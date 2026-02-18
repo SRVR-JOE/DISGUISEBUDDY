@@ -341,7 +341,7 @@ function New-SMBView {
 
     $statusType = if ($d3ShareActive) { 'Success' } else { 'Error' }
     $statusText = if ($d3ShareActive) { 'ACTIVE' } else { 'INACTIVE' }
-    $statusBadge = New-StatusBadge -Text $statusText -X 670 -Y 15 -Type $statusType
+    $statusBadge = New-StatusBadge -Text $statusText -X ($cardWidth - 100) -Y 15 -Type $statusType
     $statusBadge.Name = 'statusBadge'
     $card1.Controls.Add($statusBadge)
 
@@ -448,7 +448,7 @@ function New-SMBView {
     $card1.Controls.Add($cmbAccess)
 
     # Update Permissions button
-    $btnUpdatePerms = New-StyledButton -Text "Update Permissions" -X ($cardWidth - 170) -Y $yPos -Width 150 -Height 28 -OnClick {
+    $btnUpdatePerms = New-StyledButton -Text "Update Permissions" -X ($cardWidth - 175) -Y $yPos -Width 150 -Height 28 -OnClick {
         $card = $this.Parent
         $shareName = $card.Controls['txtShareName'].Text
         $account = $card.Controls['cmbAccount'].SelectedItem

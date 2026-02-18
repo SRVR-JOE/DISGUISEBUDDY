@@ -257,7 +257,7 @@ function New-ServerIdentityView {
     # Status badge: Domain-joined vs Workgroup
     $domainStatusType = if ($sysInfo.DomainType -eq 'Domain') { 'Info' } else { 'Warning' }
     $domainStatusText = if ($sysInfo.DomainType -eq 'Domain') { "DOMAIN: $($sysInfo.Domain)" } else { "WORKGROUP: $($sysInfo.Domain)" }
-    $domainBadge = New-StatusBadge -Text $domainStatusText -X 570 -Y 15 -Type $domainStatusType
+    $domainBadge = New-StatusBadge -Text $domainStatusText -X ($cardWidth - 200) -Y 15 -Type $domainStatusType
     $card1.Controls.Add($domainBadge)
 
     # Large hostname display
@@ -546,7 +546,7 @@ All active d3 sessions will be disconnected.
     $yPos = 50
 
     # Info icon-style indicator
-    $infoBadge = New-StatusBadge -Text "INFO" -X ($cardWidth - 70) -Y 15 -Type Info
+    $infoBadge = New-StatusBadge -Text "INFO" -X ($cardWidth - 100) -Y 15 -Type Info
     $card3.Controls.Add($infoBadge)
 
     # Recommended format

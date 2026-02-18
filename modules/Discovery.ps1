@@ -876,7 +876,7 @@ function New-DeployView {
     # Progress bar for scan progress
     $scanProgressBar = New-Object System.Windows.Forms.ProgressBar
     $scanProgressBar.Location = New-Object System.Drawing.Point(310, 95)
-    $scanProgressBar.Size = New-Object System.Drawing.Size(($cardWidth - 310 - 15), 22)
+    $scanProgressBar.Size = New-Object System.Drawing.Size(($cardWidth - 325), 22)
     $scanProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
     $scanProgressBar.Minimum = 0
     $scanProgressBar.Maximum = 100
@@ -1150,7 +1150,7 @@ function New-DeployView {
     })
 
     # --- 1-Click Assign Profile button ---
-    $btnAssignProfile = New-StyledButton -Text "Assign Profile" -X 490 -Y 235 -Width 150 -Height 30 -IsPrimary
+    $btnAssignProfile = New-StyledButton -Text "Assign Profile" -X ($cardWidth - 280) -Y 235 -Width 150 -Height 30 -IsPrimary
     $btnAssignProfile.Add_Click({
         $selectedRow = $dgvServers.CurrentRow
         if (-not $selectedRow) {
@@ -1277,7 +1277,7 @@ function New-DeployView {
     # ===================================================================
     # Card 3: Deploy Configuration
     # ===================================================================
-    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 560 -Width $cardWidth -Height 250
+    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 560 -Width $cardWidth -Height 285
 
     # --- Profile selector ---
     $lblProfile = New-StyledLabel -Text "Profile:" -X 15 -Y 48 -FontSize 9
@@ -1307,7 +1307,7 @@ function New-DeployView {
     $txtPassword = New-StyledTextBox -X 345 -Y 82 -Width 160
     $txtPassword.UseSystemPasswordChar = $true
 
-    $chkCurrentCreds = New-StyledCheckBox -Text "Use Current Credentials" -X 525 -Y 83
+    $chkCurrentCreds = New-StyledCheckBox -Text "Use Current Credentials" -X 95 -Y 118
     $chkCurrentCreds.Add_CheckedChanged({
         $isChecked = $this.Checked
         $txtUsername.Enabled = -not $isChecked
@@ -1323,13 +1323,13 @@ function New-DeployView {
     $deployCard.Controls.AddRange(@($lblUsername, $txtUsername, $lblPassword, $txtPassword, $chkCurrentCreds))
 
     # --- Deploy button ---
-    $btnDeploy = New-StyledButton -Text "Deploy to Selected Servers" -X 15 -Y 120 `
+    $btnDeploy = New-StyledButton -Text "Deploy to Selected Servers" -X 15 -Y 155 `
         -Width 250 -Height 40 -IsPrimary
 
     # Deployment progress bar
     $deployProgressBar = New-Object System.Windows.Forms.ProgressBar
-    $deployProgressBar.Location = New-Object System.Drawing.Point(280, 125)
-    $deployProgressBar.Size = New-Object System.Drawing.Size(($cardWidth - 280 - 15), 22)
+    $deployProgressBar.Location = New-Object System.Drawing.Point(280, 160)
+    $deployProgressBar.Size = New-Object System.Drawing.Size(($cardWidth - 295), 22)
     $deployProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
     $deployProgressBar.Minimum = 0
     $deployProgressBar.Maximum = 100
@@ -1339,7 +1339,7 @@ function New-DeployView {
 
     # --- Deployment log (read-only multi-line textbox) ---
     $txtDeployLog = New-Object System.Windows.Forms.TextBox
-    $txtDeployLog.Location = New-Object System.Drawing.Point(15, 160)
+    $txtDeployLog.Location = New-Object System.Drawing.Point(15, 195)
     $txtDeployLog.Size = New-Object System.Drawing.Size(($cardWidth - 30), 75)
     $txtDeployLog.Multiline = $true
     $txtDeployLog.ReadOnly = $true
