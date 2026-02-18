@@ -1,0 +1,101 @@
+{
+    "Name": "Actor 3",
+    "Description": "Actor 3 server - outputs video according to assigned Feed scenes",
+    "Created": "2026-02-18T00:00:00",
+    "Modified": "2026-02-18T00:00:00",
+    "ServerName": "ACTOR-03",
+    "NetworkAdapters": [
+        {
+            "Index": 0,
+            "Role": "d3Net",
+            "DisplayName": "NIC A - d3 Network",
+            "AdapterName": "NIC A",
+            "IPAddress": "192.168.10.14",
+            "SubnetMask": "255.255.255.0",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": false,
+            "VLANID": null,
+            "Enabled": true
+        },
+        {
+            "Index": 1,
+            "Role": "sACN",
+            "DisplayName": "NIC B - Lighting (sACN/Art-Net)",
+            "AdapterName": "NIC B",
+            "IPAddress": "",
+            "SubnetMask": "",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": true,
+            "VLANID": null,
+            "Enabled": true
+        },
+        {
+            "Index": 2,
+            "Role": "Media",
+            "DisplayName": "NIC C - Media Network",
+            "AdapterName": "NIC C",
+            "IPAddress": "192.168.20.14",
+            "SubnetMask": "255.255.255.0",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": false,
+            "VLANID": null,
+            "Enabled": true
+        },
+        {
+            "Index": 3,
+            "Role": "NDI",
+            "DisplayName": "NIC D - NDI Video",
+            "AdapterName": "NIC D",
+            "IPAddress": "",
+            "SubnetMask": "",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": true,
+            "VLANID": null,
+            "Enabled": true
+        },
+        {
+            "Index": 4,
+            "Role": "100G",
+            "DisplayName": "NIC E - 100G",
+            "AdapterName": "NIC E",
+            "IPAddress": "",
+            "SubnetMask": "",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": true,
+            "VLANID": null,
+            "Enabled": true
+        },
+        {
+            "Index": 5,
+            "Role": "100G",
+            "DisplayName": "NIC F - 100G",
+            "AdapterName": "NIC F",
+            "IPAddress": "",
+            "SubnetMask": "",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": true,
+            "VLANID": null,
+            "Enabled": true
+        }
+    ],
+    "SMBSettings": {
+        "ShareD3Projects": true,
+        "ProjectsPath": "D:\\d3 Projects",
+        "ShareName": "d3 Projects",
+        "SharePermissions": "Everyone:Full",
+        "AdditionalShares": []
+    },
+    "CustomSettings": {}
+}
