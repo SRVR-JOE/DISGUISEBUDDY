@@ -86,17 +86,16 @@ function Write-AppLog {
         [string]$Level = 'INFO'
     )
 
-    # Determine the script root directory
-    # $PSScriptRoot is set when the script is dot-sourced; fall back to current directory
-    $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot | Split-Path -Parent } else { $PWD.Path }
-
-    $logDir = Join-Path -Path $scriptRoot -ChildPath 'logs'
-    $logFile = Join-Path -Path $logDir -ChildPath 'disguisebuddy.log'
-
-    # Ensure the logs directory exists
-    if (-not (Test-Path -Path $logDir)) {
-        New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+    # Use cached log path to avoid recalculating on every call
+    if (-not $script:LogFilePath) {
+        $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot | Split-Path -Parent } else { $PWD.Path }
+        $logDir = Join-Path -Path $scriptRoot -ChildPath 'logs'
+        if (-not (Test-Path -Path $logDir)) {
+            New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+        }
+        $script:LogFilePath = Join-Path -Path $logDir -ChildPath 'disguisebuddy.log'
     }
+    $logFile = $script:LogFilePath
 
     # Format the log entry with timestamp, level, and message
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'

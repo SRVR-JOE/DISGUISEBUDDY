@@ -780,10 +780,10 @@ function New-DeployView {
     # ===================================================================
     # Section Header
     # ===================================================================
-    $sectionHeader = New-SectionHeader -Text "Network Deploy" -X 20 -Y 10 -Width 900
+    $sectionHeader = New-SectionHeader -Text "Network Deploy" -X 20 -Y 15 -Width 790
 
     $subtitleLabel = New-StyledLabel -Text "Discover disguise servers and push configurations" `
-        -X 20 -Y 48 -FontSize 9 -IsSecondary
+        -X 20 -Y 55 -FontSize 9 -IsSecondary
 
     $scrollContainer.Controls.Add($sectionHeader)
     $scrollContainer.Controls.Add($subtitleLabel)
@@ -791,7 +791,7 @@ function New-DeployView {
     # ===================================================================
     # Card 1: Network Scan
     # ===================================================================
-    $scanCard = New-StyledCard -Title "Network Scan" -X 20 -Y 80 -Width 900 -Height 180
+    $scanCard = New-StyledCard -Title "Network Scan" -X 20 -Y 80 -Width 790 -Height 180
 
     # --- Row 1: Subnet, IP range, and timeout inputs ---
     $lblSubnet = New-StyledLabel -Text "Subnet:" -X 15 -Y 48 -FontSize 9
@@ -841,7 +841,7 @@ function New-DeployView {
     # ===================================================================
     # Card 2: Discovered Servers
     # ===================================================================
-    $serversCard = New-StyledCard -Title "Discovered Servers" -X 20 -Y 270 -Width 900 -Height 280
+    $serversCard = New-StyledCard -Title "Discovered Servers" -X 20 -Y 270 -Width 790 -Height 280
 
     # DataGridView for the server list
     $dgvServers = New-StyledDataGridView -X 15 -Y 45 -Width 870 -Height 180
@@ -1084,7 +1084,7 @@ function New-DeployView {
     # ===================================================================
     # Card 3: Deploy Configuration
     # ===================================================================
-    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 560 -Width 900 -Height 250
+    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 560 -Width 790 -Height 250
 
     # --- Profile selector ---
     $lblProfile = New-StyledLabel -Text "Profile:" -X 15 -Y 48 -FontSize 9

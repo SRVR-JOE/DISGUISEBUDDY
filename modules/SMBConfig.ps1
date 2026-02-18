@@ -285,6 +285,9 @@ function New-SMBView {
         [System.Windows.Forms.Panel]$ContentPanel
     )
 
+    # Store content panel reference for view refresh callbacks
+    $script:SMBContentPanel = $ContentPanel
+
     # Clear existing content
     $ContentPanel.Controls.Clear()
 
@@ -296,7 +299,7 @@ function New-SMBView {
                           [System.Windows.Forms.AnchorStyles]::Bottom
 
     # ---- Section Header ----
-    $header = New-SectionHeader -Text "SMB File Sharing" -X 20 -Y 15 -Width 900
+    $header = New-SectionHeader -Text "SMB File Sharing" -X 20 -Y 15 -Width 790
     $scrollPanel.Controls.Add($header)
 
     $subtitle = New-StyledLabel -Text "Manage d3 Projects and media share access" -X 20 -Y 55 -IsSecondary
@@ -305,7 +308,7 @@ function New-SMBView {
     # ========================================================================
     # Card 1: d3 Projects Share
     # ========================================================================
-    $card1 = New-StyledCard -Title "d3 Projects Share" -X 20 -Y 90 -Width 900 -Height 460
+    $card1 = New-StyledCard -Title "d3 Projects Share" -X 20 -Y 90 -Width 790 -Height 460
 
     $yPos = 45
 
@@ -324,7 +327,7 @@ function New-SMBView {
 
     $statusType = if ($d3ShareActive) { 'Success' } else { 'Error' }
     $statusText = if ($d3ShareActive) { 'ACTIVE' } else { 'INACTIVE' }
-    $statusBadge = New-StatusBadge -Text $statusText -X 780 -Y 15 -Type $statusType
+    $statusBadge = New-StatusBadge -Text $statusText -X 670 -Y 15 -Type $statusType
     $statusBadge.Name = 'statusBadge'
     $card1.Controls.Add($statusBadge)
 
@@ -539,7 +542,7 @@ function New-SMBView {
                 [System.Windows.Forms.MessageBoxIcon]::Information
             )
             # Refresh the view
-            New-SMBView -ContentPanel $card.Parent.Parent
+            New-SMBView -ContentPanel $script:SMBContentPanel
         }
         else {
             [System.Windows.Forms.MessageBox]::Show(
@@ -576,7 +579,7 @@ function New-SMBView {
                     [System.Windows.Forms.MessageBoxIcon]::Information
                 )
                 # Refresh the view
-                New-SMBView -ContentPanel $card.Parent.Parent
+                New-SMBView -ContentPanel $script:SMBContentPanel
             }
             else {
                 [System.Windows.Forms.MessageBox]::Show(
@@ -595,7 +598,7 @@ function New-SMBView {
     # ========================================================================
     # Card 2: Additional Shares
     # ========================================================================
-    $card2 = New-StyledCard -Title "Additional Shares" -X 20 -Y 570 -Width 900 -Height 360
+    $card2 = New-StyledCard -Title "Additional Shares" -X 20 -Y 570 -Width 790 -Height 360
 
     # DataGridView showing all system shares
     $dgv = New-StyledDataGridView -X 15 -Y 45 -Width 870 -Height 220
@@ -828,7 +831,7 @@ function New-SMBView {
     # ========================================================================
     # Card 3: Quick Actions
     # ========================================================================
-    $card3 = New-StyledCard -Title "Quick Actions" -X 20 -Y 950 -Width 900 -Height 200
+    $card3 = New-StyledCard -Title "Quick Actions" -X 20 -Y 950 -Width 790 -Height 200
 
     $hostname = $env:COMPUTERNAME
     if (-not $hostname) {

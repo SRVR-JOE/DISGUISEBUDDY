@@ -589,15 +589,12 @@ function Invoke-ApplyAdapterConfig {
     $dns1 = $controls.DNS1TextBox.Text.Trim()
     $dns2 = $controls.DNS2TextBox.Text.Trim()
 
-    # Clear placeholder sentinel values
-    $placeholders = @('IP Address', 'Subnet Mask', 'Gateway', 'DNS 1', 'DNS 2',
-                      'e.g. 10.0.0.10', 'e.g. 255.255.255.0', 'e.g. 10.0.0.1',
-                      'e.g. 8.8.8.8', 'e.g. 8.8.4.4')
-    if ($ip   -in $placeholders) { $ip   = '' }
-    if ($sub  -in $placeholders) { $sub  = '' }
-    if ($gw   -in $placeholders) { $gw   = '' }
-    if ($dns1 -in $placeholders) { $dns1 = '' }
-    if ($dns2 -in $placeholders) { $dns2 = '' }
+    # Clear placeholder sentinel values (Tag stores the placeholder text)
+    if ($ip   -eq $controls.IPTextBox.Tag)      { $ip   = '' }
+    if ($sub  -eq $controls.SubnetTextBox.Tag)   { $sub  = '' }
+    if ($gw   -eq $controls.GatewayTextBox.Tag)  { $gw   = '' }
+    if ($dns1 -eq $controls.DNS1TextBox.Tag)     { $dns1 = '' }
+    if ($dns2 -eq $controls.DNS2TextBox.Tag)     { $dns2 = '' }
 
     # Validate mandatory fields
     if ([string]::IsNullOrWhiteSpace($ip)) {

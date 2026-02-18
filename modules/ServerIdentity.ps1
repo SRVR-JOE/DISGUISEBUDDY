@@ -237,7 +237,7 @@ function New-ServerIdentityView {
                           [System.Windows.Forms.AnchorStyles]::Bottom
 
     # ---- Section Header ----
-    $header = New-SectionHeader -Text "Server Identity" -X 20 -Y 15 -Width 900
+    $header = New-SectionHeader -Text "Server Identity" -X 20 -Y 15 -Width 790
     $scrollPanel.Controls.Add($header)
 
     $subtitle = New-StyledLabel -Text "Manage server hostname and system identification" -X 20 -Y 55 -IsSecondary
@@ -249,12 +249,12 @@ function New-ServerIdentityView {
     # ========================================================================
     # Card 1: Current Identity
     # ========================================================================
-    $card1 = New-StyledCard -Title "Current Identity" -X 20 -Y 90 -Width 900 -Height 300
+    $card1 = New-StyledCard -Title "Current Identity" -X 20 -Y 90 -Width 790 -Height 300
 
     # Status badge: Domain-joined vs Workgroup
     $domainStatusType = if ($sysInfo.DomainType -eq 'Domain') { 'Info' } else { 'Warning' }
     $domainStatusText = if ($sysInfo.DomainType -eq 'Domain') { "DOMAIN: $($sysInfo.Domain)" } else { "WORKGROUP: $($sysInfo.Domain)" }
-    $domainBadge = New-StatusBadge -Text $domainStatusText -X 680 -Y 15 -Type $domainStatusType
+    $domainBadge = New-StatusBadge -Text $domainStatusText -X 570 -Y 15 -Type $domainStatusType
     $card1.Controls.Add($domainBadge)
 
     # Large hostname display
@@ -310,7 +310,7 @@ function New-ServerIdentityView {
     # ========================================================================
     # Card 2: Change Hostname
     # ========================================================================
-    $card2 = New-StyledCard -Title "Change Hostname" -X 20 -Y 410 -Width 900 -Height 400
+    $card2 = New-StyledCard -Title "Change Hostname" -X 20 -Y 410 -Width 790 -Height 400
 
     $yPos = 45
 
@@ -538,7 +538,7 @@ All active d3 sessions will be disconnected.
     # ========================================================================
     # Card 3: Naming Conventions
     # ========================================================================
-    $card3 = New-StyledCard -Title "Naming Conventions" -X 20 -Y 830 -Width 900 -Height 260
+    $card3 = New-StyledCard -Title "Naming Conventions" -X 20 -Y 830 -Width 790 -Height 260
 
     $yPos = 50
 

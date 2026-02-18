@@ -43,14 +43,11 @@ function New-StyledButton {
         $button.ForeColor = $script:Theme.Text
     }
 
-    # Store the original background color for hover restore
-    $originalBackColor = $button.BackColor
-
-    # Hover effects
+    # Hover effects (use Tag-based check to survive theme toggles)
     $button.Add_MouseEnter({
-        if ($this.BackColor -eq $script:Theme.Primary) {
+        if ($this.Tag -eq 'Primary') {
             $this.BackColor = $script:Theme.PrimaryLight
-        } elseif ($this.BackColor -eq $script:Theme.Error) {
+        } elseif ($this.Tag -eq 'Destructive') {
             $this.BackColor = $script:Theme.ErrorLight
         } else {
             $this.BackColor = $script:Theme.SurfaceLight

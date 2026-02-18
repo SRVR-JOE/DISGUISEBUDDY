@@ -324,10 +324,10 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Header
     # ===================================================================
-    $sectionHeader = New-SectionHeader -Text "Software Installer" -X 20 -Y 10 -Width 900
+    $sectionHeader = New-SectionHeader -Text "Software Installer" -X 20 -Y 15 -Width 790
 
     $subtitleLabel = New-StyledLabel -Text "Install software from a local folder onto this server" `
-        -X 20 -Y 48 -FontSize 9 -IsSecondary
+        -X 20 -Y 55 -FontSize 9 -IsSecondary
 
     $scrollContainer.Controls.Add($sectionHeader)
     $scrollContainer.Controls.Add($subtitleLabel)
@@ -335,7 +335,7 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Card 1: Software Folder
     # ===================================================================
-    $folderCard = New-StyledCard -Title "Software Source" -X 20 -Y 80 -Width 900 -Height 110
+    $folderCard = New-StyledCard -Title "Software Source" -X 20 -Y 80 -Width 790 -Height 110
 
     $lblFolder = New-StyledLabel -Text "Folder:" -X 15 -Y 48 -FontSize 9
     $txtFolder = New-StyledTextBox -X 75 -Y 45 -Width 550
@@ -358,7 +358,7 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Card 2: Installer List
     # ===================================================================
-    $listCard = New-StyledCard -Title "Available Installers" -X 20 -Y 200 -Width 900 -Height 340
+    $listCard = New-StyledCard -Title "Available Installers" -X 20 -Y 200 -Width 790 -Height 340
 
     $dgvInstallers = New-StyledDataGridView -X 15 -Y 45 -Width 870 -Height 230
 
@@ -422,7 +422,7 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Card 3: Install Controls
     # ===================================================================
-    $installCard = New-StyledCard -Title "Install" -X 20 -Y 550 -Width 900 -Height 230
+    $installCard = New-StyledCard -Title "Install" -X 20 -Y 550 -Width 790 -Height 230
 
     $chkSilent = New-StyledCheckBox -Text "Silent install (unattended)" -X 15 -Y 45
     $chkSilent.Checked = $true
@@ -498,11 +498,11 @@ function New-SoftwareInstallerView {
         $queue = [System.Collections.ArrayList]::new()
         foreach ($row in $dgvInstallers.Rows) {
             if ($AllRows -or $row.Cells["Select"].Value -eq $true) {
-                $args = $row.Cells["Arguments"].Value
-                if (-not $chkSilent.Checked) { $args = '' }
+                $silentArgs = $row.Cells["Arguments"].Value
+                if (-not $chkSilent.Checked) { $silentArgs = '' }
                 [void]$queue.Add([PSCustomObject]@{
                     FullPath  = $row.Tag
-                    Arguments = $args
+                    Arguments = $silentArgs
                     Name      = $row.Cells["FileName"].Value
                 })
             }
