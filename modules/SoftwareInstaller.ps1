@@ -313,6 +313,8 @@ function New-SoftwareInstallerView {
 
     $ContentPanel.Controls.Clear()
 
+    $cardWidth = $ContentPanel.ClientSize.Width - 40
+
     $scrollContainer = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
     $scrollContainer.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
                               [System.Windows.Forms.AnchorStyles]::Left -bor
@@ -322,7 +324,7 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Header
     # ===================================================================
-    $sectionHeader = New-SectionHeader -Text "Software Installer" -X 20 -Y 15 -Width 790
+    $sectionHeader = New-SectionHeader -Text "Software Installer" -X 20 -Y 15 -Width $cardWidth
 
     $subtitleLabel = New-StyledLabel -Text "Install software from a local folder onto this server" `
         -X 20 -Y 55 -FontSize 9 -IsSecondary
@@ -333,22 +335,22 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Card 1: Software Folder
     # ===================================================================
-    $folderCard = New-StyledCard -Title "Software Source" -X 20 -Y 80 -Width 790 -Height 110
+    $folderCard = New-StyledCard -Title "Software Source" -X 20 -Y 80 -Width $cardWidth -Height 110
 
     $lblFolder = New-StyledLabel -Text "Folder:" -X 15 -Y 48 -FontSize 9
-    $txtFolder = New-StyledTextBox -X 75 -Y 45 -Width 550
+    $txtFolder = New-StyledTextBox -X 75 -Y 45 -Width ($cardWidth - 240)
     $txtFolder.Text = $script:DefaultSoftwarePath
 
-    $btnBrowse = New-StyledButton -Text "Browse..." -X 640 -Y 43 -Width 100 -Height 30
+    $btnBrowse = New-StyledButton -Text "Browse..." -X ($cardWidth - 155) -Y 43 -Width 100 -Height 30
 
-    $chkRecurse = New-StyledCheckBox -Text "Include subfolders" -X 755 -Y 47
+    $chkRecurse = New-StyledCheckBox -Text "Include subfolders" -X 75 -Y 70
     $chkRecurse.Checked = $true
 
     $btnScan = New-StyledButton -Text "Scan Folder" -X 15 -Y 78 -Width 130 -Height 30 -IsPrimary
 
     $lblScanStatus = New-StyledLabel -Text "Enter a folder path and click Scan" -X 160 -Y 82 -FontSize 9 -IsMuted
     $lblScanStatus.AutoSize = $false
-    $lblScanStatus.Width = 700
+    $lblScanStatus.Width = ($cardWidth - 160)
 
     $folderCard.Controls.AddRange(@($lblFolder, $txtFolder, $btnBrowse, $chkRecurse, $btnScan, $lblScanStatus))
     $scrollContainer.Controls.Add($folderCard)
@@ -356,9 +358,9 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Card 2: Installer List
     # ===================================================================
-    $listCard = New-StyledCard -Title "Available Installers" -X 20 -Y 200 -Width 790 -Height 340
+    $listCard = New-StyledCard -Title "Available Installers" -X 20 -Y 200 -Width $cardWidth -Height 340
 
-    $dgvInstallers = New-StyledDataGridView -X 15 -Y 45 -Width 870 -Height 230
+    $dgvInstallers = New-StyledDataGridView -X 15 -Y 45 -Width ($cardWidth - 30) -Height 230
 
     # Columns: Checkbox, Name, Type, Size, SubFolder, Silent Args (editable)
     $colSel = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
@@ -420,7 +422,7 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Card 3: Install Controls
     # ===================================================================
-    $installCard = New-StyledCard -Title "Install" -X 20 -Y 550 -Width 790 -Height 230
+    $installCard = New-StyledCard -Title "Install" -X 20 -Y 550 -Width $cardWidth -Height 230
 
     $chkSilent = New-StyledCheckBox -Text "Silent install (unattended)" -X 15 -Y 45
     $chkSilent.Checked = $true
@@ -436,7 +438,7 @@ function New-SoftwareInstallerView {
 
     $installProgressBar = New-Object System.Windows.Forms.ProgressBar
     $installProgressBar.Location = New-Object System.Drawing.Point(360, 83)
-    $installProgressBar.Size = New-Object System.Drawing.Size(520, 25)
+    $installProgressBar.Size = New-Object System.Drawing.Size(($cardWidth - 375), 25)
     $installProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
     $installProgressBar.Minimum = 0
     $installProgressBar.Maximum = 100
@@ -445,7 +447,7 @@ function New-SoftwareInstallerView {
     # Install log output
     $txtInstallLog = New-Object System.Windows.Forms.TextBox
     $txtInstallLog.Location = New-Object System.Drawing.Point(15, 125)
-    $txtInstallLog.Size = New-Object System.Drawing.Size(870, 90)
+    $txtInstallLog.Size = New-Object System.Drawing.Size(($cardWidth - 30), 90)
     $txtInstallLog.Multiline = $true
     $txtInstallLog.ReadOnly = $true
     $txtInstallLog.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical

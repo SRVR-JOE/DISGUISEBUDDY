@@ -1274,8 +1274,10 @@ function New-ProfilesView {
 
     # ---- Buttons below the list ----
     $buttonY = 395
-    $buttonWidth = 100
-    $buttonSpacing = 8
+    $buttonSpacing = 6
+    # Distribute three buttons across the available panel width
+    $btnAreaWidth = $leftColumnWidth - 24  # 12px margin each side
+    $buttonWidth = [Math]::Floor(($btnAreaWidth - (2 * $buttonSpacing)) / 3)
 
     $newProfileBtn = New-StyledButton -Text "New Profile" -X 12 -Y $buttonY `
         -Width $buttonWidth -Height 34 -IsPrimary -OnClick {
@@ -1304,7 +1306,7 @@ function New-ProfilesView {
     $leftPanel.Controls.Add($newProfileBtn)
 
     $importBtn = New-StyledButton -Text "Import" -X (12 + $buttonWidth + $buttonSpacing) `
-        -Y $buttonY -Width 80 -Height 34 -OnClick {
+        -Y $buttonY -Width $buttonWidth -Height 34 -OnClick {
         $importedProfile = Import-ProfileFromFile
         if ($null -ne $importedProfile) {
             Refresh-ProfileList
@@ -1315,9 +1317,9 @@ function New-ProfilesView {
         [System.Windows.Forms.AnchorStyles]::Left
     $leftPanel.Controls.Add($importBtn)
 
-    $captureBtn = New-StyledButton -Text "Capture Current" `
-        -X (12 + $buttonWidth + $buttonSpacing + 80 + $buttonSpacing) `
-        -Y $buttonY -Width 120 -Height 34 -OnClick {
+    $captureBtn = New-StyledButton -Text "Capture" `
+        -X (12 + (2 * ($buttonWidth + $buttonSpacing))) `
+        -Y $buttonY -Width $buttonWidth -Height 34 -OnClick {
         try {
             $capturedProfile = Get-CurrentSystemProfile
             Save-Profile -Profile $capturedProfile
@@ -1675,17 +1677,22 @@ function Update-ProfileDetailPanel {
     # ---- Action Buttons Row ----
     $actionY = $currentY + 46
     $actionX = 15
+    $actionAreaWidth = $innerWidth  # fits within the detail panel
+    $actionBtnSpacing = 8
+    # 4 buttons: Apply(wider), Edit, Export, Delete — distribute with weights
+    $actionSmallW = [Math]::Floor(($actionAreaWidth - (3 * $actionBtnSpacing)) / 4)
+    $actionLargeW = $actionAreaWidth - (3 * $actionSmallW) - (3 * $actionBtnSpacing)
 
     $applyBtn = New-StyledButton -Text "Apply Profile" -X $actionX -Y $actionY `
-        -Width 120 -Height 36 -IsPrimary -OnClick {
+        -Width $actionLargeW -Height 36 -IsPrimary -OnClick {
         if ($null -eq $script:SelectedProfile) { return }
         Apply-FullProfile -Profile $script:SelectedProfile
     }
     $script:DetailPanel.Controls.Add($applyBtn)
-    $actionX += 130
+    $actionX += $actionLargeW + $actionBtnSpacing
 
-    $editBtn = New-StyledButton -Text "Edit Full Profile" -X $actionX -Y $actionY `
-        -Width 130 -Height 36 -OnClick {
+    $editBtn = New-StyledButton -Text "Edit Profile" -X $actionX -Y $actionY `
+        -Width $actionSmallW -Height 36 -OnClick {
         if ($null -eq $script:SelectedProfile) { return }
         # Placeholder: Full profile editor will be in a separate module/view
         [System.Windows.Forms.MessageBox]::Show(
@@ -1696,18 +1703,18 @@ function Update-ProfileDetailPanel {
         ) | Out-Null
     }
     $script:DetailPanel.Controls.Add($editBtn)
-    $actionX += 140
+    $actionX += $actionSmallW + $actionBtnSpacing
 
     $exportBtn = New-StyledButton -Text "Export" -X $actionX -Y $actionY `
-        -Width 80 -Height 36 -OnClick {
+        -Width $actionSmallW -Height 36 -OnClick {
         if ($null -eq $script:SelectedProfile) { return }
         Export-ProfileToFile -Profile $script:SelectedProfile
     }
     $script:DetailPanel.Controls.Add($exportBtn)
-    $actionX += 90
+    $actionX += $actionSmallW + $actionBtnSpacing
 
     $deleteBtn = New-StyledButton -Text "Delete" -X $actionX -Y $actionY `
-        -Width 80 -Height 36 -IsDestructive -OnClick {
+        -Width $actionSmallW -Height 36 -IsDestructive -OnClick {
         if ($null -eq $script:SelectedProfile) { return }
 
         $confirmResult = [System.Windows.Forms.MessageBox]::Show(

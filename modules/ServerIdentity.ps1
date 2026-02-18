@@ -229,6 +229,9 @@ function New-ServerIdentityView {
     # Clear existing content
     $ContentPanel.Controls.Clear()
 
+    # Compute card width dynamically based on content panel width minus padding
+    $cardWidth = $ContentPanel.ClientSize.Width - 40
+
     # Create a scrollable container for all content
     $scrollPanel = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
     $scrollPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
@@ -237,7 +240,7 @@ function New-ServerIdentityView {
                           [System.Windows.Forms.AnchorStyles]::Bottom
 
     # ---- Section Header ----
-    $header = New-SectionHeader -Text "Server Identity" -X 20 -Y 15 -Width 790
+    $header = New-SectionHeader -Text "Server Identity" -X 20 -Y 15 -Width $cardWidth
     $scrollPanel.Controls.Add($header)
 
     $subtitle = New-StyledLabel -Text "Manage server hostname and system identification" -X 20 -Y 55 -IsSecondary
@@ -249,7 +252,7 @@ function New-ServerIdentityView {
     # ========================================================================
     # Card 1: Current Identity
     # ========================================================================
-    $card1 = New-StyledCard -Title "Current Identity" -X 20 -Y 90 -Width 790 -Height 300
+    $card1 = New-StyledCard -Title "Current Identity" -X 20 -Y 90 -Width $cardWidth -Height 300
 
     # Status badge: Domain-joined vs Workgroup
     $domainStatusType = if ($sysInfo.DomainType -eq 'Domain') { 'Info' } else { 'Warning' }
@@ -310,12 +313,12 @@ function New-ServerIdentityView {
     # ========================================================================
     # Card 2: Change Hostname
     # ========================================================================
-    $card2 = New-StyledCard -Title "Change Hostname" -X 20 -Y 410 -Width 790 -Height 400
+    $card2 = New-StyledCard -Title "Change Hostname" -X 20 -Y 410 -Width $cardWidth -Height 400
 
     $yPos = 45
 
     # Warning label
-    $lblWarning = New-StyledLabel -Text "WARNING: Changing the hostname requires a restart. All d3Net sessions will be disrupted." -X 15 -Y $yPos -FontSize 9.5 -MaxWidth 860
+    $lblWarning = New-StyledLabel -Text "WARNING: Changing the hostname requires a restart. All d3Net sessions will be disrupted." -X 15 -Y $yPos -FontSize 9.5 -MaxWidth ($cardWidth - 30)
     $lblWarning.ForeColor = $script:Theme.Warning
     $lblWarning.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
     $card2.Controls.Add($lblWarning)
@@ -346,7 +349,7 @@ function New-ServerIdentityView {
     $yPos += 35
 
     # Validation feedback label
-    $lblValidation = New-StyledLabel -Text "" -X 200 -Y $yPos -FontSize 9 -MaxWidth 680
+    $lblValidation = New-StyledLabel -Text "" -X 200 -Y $yPos -FontSize 9 -MaxWidth ($cardWidth - 120)
     $lblValidation.Name = 'lblValidation'
     $card2.Controls.Add($lblValidation)
 
@@ -418,21 +421,21 @@ function New-ServerIdentityView {
 
     $yPos += 28
 
-    $pnlPreview = New-StyledPanel -X 15 -Y $yPos -Width 860 -Height 100 -IsCard
+    $pnlPreview = New-StyledPanel -X 15 -Y $yPos -Width ($cardWidth - 30) -Height 100 -IsCard
     $pnlPreview.Name = 'pnlPreview'
     $pnlPreview.Visible = $false
 
-    $lblPreviewUNC = New-StyledLabel -Text "UNC Path:    \\NEWNAME\d3 Projects" -X 10 -Y 10 -FontSize 9.5 -MaxWidth 830
+    $lblPreviewUNC = New-StyledLabel -Text "UNC Path:    \\NEWNAME\d3 Projects" -X 10 -Y 10 -FontSize 9.5 -MaxWidth ($cardWidth - 60)
     $lblPreviewUNC.Name = 'lblPreviewUNC'
     $lblPreviewUNC.Font = New-Object System.Drawing.Font('Consolas', 9.5)
     $pnlPreview.Controls.Add($lblPreviewUNC)
 
-    $lblPreviewD3Net = New-StyledLabel -Text "d3Net Name:  NEWNAME" -X 10 -Y 35 -FontSize 9.5 -MaxWidth 830
+    $lblPreviewD3Net = New-StyledLabel -Text "d3Net Name:  NEWNAME" -X 10 -Y 35 -FontSize 9.5 -MaxWidth ($cardWidth - 60)
     $lblPreviewD3Net.Name = 'lblPreviewD3Net'
     $lblPreviewD3Net.Font = New-Object System.Drawing.Font('Consolas', 9.5)
     $pnlPreview.Controls.Add($lblPreviewD3Net)
 
-    $lblPreviewAPI = New-StyledLabel -Text "API Access:  http://NEWNAME:80/api/..." -X 10 -Y 60 -FontSize 9.5 -MaxWidth 830
+    $lblPreviewAPI = New-StyledLabel -Text "API Access:  http://NEWNAME:80/api/..." -X 10 -Y 60 -FontSize 9.5 -MaxWidth ($cardWidth - 60)
     $lblPreviewAPI.Name = 'lblPreviewAPI'
     $lblPreviewAPI.Font = New-Object System.Drawing.Font('Consolas', 9.5)
     $pnlPreview.Controls.Add($lblPreviewAPI)
@@ -538,12 +541,12 @@ All active d3 sessions will be disconnected.
     # ========================================================================
     # Card 3: Naming Conventions
     # ========================================================================
-    $card3 = New-StyledCard -Title "Naming Conventions" -X 20 -Y 830 -Width 790 -Height 260
+    $card3 = New-StyledCard -Title "Naming Conventions" -X 20 -Y 830 -Width $cardWidth -Height 260
 
     $yPos = 50
 
     # Info icon-style indicator
-    $infoBadge = New-StatusBadge -Text "INFO" -X 820 -Y 15 -Type Info
+    $infoBadge = New-StatusBadge -Text "INFO" -X ($cardWidth - 70) -Y 15 -Type Info
     $card3.Controls.Add($infoBadge)
 
     # Recommended format
@@ -563,7 +566,7 @@ All active d3 sessions will be disconnected.
     # Separator line
     $separator = New-Object System.Windows.Forms.Panel
     $separator.Location = New-Object System.Drawing.Point(15, $yPos)
-    $separator.Size = New-Object System.Drawing.Size(860, 1)
+    $separator.Size = New-Object System.Drawing.Size(($cardWidth - 30), 1)
     $separator.BackColor = $script:Theme.Border
     $card3.Controls.Add($separator)
     $yPos += 15
@@ -577,7 +580,7 @@ All active d3 sessions will be disconnected.
     )
 
     foreach ($guideline in $guidelines) {
-        $bulletLabel = New-StyledLabel -Text $guideline -X 30 -Y $yPos -FontSize 9.5 -MaxWidth 830
+        $bulletLabel = New-StyledLabel -Text $guideline -X 30 -Y $yPos -FontSize 9.5 -MaxWidth ($cardWidth - 60)
         $card3.Controls.Add($bulletLabel)
 
         # Bullet point marker

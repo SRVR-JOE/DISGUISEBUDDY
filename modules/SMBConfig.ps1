@@ -302,6 +302,9 @@ function New-SMBView {
     # Clear existing content
     $ContentPanel.Controls.Clear()
 
+    # Compute dynamic card width based on available content area (minus 20px padding each side)
+    $cardWidth = $ContentPanel.ClientSize.Width - 40
+
     # Create a scrollable container for all content
     $scrollPanel = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
     $scrollPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
@@ -310,7 +313,7 @@ function New-SMBView {
                           [System.Windows.Forms.AnchorStyles]::Bottom
 
     # ---- Section Header ----
-    $header = New-SectionHeader -Text "SMB File Sharing" -X 20 -Y 15 -Width 790
+    $header = New-SectionHeader -Text "SMB File Sharing" -X 20 -Y 15 -Width $cardWidth
     $scrollPanel.Controls.Add($header)
 
     $subtitle = New-StyledLabel -Text "Manage d3 Projects and media share access" -X 20 -Y 55 -IsSecondary
@@ -319,7 +322,7 @@ function New-SMBView {
     # ========================================================================
     # Card 1: d3 Projects Share
     # ========================================================================
-    $card1 = New-StyledCard -Title "d3 Projects Share" -X 20 -Y 90 -Width 790 -Height 460
+    $card1 = New-StyledCard -Title "d3 Projects Share" -X 20 -Y 90 -Width $cardWidth -Height 460
 
     $yPos = 45
 
@@ -421,7 +424,7 @@ function New-SMBView {
         }
     }
 
-    $lblCurrentPerms = New-StyledLabel -Text "Current: $permText" -X 15 -Y $yPos -IsSecondary -FontSize 9 -MaxWidth 860
+    $lblCurrentPerms = New-StyledLabel -Text "Current: $permText" -X 15 -Y $yPos -IsSecondary -FontSize 9 -MaxWidth ($cardWidth - 30)
     $lblCurrentPerms.Name = 'lblCurrentPerms'
     $card1.Controls.Add($lblCurrentPerms)
     $yPos += 30
@@ -445,7 +448,7 @@ function New-SMBView {
     $card1.Controls.Add($cmbAccess)
 
     # Update Permissions button
-    $btnUpdatePerms = New-StyledButton -Text "Update Permissions" -X 610 -Y $yPos -Width 150 -Height 28 -OnClick {
+    $btnUpdatePerms = New-StyledButton -Text "Update Permissions" -X ($cardWidth - 170) -Y $yPos -Width 150 -Height 28 -OnClick {
         $card = $this.Parent
         $shareName = $card.Controls['txtShareName'].Text
         $account = $card.Controls['cmbAccount'].SelectedItem
@@ -609,10 +612,10 @@ function New-SMBView {
     # ========================================================================
     # Card 2: Additional Shares
     # ========================================================================
-    $card2 = New-StyledCard -Title "Additional Shares" -X 20 -Y 570 -Width 790 -Height 360
+    $card2 = New-StyledCard -Title "Additional Shares" -X 20 -Y 570 -Width $cardWidth -Height 360
 
     # DataGridView showing all system shares
-    $dgv = New-StyledDataGridView -X 15 -Y 45 -Width 870 -Height 220
+    $dgv = New-StyledDataGridView -X 15 -Y 45 -Width ($cardWidth - 30) -Height 220
     $dgv.Name = 'dgvShares'
     $dgv.ReadOnly = $true
 
@@ -842,7 +845,7 @@ function New-SMBView {
     # ========================================================================
     # Card 3: Quick Actions
     # ========================================================================
-    $card3 = New-StyledCard -Title "Quick Actions" -X 20 -Y 950 -Width 790 -Height 200
+    $card3 = New-StyledCard -Title "Quick Actions" -X 20 -Y 950 -Width $cardWidth -Height 200
 
     $hostname = $env:COMPUTERNAME
     if (-not $hostname) {
@@ -942,7 +945,7 @@ function New-SMBView {
     $card3.Controls.Add($btnCopyUNC)
 
     # Status area
-    $lblQuickStatus = New-StyledLabel -Text "UNC Path: \\$hostname\d3 Projects" -X 15 -Y 100 -IsSecondary -FontSize 9 -MaxWidth 860
+    $lblQuickStatus = New-StyledLabel -Text "UNC Path: \\$hostname\d3 Projects" -X 15 -Y 100 -IsSecondary -FontSize 9 -MaxWidth ($cardWidth - 30)
     $lblQuickStatus.Name = 'lblQuickStatus'
     $card3.Controls.Add($lblQuickStatus)
 
