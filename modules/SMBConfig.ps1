@@ -614,7 +614,7 @@ function New-SMBView {
     $colState.HeaderText = 'State'
     $colState.FillWeight = 20
 
-    $dgv.Columns.AddRange(@($colName, $colPath, $colState))
+    $dgv.Columns.AddRange([System.Windows.Forms.DataGridViewColumn[]]@($colName, $colPath, $colState))
 
     # Populate the grid with current shares
     try {

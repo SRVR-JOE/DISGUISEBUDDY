@@ -871,7 +871,7 @@ function New-DeployView {
     $colResponseTime.Name = "ResponseTime"
     $colResponseTime.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::Fill
 
-    $dgvServers.Columns.AddRange(@($colSelect, $colIP, $colHostname, $colStatus,
+    $dgvServers.Columns.AddRange([System.Windows.Forms.DataGridViewColumn[]]@($colSelect, $colIP, $colHostname, $colStatus,
                                     $colAPI, $colPorts, $colResponseTime))
     $dgvServers.ReadOnly = $false
 
@@ -1402,12 +1402,12 @@ function New-DeployView {
 
                 if ($pushResult.Success) {
                     $successCount++
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment SUCCEEDED`r`n")
+                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ${serverIP}: Deployment SUCCEEDED`r`n")
                 } else {
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment FAILED - $($pushResult.ErrorMessage)`r`n")
+                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ${serverIP}: Deployment FAILED - $($pushResult.ErrorMessage)`r`n")
                 }
             } catch {
-                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: EXCEPTION - $_`r`n")
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ${serverIP}: EXCEPTION - $_`r`n")
             }
 
             $txtDeployLog.Refresh()
