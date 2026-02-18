@@ -1383,8 +1383,20 @@ function New-DeployView {
         try { $endIP = [int]$txtEndIP.Text.Trim() } catch { $endIP = 254 }
         try { $timeout = [int]$txtTimeout.Text.Trim() } catch { $timeout = 200 }
 
+        # Clamp IP range to valid values
+        $startIP = [Math]::Max(1, [Math]::Min(254, $startIP))
+        $endIP   = [Math]::Max($startIP, [Math]::Min(254, $endIP))
+        $timeout = [Math]::Max(50, [Math]::Min(5000, $timeout))
+
         if ([string]::IsNullOrWhiteSpace($subnet)) {
             $subnet = "192.168.10"
+        }
+
+        # Validate subnet format (expect 3-octet prefix like "192.168.10")
+        if ($subnet -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+            $lblScanStatus.Text = "Invalid subnet format. Use 3-octet prefix (e.g. 192.168.10)"
+            $lblScanStatus.ForeColor = $script:Theme.Error
+            return
         }
 
         # Disable button during scan
@@ -1590,7 +1602,14 @@ function New-DeployView {
         if (-not $chkCurrentCreds.Checked) {
             $username = $txtUsername.Text.Trim()
             $password = $txtPassword.Text
-            if (-not [string]::IsNullOrWhiteSpace($username) -and -not [string]::IsNullOrWhiteSpace($password)) {
+            if ([string]::IsNullOrWhiteSpace($username) -or [string]::IsNullOrWhiteSpace($password)) {
+                $credWarn = [System.Windows.Forms.MessageBox]::Show(
+                    "Custom credentials selected but username or password is empty.`n`nDeploy using current Windows credentials instead?",
+                    "Credentials Missing",
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning)
+                if ($credWarn -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+            } else {
                 $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
                 $credential = New-Object System.Management.Automation.PSCredential($username, $securePassword)
             }

@@ -182,8 +182,9 @@ function Install-Software {
         Write-AppLog -Message "Install-Software: Starting $InstallerPath $Arguments" -Level 'INFO'
 
         if ($extension -eq '.msi' -or $extension -eq '.msp') {
-            # Use msiexec for MSI/MSP files - pass as single string to preserve quoted paths
-            $msiArgString = "/i `"$InstallerPath`""
+            # Use msiexec for MSI/MSP files - /i for MSI, /p for MSP patches
+            $msiFlag = if ($extension -eq '.msp') { '/p' } else { '/i' }
+            $msiArgString = "$msiFlag `"$InstallerPath`""
             if ($Arguments) { $msiArgString += " $Arguments" }
             $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgString `
                 -PassThru -ErrorAction Stop
@@ -214,7 +215,14 @@ function Install-Software {
         }
 
         if ($WaitForExit -and $proc) {
-            $proc.WaitForExit()
+            $exited = $proc.WaitForExit(600000)  # 10 minute timeout
+            if (-not $exited) {
+                $stopwatch.Stop()
+                $result.Message = "Installer timed out after 10 minutes"
+                $result.Duration = "$([int]$stopwatch.Elapsed.TotalSeconds)s"
+                Write-AppLog -Message "Install-Software: Timeout - $InstallerPath" -Level 'ERROR'
+                return $result
+            }
             $result.ExitCode = $proc.ExitCode
             $result.Success = ($proc.ExitCode -eq 0 -or $proc.ExitCode -eq 3010)
             $result.Message = if ($result.Success) {
@@ -545,7 +553,7 @@ function New-SoftwareInstallerView {
             $idx++
             $txtInstallLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] [$idx/$total] Installing $($item.Name)...`r`n")
             $txtInstallLog.Refresh()
-            $installProgressBar.Value = [int](($idx / $total) * 100)
+            $installProgressBar.Value = [int]((($idx - 1) / $total) * 100)
             $installProgressBar.Refresh()
             [System.Windows.Forms.Application]::DoEvents()
 
