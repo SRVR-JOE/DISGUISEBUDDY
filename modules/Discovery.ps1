@@ -28,7 +28,7 @@ function Find-DisguiseServers {
           3. HTTP probe against the disguise REST API at /api/service/system
         Results are aggregated and returned as an array of server descriptor objects.
     .PARAMETER SubnetBase
-        The first three octets of the target subnet (e.g. "10.0.0").
+        The first three octets of the target subnet (e.g. "192.168.10").
     .PARAMETER StartIP
         The starting value for the fourth octet. Default 1.
     .PARAMETER EndIP
@@ -43,7 +43,7 @@ function Find-DisguiseServers {
     #>
     [CmdletBinding()]
     param(
-        [string]$SubnetBase = "10.0.0",
+        [string]$SubnetBase = "192.168.10",
         [int]$StartIP = 1,
         [int]$EndIP = 254,
         [int]$TimeoutMs = 200,
@@ -519,8 +519,11 @@ function Push-ProfileToServer {
                 $results = @()
                 foreach ($adapter in $AdapterConfigs) {
                     try {
-                        # Skip unconfigured adapters
-                        if ([string]::IsNullOrWhiteSpace($adapter.IPAddress)) { continue }
+                        # Skip disabled adapters
+                        if ($adapter.Enabled -eq $false) {
+                            $results += "SKIP: $($adapter.Role) disabled"
+                            continue
+                        }
 
                         # Find the adapter by name or role
                         $netAdapter = Get-NetAdapter | Where-Object {
@@ -533,6 +536,23 @@ function Push-ProfileToServer {
                             continue
                         }
 
+                        # Handle DHCP adapters
+                        if ($adapter.DHCP -eq $true) {
+                            try {
+                                Set-NetIPInterface -InterfaceIndex $netAdapter.InterfaceIndex `
+                                    -Dhcp Enabled -AddressFamily IPv4 -ErrorAction Stop
+                                Set-DnsClientServerAddress -InterfaceIndex $netAdapter.InterfaceIndex `
+                                    -ResetServerAddresses -ErrorAction SilentlyContinue
+                                $results += "OK: $($adapter.Role) -> DHCP"
+                            } catch {
+                                $results += "ERROR: $($adapter.Role) DHCP - $_"
+                            }
+                            continue
+                        }
+
+                        # Skip adapters with no static IP configured
+                        if ([string]::IsNullOrWhiteSpace($adapter.IPAddress)) { continue }
+
                         # Remove existing IP configuration
                         $netAdapter | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
                         $netAdapter | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
@@ -543,7 +563,7 @@ function Push-ProfileToServer {
                             $maskOctets = $adapter.SubnetMask.Split('.')
                             $binary = ''
                             foreach ($o in $maskOctets) { $binary += [Convert]::ToString([int]$o, 2).PadLeft(8, '0') }
-                            $prefixLen = ($binary.ToCharArray() | Where-Object { $_ -eq '1' }).Count
+                            $prefixLen = ($binary -replace '0', '').Length
                         }
                         $ipParams = @{
                             InterfaceIndex = $netAdapter.InterfaceIndex
@@ -570,7 +590,7 @@ function Push-ProfileToServer {
                         $results += "ERROR: $($adapter.Role) - $_"
                     }
                 }
-                return @{ Success = ($results -notmatch '^ERROR:').Count -eq $results.Count; Message = ($results -join '; ') }
+                return @{ Success = @($results | Where-Object { $_ -match '^ERROR:' }).Count -eq 0; Message = ($results -join '; ') }
             }
 
             $invokeParams = @{
@@ -614,39 +634,67 @@ function Push-ProfileToServer {
                 param($SMBConfig)
                 $results = @()
                 try {
-                    # Configure SMB server settings
-                    if ($SMBConfig.EnableSMB1) {
-                        Set-SmbServerConfiguration -EnableSMB1Protocol $true -Force -ErrorAction Stop
-                        $results += "OK: SMB1 enabled"
-                    }
-                    if ($SMBConfig.EnableSMB2) {
-                        Set-SmbServerConfiguration -EnableSMB2Protocol $true -Force -ErrorAction Stop
-                        $results += "OK: SMB2 enabled"
-                    }
+                    if ($SMBConfig.ShareD3Projects) {
+                        $sharePath = $SMBConfig.ProjectsPath
+                        $shareName = $SMBConfig.ShareName
+                        if (-not $shareName) { $shareName = 'd3 Projects' }
+                        if (-not $sharePath) { $sharePath = 'D:\d3 Projects' }
 
-                    # Create or update shares
-                    if ($SMBConfig.Shares) {
-                        foreach ($share in $SMBConfig.Shares) {
-                            try {
-                                $existingShare = Get-SmbShare -Name $share.Name -ErrorAction SilentlyContinue
-                                if ($existingShare) {
-                                    Set-SmbShare -Name $share.Name -Path $share.Path -Force -ErrorAction Stop
-                                    $results += "OK: Updated share '$($share.Name)'"
-                                } else {
-                                    New-SmbShare -Name $share.Name -Path $share.Path `
-                                        -FullAccess $share.FullAccess -ErrorAction Stop
-                                    $results += "OK: Created share '$($share.Name)'"
+                        # Ensure the share folder exists
+                        if (-not (Test-Path $sharePath)) {
+                            New-Item -Path $sharePath -ItemType Directory -Force | Out-Null
+                            $results += "OK: Created folder '$sharePath'"
+                        }
+
+                        # Create the share if it doesn't exist
+                        $existingShare = Get-SmbShare -Name $shareName -ErrorAction SilentlyContinue
+                        if (-not $existingShare) {
+                            # Parse permission string (format: "Account:Level")
+                            $permParts = ($SMBConfig.SharePermissions -split ':')
+                            $account = if ($permParts.Count -ge 1 -and $permParts[0]) { $permParts[0] } else { 'Everyone' }
+                            $level   = if ($permParts.Count -ge 2) { $permParts[1] } else { 'Full' }
+
+                            $shareParams = @{ Name = $shareName; Path = $sharePath; ErrorAction = 'Stop' }
+                            switch ($level) {
+                                'Full'   { $shareParams['FullAccess']   = $account }
+                                'Change' { $shareParams['ChangeAccess'] = $account }
+                                'Read'   { $shareParams['ReadAccess']   = $account }
+                                default  { $shareParams['FullAccess']   = $account }
+                            }
+                            New-SmbShare @shareParams | Out-Null
+                            $results += "OK: Created share '$shareName' -> '$sharePath'"
+                        } else {
+                            $results += "OK: Share '$shareName' already exists"
+                        }
+
+                        # Process additional shares
+                        if ($SMBConfig.AdditionalShares) {
+                            foreach ($extra in $SMBConfig.AdditionalShares) {
+                                try {
+                                    if (-not (Test-Path $extra.Path)) {
+                                        New-Item -Path $extra.Path -ItemType Directory -Force | Out-Null
+                                    }
+                                    $existing = Get-SmbShare -Name $extra.Name -ErrorAction SilentlyContinue
+                                    if (-not $existing) {
+                                        New-SmbShare -Name $extra.Name -Path $extra.Path `
+                                            -FullAccess 'Everyone' -ErrorAction Stop | Out-Null
+                                        $results += "OK: Created additional share '$($extra.Name)'"
+                                    } else {
+                                        $results += "OK: Additional share '$($extra.Name)' exists"
+                                    }
+                                } catch {
+                                    $results += "ERROR: Additional share '$($extra.Name)' - $_"
                                 }
-                            } catch {
-                                $results += "ERROR: Share '$($share.Name)' - $_"
                             }
                         }
+                    } else {
+                        $results += "OK: SMB sharing disabled in profile"
                     }
                 } catch {
                     $results += "ERROR: SMB configuration - $_"
                 }
                 return @{
-                    Success = ($results | Where-Object { $_ -match '^ERROR:' }).Count -eq 0
+                    Success = @($results | Where-Object { $_ -match '^ERROR:' }).Count -eq 0
                     Message = ($results -join '; ')
                 }
             }
@@ -795,8 +843,8 @@ function New-DeployView {
 
     # --- Row 1: Subnet, IP range, and timeout inputs ---
     $lblSubnet = New-StyledLabel -Text "Subnet:" -X 15 -Y 48 -FontSize 9
-    $txtSubnet = New-StyledTextBox -X 75 -Y 45 -Width 120 -PlaceholderText "10.0.0"
-    $txtSubnet.Text = "10.0.0"
+    $txtSubnet = New-StyledTextBox -X 75 -Y 45 -Width 120 -PlaceholderText "192.168.10"
+    $txtSubnet.Text = "192.168.10"
     $txtSubnet.ForeColor = $script:Theme.Text
 
     $lblStartIP = New-StyledLabel -Text "Start:" -X 210 -Y 48 -FontSize 9
@@ -1176,7 +1224,7 @@ function New-DeployView {
         try { $timeout = [int]$txtTimeout.Text.Trim() } catch { $timeout = 200 }
 
         if ([string]::IsNullOrWhiteSpace($subnet)) {
-            $subnet = "10.0.0"
+            $subnet = "192.168.10"
         }
 
         # Disable button during scan
@@ -1250,7 +1298,7 @@ function New-DeployView {
     # ===================================================================
     $btnQuickScan.Add_Click({
         $subnet = $txtSubnet.Text.Trim()
-        if ([string]::IsNullOrWhiteSpace($subnet)) { $subnet = "10.0.0" }
+        if ([string]::IsNullOrWhiteSpace($subnet)) { $subnet = "192.168.10" }
 
         $btnScanNetwork.Enabled = $false
         $btnQuickScan.Enabled = $false

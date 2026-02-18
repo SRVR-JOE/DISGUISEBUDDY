@@ -23,7 +23,7 @@ function Get-D3ProjectShares {
                 Path        = $_.Path
                 Description = $_.Description
                 ShareState  = $_.ShareState
-                IsD3Share   = ($_.Name -eq 'd3 Projects')
+                IsD3Share   = ($_.Name -ieq 'd3 Projects')
             }
         }
         Write-AppLog -Message "Retrieved $($shares.Count) SMB shares from system." -Level INFO

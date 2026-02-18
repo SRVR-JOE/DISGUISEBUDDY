@@ -411,16 +411,16 @@ function New-DashboardView {
                 $profilesCard.Controls.Add($lblDesc)
             }
 
-            # Quick Apply button for each profile entry
-            $btnQuickApply = New-StyledButton -Text "Quick Apply" `
+            # Set Active button for each profile entry
+            $btnQuickApply = New-StyledButton -Text "Set Active" `
                 -X ($colWidth - 115) -Y $currentEntryY -Width 95 -Height 28
             # Store the profile name in the button's Tag so the click handler can reference it
             $btnQuickApply.Tag = $profileName
             $btnQuickApply.Add_Click({
                 $targetProfileName = $this.Tag
                 $confirmResult = [System.Windows.Forms.MessageBox]::Show(
-                    "Apply profile '$targetProfileName' to the local machine?",
-                    "Quick Apply",
+                    "Set '$targetProfileName' as the active profile?",
+                    "Set Active Profile",
                     [System.Windows.Forms.MessageBoxButtons]::YesNo,
                     [System.Windows.Forms.MessageBoxIcon]::Question)
 
@@ -431,7 +431,7 @@ function New-DashboardView {
                             $script:AppState.LastAppliedProfile = $targetProfileName
                             # Refresh the active profile display on the dashboard
                             $lblProfileValue.Text = $targetProfileName
-                            $profileStatusBadge.Text = "INFO"
+                            $profileStatusBadge.Text = "ACTIVE"
                             $profileStatusBadge.BackColor = $script:Theme.Accent
                             [System.Windows.Forms.MessageBox]::Show(
                                 "Profile '$targetProfileName' marked as active.`nUse Network Deploy to push to remote servers.",

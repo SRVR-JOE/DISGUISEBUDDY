@@ -912,7 +912,7 @@ function New-NetworkView {
                     $controls.GatewayTextBox.Text  = $adapter.Gateway
                     $controls.DNS1TextBox.Text     = $adapter.DNS1
                     $controls.DNS2TextBox.Text     = $adapter.DNS2
-                    $controls.DHCPCheckBox.Checked = ($adapter.DHCP -eq $true -or [string]::IsNullOrWhiteSpace($adapter.IPAddress))
+                    $controls.DHCPCheckBox.Checked = ($adapter.DHCP -eq $true)
                 }
                 Write-AppLog -Message "NetworkConfig: Loaded profile '$selectedName' into adapter cards" -Level 'INFO'
             }
