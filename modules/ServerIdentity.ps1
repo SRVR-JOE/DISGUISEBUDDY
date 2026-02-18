@@ -541,7 +541,7 @@ All active d3 sessions will be disconnected.
     # ========================================================================
     # Card 3: Naming Conventions
     # ========================================================================
-    $card3 = New-StyledCard -Title "Naming Conventions" -X 20 -Y 830 -Width $cardWidth -Height 260
+    $card3 = New-StyledCard -Title "Naming Conventions" -X 20 -Y 830 -Width $cardWidth -Height 310
 
     $yPos = 50
 

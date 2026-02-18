@@ -230,12 +230,12 @@ function New-DashboardView {
 
     $profileBadgeType = if ($activeProfile -eq "None") { 'Warning' } else { 'Info' }
     $profileBadgeText = if ($activeProfile -eq "None") { 'NONE' } else { 'ACTIVE' }
-    $profileStatusBadge = New-StatusBadge -Text $profileBadgeText `
+    $script:DashProfileStatusBadge = New-StatusBadge -Text $profileBadgeText `
         -X ($cardWidth - 50) -Y 15 -Type $profileBadgeType
-    $card2.Controls.Add($profileStatusBadge)
+    $card2.Controls.Add($script:DashProfileStatusBadge)
 
-    $lblProfileValue = New-StyledLabel -Text $activeProfile -X 15 -Y 50 -FontSize 12 -IsBold
-    $card2.Controls.Add($lblProfileValue)
+    $script:DashLblProfileValue = New-StyledLabel -Text $activeProfile -X 15 -Y 50 -FontSize 12 -IsBold
+    $card2.Controls.Add($script:DashLblProfileValue)
 
     $scrollContainer.Controls.Add($card2)
 
@@ -431,9 +431,9 @@ function New-DashboardView {
                         if ($profileToApply) {
                             $script:AppState.LastAppliedProfile = $targetProfileName
                             # Refresh the active profile display on the dashboard
-                            $lblProfileValue.Text = $targetProfileName
-                            $profileStatusBadge.Text = "ACTIVE"
-                            $profileStatusBadge.BackColor = $script:Theme.Accent
+                            $script:DashLblProfileValue.Text = $targetProfileName
+                            $script:DashProfileStatusBadge.Text = "ACTIVE"
+                            $script:DashProfileStatusBadge.BackColor = $script:Theme.Accent
                             [System.Windows.Forms.MessageBox]::Show(
                                 "Profile '$targetProfileName' marked as active.`nUse Network Deploy to push to remote servers.",
                                 "Profile Applied",
@@ -591,7 +591,7 @@ function New-DashboardView {
                 $profileObj = Get-Profile -Name $lastProfile
                 if ($profileObj) {
                     # Mark as active (actual deployment goes through the Deploy view)
-                    $lblProfileValue.Text = $lastProfile
+                    $script:DashLblProfileValue.Text = $lastProfile
                     [System.Windows.Forms.MessageBox]::Show(
                         "Profile '$lastProfile' marked as active.`nUse Network Deploy to push to remote servers.",
                         "Profile Active",

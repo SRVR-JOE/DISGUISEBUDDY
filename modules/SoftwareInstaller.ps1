@@ -335,7 +335,7 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Card 1: Software Folder
     # ===================================================================
-    $folderCard = New-StyledCard -Title "Software Source" -X 20 -Y 80 -Width $cardWidth -Height 110
+    $folderCard = New-StyledCard -Title "Software Source" -X 20 -Y 80 -Width $cardWidth -Height 145
 
     $lblFolder = New-StyledLabel -Text "Folder:" -X 15 -Y 48 -FontSize 9
     $txtFolder = New-StyledTextBox -X 75 -Y 45 -Width ($cardWidth - 240)
@@ -343,12 +343,12 @@ function New-SoftwareInstallerView {
 
     $btnBrowse = New-StyledButton -Text "Browse..." -X ($cardWidth - 155) -Y 43 -Width 100 -Height 30
 
-    $chkRecurse = New-StyledCheckBox -Text "Include subfolders" -X 75 -Y 70
+    $chkRecurse = New-StyledCheckBox -Text "Include subfolders" -X 75 -Y 76
     $chkRecurse.Checked = $true
 
-    $btnScan = New-StyledButton -Text "Scan Folder" -X 15 -Y 78 -Width 130 -Height 30 -IsPrimary
+    $btnScan = New-StyledButton -Text "Scan Folder" -X 15 -Y 105 -Width 130 -Height 30 -IsPrimary
 
-    $lblScanStatus = New-StyledLabel -Text "Enter a folder path and click Scan" -X 160 -Y 82 -FontSize 9 -IsMuted
+    $lblScanStatus = New-StyledLabel -Text "Enter a folder path and click Scan" -X 160 -Y 112 -FontSize 9 -IsMuted
     $lblScanStatus.AutoSize = $false
     $lblScanStatus.Width = ($cardWidth - 160)
 
@@ -358,7 +358,7 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Card 2: Installer List
     # ===================================================================
-    $listCard = New-StyledCard -Title "Available Installers" -X 20 -Y 200 -Width $cardWidth -Height 340
+    $listCard = New-StyledCard -Title "Available Installers" -X 20 -Y 235 -Width $cardWidth -Height 340
 
     $dgvInstallers = New-StyledDataGridView -X 15 -Y 45 -Width ($cardWidth - 30) -Height 230
 
@@ -422,7 +422,7 @@ function New-SoftwareInstallerView {
     # ===================================================================
     # Card 3: Install Controls
     # ===================================================================
-    $installCard = New-StyledCard -Title "Install" -X 20 -Y 550 -Width $cardWidth -Height 230
+    $installCard = New-StyledCard -Title "Install" -X 20 -Y 585 -Width $cardWidth -Height 230
 
     $chkSilent = New-StyledCheckBox -Text "Silent install (unattended)" -X 15 -Y 45
     $chkSilent.Checked = $true
