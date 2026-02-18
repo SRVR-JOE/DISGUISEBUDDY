@@ -45,6 +45,7 @@ try {
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Warning
         ) | Out-Null
+        exit 1
     }
 } catch {
     # Non-Windows or identity check failed -- continue silently
@@ -57,17 +58,26 @@ try {
 $modulesPath = Join-Path -Path $PSScriptRoot -ChildPath 'modules'
 
 # Foundation modules (must load first)
-. (Join-Path $modulesPath 'Theme.ps1')
-. (Join-Path $modulesPath 'UIComponents.ps1')
+try {
+    . (Join-Path $modulesPath 'Theme.ps1')
+    . (Join-Path $modulesPath 'UIComponents.ps1')
+} catch {
+    [System.Windows.Forms.MessageBox]::Show(
+        "Failed to load core UI modules:`n$($_.Exception.Message)",
+        "Module Load Error", [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    exit 1
+}
 
 # Feature modules (order doesn't matter)
-. (Join-Path $modulesPath 'ProfileManager.ps1')
-. (Join-Path $modulesPath 'NetworkConfig.ps1')
-. (Join-Path $modulesPath 'SMBConfig.ps1')
-. (Join-Path $modulesPath 'ServerIdentity.ps1')
-. (Join-Path $modulesPath 'Discovery.ps1')
-. (Join-Path $modulesPath 'SoftwareInstaller.ps1')
-. (Join-Path $modulesPath 'Dashboard.ps1')
+$featureModules = @('ProfileManager','NetworkConfig','SMBConfig','ServerIdentity','Discovery','SoftwareInstaller','Dashboard')
+foreach ($mod in $featureModules) {
+    try {
+        . (Join-Path $modulesPath "$mod.ps1")
+    } catch {
+        Write-Warning "Failed to load module ${mod}: $($_.Exception.Message)"
+    }
+}
 
 Write-AppLog -Message 'DISGUISE BUDDY starting up' -Level 'INFO'
 

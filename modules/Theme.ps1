@@ -88,7 +88,9 @@ function Write-AppLog {
 
     # Use cached log path to avoid recalculating on every call
     if (-not $script:LogFilePath) {
-        $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot | Split-Path -Parent } else { $PWD.Path }
+        $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
+        # If we're inside /modules, go up one level to the project root
+        if ((Split-Path -Leaf $scriptRoot) -eq 'modules') { $scriptRoot = Split-Path -Parent $scriptRoot }
         $logDir = Join-Path -Path $scriptRoot -ChildPath 'logs'
         if (-not (Test-Path -Path $logDir)) {
             New-Item -Path $logDir -ItemType Directory -Force | Out-Null
