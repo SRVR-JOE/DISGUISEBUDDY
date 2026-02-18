@@ -1,0 +1,101 @@
+{
+    "Name": "Actor 8",
+    "Description": "Actor 8 server - outputs video according to assigned Feed scenes",
+    "Created": "2026-02-18T00:00:00",
+    "Modified": "2026-02-18T00:00:00",
+    "ServerName": "ACTOR-08",
+    "NetworkAdapters": [
+        {
+            "Index": 0,
+            "Role": "d3Net",
+            "DisplayName": "d3 Network",
+            "AdapterName": "",
+            "IPAddress": "10.0.0.19",
+            "SubnetMask": "255.255.255.0",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": false,
+            "VLANID": null,
+            "Enabled": true
+        },
+        {
+            "Index": 1,
+            "Role": "Media",
+            "DisplayName": "Media Network",
+            "AdapterName": "",
+            "IPAddress": "10.0.1.19",
+            "SubnetMask": "255.255.255.0",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": false,
+            "VLANID": null,
+            "Enabled": true
+        },
+        {
+            "Index": 2,
+            "Role": "sACN",
+            "DisplayName": "Lighting (sACN/Art-Net)",
+            "AdapterName": "",
+            "IPAddress": "2.0.0.19",
+            "SubnetMask": "255.0.0.0",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": false,
+            "VLANID": null,
+            "Enabled": true
+        },
+        {
+            "Index": 3,
+            "Role": "NDI",
+            "DisplayName": "NDI Video",
+            "AdapterName": "",
+            "IPAddress": "10.0.3.19",
+            "SubnetMask": "255.255.255.0",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": false,
+            "VLANID": null,
+            "Enabled": true
+        },
+        {
+            "Index": 4,
+            "Role": "Control",
+            "DisplayName": "Control (OSC/Automation)",
+            "AdapterName": "",
+            "IPAddress": "10.0.4.19",
+            "SubnetMask": "255.255.255.0",
+            "Gateway": "",
+            "DNS1": "",
+            "DNS2": "",
+            "DHCP": false,
+            "VLANID": null,
+            "Enabled": true
+        },
+        {
+            "Index": 5,
+            "Role": "Internet",
+            "DisplayName": "Internet / Management",
+            "AdapterName": "",
+            "IPAddress": "",
+            "SubnetMask": "",
+            "Gateway": "",
+            "DNS1": "8.8.8.8",
+            "DNS2": "8.8.4.4",
+            "DHCP": true,
+            "VLANID": null,
+            "Enabled": true
+        }
+    ],
+    "SMBSettings": {
+        "ShareD3Projects": true,
+        "ProjectsPath": "D:\\d3 Projects",
+        "ShareName": "d3 Projects",
+        "SharePermissions": "Everyone:Full",
+        "AdditionalShares": []
+    },
+    "CustomSettings": {}
+}

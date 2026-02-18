@@ -468,14 +468,18 @@ function Apply-FullProfile {
     .SYNOPSIS
         Applies all settings from a profile to the local machine.
     .DESCRIPTION
-        STUB: This function currently displays a confirmation dialog listing all
-        changes that would be made, and logs the intended actions. The actual
-        application logic (calling NetworkConfig, SMBConfig, ServerIdentity
-        modules) will be connected when those modules are available.
+        Shows a confirmation dialog listing all changes, then applies:
+        1. Hostname change via Set-ServerHostname (if different from current)
+        2. Network adapter configuration via Set-AdapterStaticIP / Set-AdapterDHCP
+        3. SMB share creation via New-D3ProjectShare (if enabled)
+        Each step is wrapped in error handling so one failure does not block
+        the remaining steps. A results summary dialog is shown after all
+        steps complete. If the hostname was changed, the user is prompted
+        to restart.
     .PARAMETER Profile
         The profile object to apply.
     .OUTPUTS
-        [bool] - $true if the user confirmed and application was logged.
+        [bool] - $true if all steps succeeded (or were skipped), $false if any failed.
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -541,38 +545,202 @@ function Apply-FullProfile {
         return $false
     }
 
-    # STUB: Log what would be done. Actual calls will be added when modules are ready.
+    # ---- Execute profile application ----
     Write-AppLog "=== PROFILE APPLICATION START: '$($Profile.Name)' ===" -Level 'INFO'
-    Write-AppLog "STUB: Would set hostname to '$($Profile.ServerName)'" -Level 'INFO'
 
-    foreach ($adapter in $Profile.NetworkAdapters) {
-        if ($adapter.Enabled) {
-            if ($adapter.DHCP) {
-                Write-AppLog "STUB: Would set adapter [$($adapter.Index)] '$($adapter.DisplayName)' to DHCP" -Level 'INFO'
+    $results = [System.Text.StringBuilder]::new()
+    $successCount = 0
+    $failCount = 0
+    $skipCount = 0
+    $restartNeeded = $false
+
+    # ================================================================
+    # Step 1: Change hostname (if different from current)
+    # ================================================================
+    try {
+        if ($Profile.ServerName -and $Profile.ServerName -ne $env:COMPUTERNAME) {
+            Write-AppLog "Applying hostname change: '$env:COMPUTERNAME' -> '$($Profile.ServerName)'" -Level 'INFO'
+            $hostnameResult = Set-ServerHostname -NewName $Profile.ServerName
+
+            if ($hostnameResult.Success) {
+                $successCount++
+                $restartNeeded = $hostnameResult.RestartRequired
+                [void]$results.AppendLine("[OK] Hostname: $($hostnameResult.Message)")
+                Write-AppLog "Hostname change succeeded: $($hostnameResult.Message)" -Level 'INFO'
             }
             else {
-                Write-AppLog "STUB: Would set adapter [$($adapter.Index)] '$($adapter.DisplayName)' to IP=$($adapter.IPAddress), Subnet=$($adapter.SubnetMask)" -Level 'INFO'
+                $failCount++
+                [void]$results.AppendLine("[FAIL] Hostname: $($hostnameResult.Message)")
+                Write-AppLog "Hostname change failed: $($hostnameResult.Message)" -Level 'ERROR'
             }
         }
         else {
-            Write-AppLog "STUB: Would disable adapter [$($adapter.Index)] '$($adapter.DisplayName)'" -Level 'INFO'
+            $skipCount++
+            [void]$results.AppendLine("[SKIP] Hostname: Already set to '$($Profile.ServerName)'")
+            Write-AppLog "Hostname unchanged (already '$($Profile.ServerName)')" -Level 'INFO'
+        }
+    }
+    catch {
+        $failCount++
+        [void]$results.AppendLine("[FAIL] Hostname: Unexpected error - $_")
+        Write-AppLog "Hostname change error: $_" -Level 'ERROR'
+    }
+
+    # ================================================================
+    # Step 2: Configure network adapters
+    # ================================================================
+    foreach ($adapter in $Profile.NetworkAdapters) {
+        $adapterLabel = "[$($adapter.Index)] $($adapter.DisplayName) ($($adapter.Role))"
+
+        try {
+            if (-not $adapter.Enabled) {
+                $skipCount++
+                [void]$results.AppendLine("[SKIP] $adapterLabel : Disabled in profile")
+                Write-AppLog "Skipping adapter $adapterLabel - disabled in profile" -Level 'INFO'
+                continue
+            }
+
+            $adapterName = $adapter.AdapterName
+            if ([string]::IsNullOrWhiteSpace($adapterName)) {
+                $skipCount++
+                [void]$results.AppendLine("[SKIP] $adapterLabel : No physical adapter assigned")
+                Write-AppLog "Skipping adapter $adapterLabel - no AdapterName set" -Level 'WARN'
+                continue
+            }
+
+            if ($adapter.DHCP) {
+                Write-AppLog "Setting adapter '$adapterName' ($adapterLabel) to DHCP" -Level 'INFO'
+                $adapterResult = Set-AdapterDHCP -AdapterName $adapterName
+            }
+            else {
+                Write-AppLog "Setting adapter '$adapterName' ($adapterLabel) to static IP=$($adapter.IPAddress)" -Level 'INFO'
+                $adapterResult = Set-AdapterStaticIP -AdapterName $adapterName `
+                    -IPAddress $adapter.IPAddress `
+                    -SubnetMask $adapter.SubnetMask `
+                    -Gateway $adapter.Gateway `
+                    -DNS1 $adapter.DNS1 `
+                    -DNS2 $adapter.DNS2
+            }
+
+            if ($adapterResult.Success) {
+                $successCount++
+                [void]$results.AppendLine("[OK] $adapterLabel : $($adapterResult.Message)")
+                Write-AppLog "Adapter $adapterLabel succeeded: $($adapterResult.Message)" -Level 'INFO'
+            }
+            else {
+                $failCount++
+                [void]$results.AppendLine("[FAIL] $adapterLabel : $($adapterResult.Message)")
+                Write-AppLog "Adapter $adapterLabel failed: $($adapterResult.Message)" -Level 'ERROR'
+            }
+        }
+        catch {
+            $failCount++
+            [void]$results.AppendLine("[FAIL] $adapterLabel : Unexpected error - $_")
+            Write-AppLog "Adapter $adapterLabel error: $_" -Level 'ERROR'
         }
     }
 
-    if ($Profile.SMBSettings.ShareD3Projects) {
-        Write-AppLog "STUB: Would create SMB share '$($Profile.SMBSettings.ShareName)' at '$($Profile.SMBSettings.ProjectsPath)'" -Level 'INFO'
+    # ================================================================
+    # Step 3: Configure SMB sharing
+    # ================================================================
+    try {
+        if ($Profile.SMBSettings.ShareD3Projects) {
+            Write-AppLog "Creating SMB share '$($Profile.SMBSettings.ShareName)' at '$($Profile.SMBSettings.ProjectsPath)'" -Level 'INFO'
+            $smbResult = New-D3ProjectShare `
+                -LocalPath $Profile.SMBSettings.ProjectsPath `
+                -ShareName $Profile.SMBSettings.ShareName `
+                -Permissions $Profile.SMBSettings.SharePermissions
+
+            if ($smbResult.Success) {
+                $successCount++
+                [void]$results.AppendLine("[OK] SMB Share: $($smbResult.Message)")
+                Write-AppLog "SMB share creation succeeded: $($smbResult.Message)" -Level 'INFO'
+            }
+            else {
+                $failCount++
+                [void]$results.AppendLine("[FAIL] SMB Share: $($smbResult.Message)")
+                Write-AppLog "SMB share creation failed: $($smbResult.Message)" -Level 'ERROR'
+            }
+        }
+        else {
+            $skipCount++
+            [void]$results.AppendLine("[SKIP] SMB Share: Disabled in profile")
+            Write-AppLog "SMB sharing disabled in profile - skipping" -Level 'INFO'
+        }
     }
+    catch {
+        $failCount++
+        [void]$results.AppendLine("[FAIL] SMB Share: Unexpected error - $_")
+        Write-AppLog "SMB share error: $_" -Level 'ERROR'
+    }
+
+    # ================================================================
+    # Step 4: Update AppState
+    # ================================================================
+    $script:AppState.LastAppliedProfile = $Profile.Name
+    Write-AppLog "Updated LastAppliedProfile to '$($Profile.Name)'" -Level 'INFO'
 
     Write-AppLog "=== PROFILE APPLICATION END: '$($Profile.Name)' ===" -Level 'INFO'
 
-    [System.Windows.Forms.MessageBox]::Show(
-        "Profile '$($Profile.Name)' application logged (stub mode).`n`nActual system changes are not yet implemented.`nCheck the log file for details of what would be applied.",
-        "Application Complete (Stub)",
-        [System.Windows.Forms.MessageBoxButtons]::OK,
+    # ================================================================
+    # Show results summary dialog
+    # ================================================================
+    $summaryText = [System.Text.StringBuilder]::new()
+    [void]$summaryText.AppendLine("Profile '$($Profile.Name)' application results:")
+    [void]$summaryText.AppendLine("")
+    [void]$summaryText.AppendLine("  Succeeded: $successCount")
+    [void]$summaryText.AppendLine("  Failed:    $failCount")
+    [void]$summaryText.AppendLine("  Skipped:   $skipCount")
+    [void]$summaryText.AppendLine("")
+    [void]$summaryText.AppendLine("Details:")
+    [void]$summaryText.AppendLine($results.ToString())
+
+    $summaryIcon = if ($failCount -gt 0) {
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    }
+    else {
         [System.Windows.Forms.MessageBoxIcon]::Information
+    }
+
+    [System.Windows.Forms.MessageBox]::Show(
+        $summaryText.ToString(),
+        "Profile Application Results - $($Profile.Name)",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        $summaryIcon
     ) | Out-Null
 
-    return $true
+    # ================================================================
+    # If hostname was changed, prompt for restart
+    # ================================================================
+    if ($restartNeeded) {
+        $restartChoice = [System.Windows.Forms.MessageBox]::Show(
+            "Hostname was changed. A restart is required for the new hostname to take effect.`n`nRestart now?",
+            "Restart Required",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+
+        if ($restartChoice -eq [System.Windows.Forms.DialogResult]::Yes) {
+            Write-AppLog "User chose to restart after hostname change" -Level 'INFO'
+            try {
+                Restart-Computer -Force
+            }
+            catch {
+                Write-AppLog "Failed to initiate restart: $_" -Level 'ERROR'
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Failed to initiate restart: $_`n`nPlease restart manually.",
+                    "Restart Failed",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Error
+                ) | Out-Null
+            }
+        }
+        else {
+            Write-AppLog "User deferred restart after hostname change" -Level 'INFO'
+        }
+    }
+
+    return ($failCount -eq 0)
 }
 
 
