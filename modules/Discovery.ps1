@@ -979,7 +979,7 @@ function New-DeployView {
                     try {
                         $profileObj = Get-Profile -Name $profileName
                         if ($profileObj) {
-                            $pushResult = Push-ProfileToServer -Profile $profileObj -TargetIP $ip
+                            $pushResult = Push-ProfileToServer -ServerIP $ip -Profile $profileObj
                             if ($pushResult.Success) {
                                 $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Push to $ip succeeded.`r`n")
                                 $selectedRow.Cells["Status"].Value = "Configured"
