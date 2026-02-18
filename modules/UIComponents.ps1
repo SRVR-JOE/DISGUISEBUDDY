@@ -51,11 +51,7 @@ function New-StyledButton {
         if ($this.BackColor -eq $script:Theme.Primary) {
             $this.BackColor = $script:Theme.PrimaryLight
         } elseif ($this.BackColor -eq $script:Theme.Error) {
-            # Lighten the error color slightly for hover
-            $r = [Math]::Min(255, $this.BackColor.R + 20)
-            $g = [Math]::Min(255, $this.BackColor.G + 20)
-            $b = [Math]::Min(255, $this.BackColor.B + 20)
-            $this.BackColor = [System.Drawing.Color]::FromArgb($r, $g, $b)
+            $this.BackColor = $script:Theme.ErrorLight
         } else {
             $this.BackColor = $script:Theme.SurfaceLight
         }
@@ -434,7 +430,10 @@ function New-StatusBadge {
     # Set background color based on type
     switch ($Type) {
         'Success' { $badge.BackColor = $script:Theme.Success }
-        'Warning' { $badge.BackColor = $script:Theme.Warning }
+        'Warning' {
+            $badge.BackColor = $script:Theme.Warning
+            $badge.ForeColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+        }
         'Error'   { $badge.BackColor = $script:Theme.Error }
         'Info'    { $badge.BackColor = $script:Theme.Accent }
     }

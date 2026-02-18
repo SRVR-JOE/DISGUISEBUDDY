@@ -169,15 +169,25 @@ function Install-Software {
     }
 
     $extension = [System.IO.Path]::GetExtension($InstallerPath).ToLower()
+    $allowedExtensions = @('.exe', '.msi', '.msix', '.msp')
+    if ($extension -notin $allowedExtensions) {
+        $result.Message = "Unsupported installer type: $extension. Allowed: $($allowedExtensions -join ', ')"
+        Write-AppLog -Message "Install-Software: $($result.Message)" -Level 'ERROR'
+        return $result
+    }
+
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
     try {
         Write-AppLog -Message "Install-Software: Starting $InstallerPath $Arguments" -Level 'INFO'
 
         if ($extension -eq '.msi' -or $extension -eq '.msp') {
-            # Use msiexec for MSI/MSP files
-            $processArgs = "/i `"$InstallerPath`" $Arguments"
-            $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $processArgs `
+            # Use msiexec for MSI/MSP files - build argument list as array for safety
+            $msiArgs = @('/i', "`"$InstallerPath`"")
+            if ($Arguments) {
+                $msiArgs += $Arguments -split '\s+'
+            }
+            $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs `
                 -PassThru -ErrorAction Stop
         }
         elseif ($extension -eq '.msix') {

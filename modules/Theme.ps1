@@ -15,6 +15,7 @@ $script:DarkTheme = @{
     Success         = [System.Drawing.ColorTranslator]::FromHtml('#10B981')
     Warning         = [System.Drawing.ColorTranslator]::FromHtml('#F59E0B')
     Error           = [System.Drawing.ColorTranslator]::FromHtml('#EF4444')
+    ErrorLight      = [System.Drawing.ColorTranslator]::FromHtml('#F87171')
     Border          = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
     NavBackground   = [System.Drawing.ColorTranslator]::FromHtml('#16162A')
     NavHover        = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
@@ -38,6 +39,7 @@ $script:LightTheme = @{
     Success         = [System.Drawing.ColorTranslator]::FromHtml('#059669')
     Warning         = [System.Drawing.ColorTranslator]::FromHtml('#D97706')
     Error           = [System.Drawing.ColorTranslator]::FromHtml('#DC2626')
+    ErrorLight      = [System.Drawing.ColorTranslator]::FromHtml('#EF4444')
     Border          = [System.Drawing.ColorTranslator]::FromHtml('#E2E8F0')
     NavBackground   = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
     NavHover        = [System.Drawing.ColorTranslator]::FromHtml('#F1F5F9')
@@ -101,11 +103,18 @@ function Write-AppLog {
     $logEntry = "[$timestamp] [$Level] $Message"
 
     # Append the entry to the log file
-    try {
-        Add-Content -Path $logFile -Value $logEntry -Encoding UTF8
-    } catch {
-        # If logging fails, write to console as a fallback
-        Write-Warning "Failed to write to log file: $_"
-        Write-Warning "Log entry was: $logEntry"
+    # Retry with short delay to handle transient file lock contention
+    $maxRetries = 2
+    for ($attempt = 0; $attempt -le $maxRetries; $attempt++) {
+        try {
+            Add-Content -Path $logFile -Value $logEntry -Encoding UTF8 -ErrorAction Stop
+            break
+        } catch {
+            if ($attempt -eq $maxRetries) {
+                Write-Warning "Failed to write to log file: $_"
+            } else {
+                Start-Sleep -Milliseconds 50
+            }
+        }
     }
 }

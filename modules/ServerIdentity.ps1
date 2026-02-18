@@ -231,6 +231,10 @@ function New-ServerIdentityView {
 
     # Create a scrollable container for all content
     $scrollPanel = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
+    $scrollPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
+                          [System.Windows.Forms.AnchorStyles]::Left -bor
+                          [System.Windows.Forms.AnchorStyles]::Right -bor
+                          [System.Windows.Forms.AnchorStyles]::Bottom
 
     # ---- Section Header ----
     $header = New-SectionHeader -Text "Server Identity" -X 20 -Y 15 -Width 900

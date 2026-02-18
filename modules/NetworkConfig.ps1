@@ -5,13 +5,13 @@
 # and a WinForms UI view for managing 6 adapter roles used by disguise (d3)
 # media servers.
 #
-# Adapter role indices (by convention):
-#   0 = d3Net        - Core disguise server-to-server communication
-#   1 = Media        - High-bandwidth media/content transfer
-#   2 = sACN/Art-Net - Lighting control DMX over Ethernet
-#   3 = NDI          - NDI video networking
-#   4 = Control      - OSC/Automation/PSN show control
-#   5 = Internet     - Updates, remote access, management
+# Adapter role indices (NIC A-F by convention):
+#   0 = NIC A - d3Net        - Core disguise server-to-server communication
+#   1 = NIC B - sACN/Art-Net - Lighting control DMX over Ethernet
+#   2 = NIC C - Media        - High-bandwidth media/content transfer
+#   3 = NIC D - NDI          - NDI video networking
+#   4 = NIC E - 100G         - 100 Gigabit Ethernet (high bandwidth)
+#   5 = NIC F - 100G         - 100 Gigabit Ethernet (high bandwidth)
 #
 # Prerequisites: Theme.ps1 and UIComponents.ps1 must be dot-sourced before
 # this file so that $script:Theme and New-Styled* functions are available.

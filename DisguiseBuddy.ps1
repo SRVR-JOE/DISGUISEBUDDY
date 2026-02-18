@@ -56,12 +56,17 @@ Write-AppLog -Message 'DISGUISE BUDDY starting up' -Level 'INFO'
 # APPLICATION STATE
 # ============================================================================
 
-if (-not $script:AppState) {
-    $script:AppState = @{
-        LastAppliedProfile = ''
-        LastScanResults    = @()
-        CurrentView        = 'Dashboard'
-    }
+# Merge-initialize AppState — modules may have already created it with partial keys
+if (-not $script:AppState) { $script:AppState = @{} }
+if (-not $script:AppState.ContainsKey('LastAppliedProfile')) { $script:AppState.LastAppliedProfile = '' }
+if (-not $script:AppState.ContainsKey('LastScanResults'))    { $script:AppState.LastScanResults = @() }
+if (-not $script:AppState.ContainsKey('CurrentView'))        { $script:AppState.CurrentView = 'Dashboard' }
+if (-not $script:AppState.ContainsKey('NavigateTo'))         { $script:AppState.NavigateTo = $null }
+
+# Wire up navigation callback for cross-view navigation from feature modules
+$script:AppState.NavigateTo = {
+    param([string]$ViewName)
+    Set-ActiveView -ViewName $ViewName
 }
 
 # ============================================================================
@@ -249,9 +254,10 @@ foreach ($item in $navItems) {
 function Set-ActiveView {
     param([string]$ViewName)
 
-    # Update visual state of nav buttons
+    # Update visual state of nav buttons (dispose old fonts to avoid GDI leaks)
     foreach ($key in $script:NavButtons.Keys) {
         $btn = $script:NavButtons[$key]
+        $oldFont = $btn.Font
         if ($key -eq $ViewName) {
             # Active button styling
             $btn.BackColor = $script:Theme.NavActive
@@ -263,6 +269,7 @@ function Set-ActiveView {
             $btn.ForeColor = $script:Theme.TextSecondary
             $btn.Font = New-Object System.Drawing.Font('Segoe UI', 10)
         }
+        if ($oldFont) { $oldFont.Dispose() }
     }
 
     # Update state
@@ -270,6 +277,11 @@ function Set-ActiveView {
 
     # Load the requested view into the content panel
     $contentPanel.SuspendLayout()
+
+    # Dispose existing controls to prevent GDI handle leaks
+    foreach ($ctrl in @($contentPanel.Controls)) {
+        $ctrl.Dispose()
+    }
     $contentPanel.Controls.Clear()
 
     # Create an inner panel that respects padding
@@ -329,6 +341,16 @@ $themeToggleBtn.Add_Click({
     $versionLabel.ForeColor = $script:Theme.TextMuted
     $contentPanel.BackColor = $script:Theme.Background
 
+    # Update nav button theme colors (hover, inactive state)
+    foreach ($key in $script:NavButtons.Keys) {
+        $btn = $script:NavButtons[$key]
+        $btn.FlatAppearance.MouseOverBackColor = $script:Theme.NavHover
+        if ($key -ne $script:AppState.CurrentView) {
+            $btn.BackColor = $script:Theme.NavBackground
+            $btn.ForeColor = $script:Theme.TextSecondary
+        }
+    }
+
     # Re-render current view with new theme
     Set-ActiveView -ViewName $script:AppState.CurrentView
 
@@ -355,13 +377,8 @@ $mainForm.Add_FormClosing({
     Write-AppLog -Message 'DISGUISE BUDDY shutting down' -Level 'INFO'
 })
 
-# Handle resize for responsive layout
-$mainForm.Add_Resize({
-    # Re-render current view on significant resize
-    if ($mainForm.WindowState -ne [System.Windows.Forms.FormWindowState]::Minimized) {
-        # Views will auto-adjust via docking/anchoring
-    }
-})
+# Views auto-adjust via docking/anchoring on the scroll container.
+# No explicit resize handler needed.
 
 Write-AppLog -Message 'DISGUISE BUDDY initialized successfully' -Level 'INFO'
 

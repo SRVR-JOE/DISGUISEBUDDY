@@ -199,9 +199,9 @@ function New-DashboardView {
     # Row 1: Quick Status Cards (4 cards in a row)
     # ===================================================================
     $cardY = 80
-    $cardWidth = 215
+    $cardWidth = 200
     $cardHeight = 100
-    $cardSpacing = 10
+    $cardSpacing = 12
     $cardStartX = 20
 
     # --- Gather live data ---
@@ -321,7 +321,7 @@ function New-DashboardView {
             "Blue"   { $script:Theme.Accent }
             "Purple" { $script:Theme.Primary }
             "Green"  { $script:Theme.Success }
-            "Cyan"   { [System.Drawing.ColorTranslator]::FromHtml('#06B6D4') }
+            "Cyan"   { $script:Theme.Accent }
             "Orange" { $script:Theme.Warning }
             "Gray"   { $script:Theme.TextMuted }
             default  { $script:Theme.TextSecondary }
@@ -527,9 +527,11 @@ function New-DashboardView {
                     $ipInfo = $liveIPs | Where-Object { $_.InterfaceIndex -eq $adapter.InterfaceIndex } |
                         Select-Object -First 1
                     if ($newProfile.NetworkAdapters -and $adapterIndex -lt $newProfile.NetworkAdapters.Count) {
-                        $newProfile.NetworkAdapters[$adapterIndex].InterfaceAlias = $adapter.Name
+                        $newProfile.NetworkAdapters[$adapterIndex].AdapterName = $adapter.Name
                         $newProfile.NetworkAdapters[$adapterIndex].IPAddress = if ($ipInfo) { $ipInfo.IPAddress } else { '' }
-                        $newProfile.NetworkAdapters[$adapterIndex].SubnetPrefix = if ($ipInfo) { $ipInfo.PrefixLength } else { 24 }
+                        $newProfile.NetworkAdapters[$adapterIndex].SubnetMask = if ($ipInfo) {
+                            Convert-PrefixToSubnetMask -PrefixLength $ipInfo.PrefixLength
+                        } else { '255.255.255.0' }
                     }
                     $adapterIndex++
                 }

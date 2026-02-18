@@ -290,6 +290,10 @@ function New-SMBView {
 
     # Create a scrollable container for all content
     $scrollPanel = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
+    $scrollPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
+                          [System.Windows.Forms.AnchorStyles]::Left -bor
+                          [System.Windows.Forms.AnchorStyles]::Right -bor
+                          [System.Windows.Forms.AnchorStyles]::Bottom
 
     # ---- Section Header ----
     $header = New-SectionHeader -Text "SMB File Sharing" -X 20 -Y 15 -Width 900
@@ -433,7 +437,7 @@ function New-SMBView {
         $account = $card.Controls['cmbAccount'].SelectedItem
         $access = $card.Controls['cmbAccess'].SelectedItem
 
-        if (-not $shareName -or $shareName -eq 'd3 Projects' -and $shareName -eq '') {
+        if (-not $shareName -or $shareName -eq '') {
             $shareName = 'd3 Projects'
         }
         # Use placeholder fallback

@@ -154,6 +154,7 @@ function Find-DisguiseServers {
                 $httpClient.Dispose()
             } catch {
                 # API not responding or not a disguise server
+                if ($httpClient) { $httpClient.Dispose() }
             }
         }
 
@@ -333,25 +334,29 @@ function Test-DisguiseServer {
             $httpClient.Dispose()
         } catch {
             # API not reachable or timed out
+            if ($httpClient) { $httpClient.Dispose() }
         }
     }
 
     # --- SMC API Check ---
-    # The SMC typically runs on a separate management interface; try the standard API endpoint
-    try {
-        $httpClient = New-Object System.Net.Http.HttpClient
-        $httpClient.Timeout = [TimeSpan]::FromMilliseconds($TimeoutMs)
-        $smcResponse = $httpClient.GetStringAsync("http://$IPAddress/api/networkadapters").Result
-        if ($smcResponse) {
-            $result.SMCAvailable = $true
-            # If we got a response from SMC but did not yet confirm disguise, do so now
-            if (-not $result.IsDisguise -and ($smcResponse -match 'adapter|network|interface')) {
-                $result.IsDisguise = $true
+    # Only attempt if port 80 is open (avoid unnecessary HTTP timeouts)
+    if ($result.Ports -contains 80) {
+        $httpClient = $null
+        try {
+            $httpClient = New-Object System.Net.Http.HttpClient
+            $httpClient.Timeout = [TimeSpan]::FromMilliseconds($TimeoutMs)
+            $smcResponse = $httpClient.GetStringAsync("http://$IPAddress/api/networkadapters").Result
+            if ($smcResponse) {
+                $result.SMCAvailable = $true
+                if (-not $result.IsDisguise -and ($smcResponse -match 'adapter|network|interface')) {
+                    $result.IsDisguise = $true
+                }
             }
+        } catch {
+            # SMC API not available on this host
+        } finally {
+            if ($httpClient) { $httpClient.Dispose() }
         }
-        $httpClient.Dispose()
-    } catch {
-        # SMC API not available on this host
     }
 
     Write-AppLog -Message "Test-DisguiseServer: $IPAddress - IsDisguise=$($result.IsDisguise), API=$($result.APIAvailable), Ports=$($result.Ports -join ',')" -Level 'INFO'
@@ -384,12 +389,14 @@ function Get-RemoteServerInfo {
         if ($response) {
             $parsed = $response | ConvertFrom-Json
             Write-AppLog -Message "Get-RemoteServerInfo: Successfully retrieved info from $IPAddress" -Level 'INFO'
+            $httpClient.Dispose()
             return $parsed
         }
 
         $httpClient.Dispose()
     } catch {
         Write-AppLog -Message "Get-RemoteServerInfo: Failed to reach $IPAddress - $_" -Level 'WARN'
+        if ($httpClient) { $httpClient.Dispose() }
     }
 
     return $null
@@ -515,9 +522,9 @@ function Push-ProfileToServer {
                         # Skip unconfigured adapters
                         if ([string]::IsNullOrWhiteSpace($adapter.IPAddress)) { continue }
 
-                        # Find the adapter by role name or interface alias
+                        # Find the adapter by name or role
                         $netAdapter = Get-NetAdapter | Where-Object {
-                            $_.Name -eq $adapter.InterfaceAlias -or
+                            $_.Name -eq $adapter.AdapterName -or
                             $_.InterfaceDescription -match $adapter.Role
                         } | Select-Object -First 1
 
@@ -530,11 +537,18 @@ function Push-ProfileToServer {
                         $netAdapter | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
                         $netAdapter | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
 
-                        # Apply new IP configuration
+                        # Apply new IP configuration (convert SubnetMask to prefix length)
+                        $prefixLen = 24
+                        if ($adapter.SubnetMask) {
+                            $maskOctets = $adapter.SubnetMask.Split('.')
+                            $binary = ''
+                            foreach ($o in $maskOctets) { $binary += [Convert]::ToString([int]$o, 2).PadLeft(8, '0') }
+                            $prefixLen = ($binary.ToCharArray() | Where-Object { $_ -eq '1' }).Count
+                        }
                         $ipParams = @{
                             InterfaceIndex = $netAdapter.InterfaceIndex
                             IPAddress      = $adapter.IPAddress
-                            PrefixLength   = $adapter.SubnetPrefix
+                            PrefixLength   = $prefixLen
                             ErrorAction    = 'Stop'
                         }
                         if ($adapter.Gateway) {
@@ -543,12 +557,15 @@ function Push-ProfileToServer {
                         New-NetIPAddress @ipParams
 
                         # Set DNS servers if specified
-                        if ($adapter.DNSServers -and $adapter.DNSServers.Count -gt 0) {
+                        $dnsAddrs = @()
+                        if ($adapter.DNS1) { $dnsAddrs += $adapter.DNS1 }
+                        if ($adapter.DNS2) { $dnsAddrs += $adapter.DNS2 }
+                        if ($dnsAddrs.Count -gt 0) {
                             Set-DnsClientServerAddress -InterfaceIndex $netAdapter.InterfaceIndex `
-                                -ServerAddresses $adapter.DNSServers -ErrorAction Stop
+                                -ServerAddresses $dnsAddrs -ErrorAction Stop
                         }
 
-                        $results += "OK: $($adapter.Role) -> $($adapter.IPAddress)/$($adapter.SubnetPrefix)"
+                        $results += "OK: $($adapter.Role) -> $($adapter.IPAddress)/$prefixLen"
                     } catch {
                         $results += "ERROR: $($adapter.Role) - $_"
                     }
@@ -951,13 +968,31 @@ function New-DeployView {
         if ($selectedRow) {
             $ip = $selectedRow.Cells["IPAddress"].Value
             if ($ip -and $cboProfiles.SelectedItem) {
+                $profileName = $cboProfiles.SelectedItem.ToString()
                 $confirmResult = [System.Windows.Forms.MessageBox]::Show(
-                    "Push profile '$($cboProfiles.SelectedItem)' to $ip?",
+                    "Push profile '$profileName' to $ip?",
                     "Confirm Deployment",
                     [System.Windows.Forms.MessageBoxButtons]::YesNo,
                     [System.Windows.Forms.MessageBoxIcon]::Question)
                 if ($confirmResult -eq [System.Windows.Forms.DialogResult]::Yes) {
                     $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting push to $ip...`r`n")
+                    try {
+                        $profileObj = Get-Profile -Name $profileName
+                        if ($profileObj) {
+                            $pushResult = Push-ProfileToServer -Profile $profileObj -TargetIP $ip
+                            if ($pushResult.Success) {
+                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Push to $ip succeeded.`r`n")
+                                $selectedRow.Cells["Status"].Value = "Configured"
+                            } else {
+                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Push to $ip failed: $($pushResult.Message)`r`n")
+                            }
+                        } else {
+                            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Profile '$profileName' not found.`r`n")
+                        }
+                    } catch {
+                        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Push to $ip error: $_`r`n")
+                        Write-AppLog -Message "Push Profile to $ip failed: $_" -Level 'ERROR'
+                    }
                 }
             } else {
                 [System.Windows.Forms.MessageBox]::Show("Please select a profile first.",

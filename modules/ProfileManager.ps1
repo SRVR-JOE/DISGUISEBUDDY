@@ -7,6 +7,16 @@
 # ============================================================================
 
 # ============================================================================
+# Ensure shared application state is initialized
+# ============================================================================
+if (-not $script:AppState) {
+    $script:AppState = @{
+        LastAppliedProfile = ''
+        LastScanResults    = @()
+    }
+}
+
+# ============================================================================
 # BACKEND FUNCTIONS - Profile Data Management
 # ============================================================================
 
@@ -174,7 +184,7 @@ function Get-AllProfiles {
         [PSCustomObject[]] - Array of profile objects, sorted by Name.
     #>
     $profilesDir = Get-ProfilesDirectory
-    $profiles = @()
+    $profiles = [System.Collections.ArrayList]::new()
 
     $jsonFiles = Get-ChildItem -Path $profilesDir -Filter '*.json' -File -ErrorAction SilentlyContinue
 
@@ -182,7 +192,7 @@ function Get-AllProfiles {
         try {
             $content = Get-Content -Path $file.FullName -Raw -Encoding UTF8
             $profileObj = $content | ConvertFrom-Json
-            $profiles += $profileObj
+            [void]$profiles.Add($profileObj)
         }
         catch {
             Write-AppLog "Failed to read profile file '$($file.Name)': $_" -Level 'ERROR'
@@ -190,8 +200,7 @@ function Get-AllProfiles {
     }
 
     # Sort profiles alphabetically by name
-    $profiles = $profiles | Sort-Object -Property Name
-    return $profiles
+    return @($profiles | Sort-Object -Property Name)
 }
 
 
@@ -908,34 +917,8 @@ function Get-CurrentSystemProfile {
 }
 
 
-function Convert-PrefixToSubnetMask {
-    <#
-    .SYNOPSIS
-        Converts a CIDR prefix length to a dotted-decimal subnet mask string.
-    .PARAMETER PrefixLength
-        The prefix length (0-32).
-    .OUTPUTS
-        [string] - Dotted-decimal subnet mask (e.g. "255.255.255.0").
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [int]$PrefixLength
-    )
-
-    if ($PrefixLength -lt 0 -or $PrefixLength -gt 32) {
-        return "255.255.255.0"
-    }
-
-    $mask = ([Math]::Pow(2, 32) - [Math]::Pow(2, 32 - $PrefixLength))
-    $maskUInt = [UInt32]$mask
-
-    $b1 = ($maskUInt -shr 24) -band 0xFF
-    $b2 = ($maskUInt -shr 16) -band 0xFF
-    $b3 = ($maskUInt -shr 8) -band 0xFF
-    $b4 = $maskUInt -band 0xFF
-
-    return "$b1.$b2.$b3.$b4"
-}
+# Convert-PrefixToSubnetMask is defined in NetworkConfig.ps1
+# Do not redefine it here to avoid conflicting implementations.
 
 
 # ============================================================================
