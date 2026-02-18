@@ -831,7 +831,8 @@ function New-DeployView {
     # ===================================================================
     # Section Header
     # ===================================================================
-    $sectionHeader = New-SectionHeader -Text "Network Deploy" -X 20 -Y 15 -Width 790
+    $cardWidth = $ContentPanel.ClientSize.Width - 40  # 20px margin each side
+    $sectionHeader = New-SectionHeader -Text "Network Deploy" -X 20 -Y 15 -Width $cardWidth
 
     $subtitleLabel = New-StyledLabel -Text "Discover disguise servers and push configurations" `
         -X 20 -Y 55 -FontSize 9 -IsSecondary
@@ -842,7 +843,7 @@ function New-DeployView {
     # ===================================================================
     # Card 1: Network Scan
     # ===================================================================
-    $scanCard = New-StyledCard -Title "Network Scan" -X 20 -Y 80 -Width 790 -Height 180
+    $scanCard = New-StyledCard -Title "Network Scan" -X 20 -Y 80 -Width $cardWidth -Height 180
 
     # --- Row 1: Subnet, IP range, and timeout inputs ---
     $lblSubnet = New-StyledLabel -Text "Subnet:" -X 15 -Y 48 -FontSize 9
@@ -875,7 +876,7 @@ function New-DeployView {
     # Progress bar for scan progress
     $scanProgressBar = New-Object System.Windows.Forms.ProgressBar
     $scanProgressBar.Location = New-Object System.Drawing.Point(310, 95)
-    $scanProgressBar.Size = New-Object System.Drawing.Size(350, 22)
+    $scanProgressBar.Size = New-Object System.Drawing.Size(($cardWidth - 310 - 15), 22)
     $scanProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
     $scanProgressBar.Minimum = 0
     $scanProgressBar.Maximum = 100
@@ -883,7 +884,7 @@ function New-DeployView {
 
     $lblScanStatus = New-StyledLabel -Text "Ready to scan" -X 15 -Y 140 -FontSize 9 -IsMuted
     $lblScanStatus.AutoSize = $false
-    $lblScanStatus.Width = 870
+    $lblScanStatus.Width = $cardWidth - 30
 
     $scanCard.Controls.AddRange(@($btnScanNetwork, $btnQuickScan, $scanProgressBar, $lblScanStatus))
 
@@ -892,10 +893,10 @@ function New-DeployView {
     # ===================================================================
     # Card 2: Discovered Servers
     # ===================================================================
-    $serversCard = New-StyledCard -Title "Discovered Servers" -X 20 -Y 270 -Width 790 -Height 280
+    $serversCard = New-StyledCard -Title "Discovered Servers" -X 20 -Y 270 -Width $cardWidth -Height 280
 
     # DataGridView for the server list
-    $dgvServers = New-StyledDataGridView -X 15 -Y 45 -Width 870 -Height 180
+    $dgvServers = New-StyledDataGridView -X 15 -Y 45 -Width ($cardWidth - 30) -Height 180
 
     # Configure columns: Checkbox, IP Address, Hostname, Status, d3 API, Ports, Response Time
     $colSelect = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
@@ -1012,48 +1013,69 @@ function New-DeployView {
         }
     })
 
-    $menuPushProfile = New-Object System.Windows.Forms.ToolStripMenuItem
-    $menuPushProfile.Text = "Push Profile"
-    $menuPushProfile.Add_Click({
-        $selectedRow = $dgvServers.CurrentRow
-        if ($selectedRow) {
-            $ip = $selectedRow.Cells["IPAddress"].Value
-            if ($ip -and $cboProfiles.SelectedItem) {
-                $profileName = $cboProfiles.SelectedItem.ToString()
-                $confirmResult = [System.Windows.Forms.MessageBox]::Show(
-                    "Push profile '$profileName' to $ip?",
-                    "Confirm Deployment",
-                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
-                    [System.Windows.Forms.MessageBoxIcon]::Question)
-                if ($confirmResult -eq [System.Windows.Forms.DialogResult]::Yes) {
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting push to $ip...`r`n")
-                    try {
-                        $profileObj = Get-Profile -Name $profileName
-                        if ($profileObj) {
+    # --- "Assign Profile" context menu with 1-click profile submenu ---
+    $menuAssignProfile = New-Object System.Windows.Forms.ToolStripMenuItem
+    $menuAssignProfile.Text = "Assign Profile"
+    $menuAssignProfile.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+
+    # Populate profile submenu items dynamically on opening
+    $contextMenu.Add_Opening({
+        $menuAssignProfile.DropDownItems.Clear()
+        try {
+            $profiles = Get-AllProfiles
+            if ($profiles.Count -eq 0) {
+                $emptyItem = New-Object System.Windows.Forms.ToolStripMenuItem
+                $emptyItem.Text = "(No profiles found)"
+                $emptyItem.Enabled = $false
+                $menuAssignProfile.DropDownItems.Add($emptyItem) | Out-Null
+            } else {
+                foreach ($p in $profiles) {
+                    $profileItem = New-Object System.Windows.Forms.ToolStripMenuItem
+                    $profileItem.Text = $p.Name
+                    $profileItem.Tag = $p.Name
+                    $profileItem.Add_Click({
+                        $pName = $this.Tag
+                        $row = $dgvServers.CurrentRow
+                        if (-not $row) { return }
+                        $ip = $row.Cells["IPAddress"].Value
+                        if (-not $ip) { return }
+
+                        $confirmResult = [System.Windows.Forms.MessageBox]::Show(
+                            "Assign profile '$pName' to server $ip?`n`nThis will push hostname, network, and SMB settings.",
+                            "Assign Profile",
+                            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                            [System.Windows.Forms.MessageBoxIcon]::Question)
+                        if ($confirmResult -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+
+                        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assigning '$pName' to $ip...`r`n")
+                        try {
+                            $profileObj = Get-Profile -Name $pName
+                            if (-not $profileObj) {
+                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Profile '$pName' not found.`r`n")
+                                return
+                            }
                             $pushResult = Push-ProfileToServer -ServerIP $ip -Profile $profileObj
                             if ($pushResult.Success) {
-                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Push to $ip succeeded.`r`n")
-                                $selectedRow.Cells["Status"].Value = "Configured"
+                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assigned '$pName' to $ip successfully.`r`n")
+                                $row.Cells["Status"].Value = "Configured"
+                                $row.Cells["Status"].Style.ForeColor = $script:Theme.Primary
                             } else {
-                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Push to $ip failed: $($pushResult.Message)`r`n")
+                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assign to $ip failed: $($pushResult.Message)`r`n")
                             }
-                        } else {
-                            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Profile '$profileName' not found.`r`n")
+                        } catch {
+                            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assign to $ip error: $_`r`n")
+                            Write-AppLog -Message "Assign Profile to $ip failed: $_" -Level 'ERROR'
                         }
-                    } catch {
-                        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Push to $ip error: $_`r`n")
-                        Write-AppLog -Message "Push Profile to $ip failed: $_" -Level 'ERROR'
-                    }
+                    })
+                    $menuAssignProfile.DropDownItems.Add($profileItem) | Out-Null
                 }
-            } else {
-                [System.Windows.Forms.MessageBox]::Show("Please select a profile first.",
-                    "No Profile", [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
             }
+        } catch {
+            Write-AppLog -Message "Failed to load profiles for context menu: $_" -Level 'WARN'
         }
     })
 
-    $contextMenu.Items.AddRange(@($menuViewDetails, $menuTestConnection, $menuPushProfile))
+    $contextMenu.Items.AddRange(@($menuViewDetails, $menuTestConnection, $menuAssignProfile))
     $dgvServers.ContextMenuStrip = $contextMenu
 
     # --- Buttons below the grid ---
@@ -1127,15 +1149,135 @@ function New-DeployView {
         }
     })
 
+    # --- 1-Click Assign Profile button ---
+    $btnAssignProfile = New-StyledButton -Text "Assign Profile" -X 490 -Y 235 -Width 150 -Height 30 -IsPrimary
+    $btnAssignProfile.Add_Click({
+        $selectedRow = $dgvServers.CurrentRow
+        if (-not $selectedRow) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Select a server row first.",
+                "No Server Selected",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+            return
+        }
+        $ip = $selectedRow.Cells["IPAddress"].Value
+        $hostname = $selectedRow.Cells["Hostname"].Value
+        if (-not $ip) { return }
+
+        # --- Build profile picker dialog ---
+        $pickerForm = New-Object System.Windows.Forms.Form
+        $pickerForm.Text = "Assign Profile to $ip"
+        $pickerForm.Size = New-Object System.Drawing.Size(400, 340)
+        $pickerForm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterParent
+        $pickerForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+        $pickerForm.MaximizeBox = $false
+        $pickerForm.MinimizeBox = $false
+        $pickerForm.BackColor = $script:Theme.Background
+        $pickerForm.ForeColor = $script:Theme.Text
+        $pickerForm.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+
+        $pickerHeaderLabel = New-Object System.Windows.Forms.Label
+        $pickerHeaderLabel.Text = "Select a profile to assign:"
+        $pickerHeaderLabel.Location = New-Object System.Drawing.Point(15, 15)
+        $pickerHeaderLabel.AutoSize = $true
+        $pickerHeaderLabel.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+
+        $pickerTargetLabel = New-Object System.Windows.Forms.Label
+        $pickerTargetLabel.Text = "Target: $ip $(if ($hostname) { "($hostname)" })"
+        $pickerTargetLabel.Location = New-Object System.Drawing.Point(15, 42)
+        $pickerTargetLabel.AutoSize = $true
+        $pickerTargetLabel.ForeColor = $script:Theme.TextSecondary
+
+        $profileListBox = New-Object System.Windows.Forms.ListBox
+        $profileListBox.Location = New-Object System.Drawing.Point(15, 70)
+        $profileListBox.Size = New-Object System.Drawing.Size(355, 170)
+        $profileListBox.BackColor = $script:Theme.InputBackground
+        $profileListBox.ForeColor = $script:Theme.Text
+        $profileListBox.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+        $profileListBox.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+
+        try {
+            $profiles = Get-AllProfiles
+            foreach ($p in $profiles) {
+                $desc = if ($p.Description) { " - $($p.Description)" } else { "" }
+                $profileListBox.Items.Add("$($p.Name)$desc") | Out-Null
+            }
+        } catch {
+            Write-AppLog "Failed to load profiles for picker: $_" -Level 'WARN'
+        }
+        if ($profileListBox.Items.Count -gt 0) { $profileListBox.SelectedIndex = 0 }
+
+        $btnAssign = New-Object System.Windows.Forms.Button
+        $btnAssign.Text = "Assign"
+        $btnAssign.Location = New-Object System.Drawing.Point(175, 252)
+        $btnAssign.Size = New-Object System.Drawing.Size(100, 35)
+        $btnAssign.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+        $btnAssign.BackColor = $script:Theme.Primary
+        $btnAssign.ForeColor = [System.Drawing.Color]::White
+        $btnAssign.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+        $btnAssign.DialogResult = [System.Windows.Forms.DialogResult]::OK
+
+        $btnCancel = New-Object System.Windows.Forms.Button
+        $btnCancel.Text = "Cancel"
+        $btnCancel.Location = New-Object System.Drawing.Point(285, 252)
+        $btnCancel.Size = New-Object System.Drawing.Size(85, 35)
+        $btnCancel.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+        $btnCancel.BackColor = $script:Theme.CardBackground
+        $btnCancel.ForeColor = $script:Theme.TextSecondary
+        $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+
+        # Double-click to assign immediately
+        $profileListBox.Add_DoubleClick({ $pickerForm.DialogResult = [System.Windows.Forms.DialogResult]::OK; $pickerForm.Close() })
+
+        $pickerForm.AcceptButton = $btnAssign
+        $pickerForm.CancelButton = $btnCancel
+        $pickerForm.Controls.AddRange(@($pickerHeaderLabel, $pickerTargetLabel, $profileListBox, $btnAssign, $btnCancel))
+
+        $dialogResult = $pickerForm.ShowDialog()
+        if ($dialogResult -ne [System.Windows.Forms.DialogResult]::OK) { return }
+        if ($profileListBox.SelectedIndex -lt 0) { return }
+
+        # Extract profile name (strip description after " - ")
+        $selectedText = $profileListBox.SelectedItem.ToString()
+        $profileName = ($selectedText -split ' - ', 2)[0]
+
+        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assigning '$profileName' to $ip...`r`n")
+        try {
+            $profileObj = Get-Profile -Name $profileName
+            if (-not $profileObj) {
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Profile '$profileName' not found.`r`n")
+                return
+            }
+            $pushResult = Push-ProfileToServer -ServerIP $ip -Profile $profileObj
+            if ($pushResult.Success) {
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assigned '$profileName' to $ip successfully.`r`n")
+                $selectedRow.Cells["Status"].Value = "Configured"
+                $selectedRow.Cells["Status"].Style.ForeColor = $script:Theme.Primary
+                $lblScanStatus.Text = "Assigned '$profileName' to $ip"
+                $lblScanStatus.ForeColor = $script:Theme.Success
+            } else {
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assign to $ip failed: $($pushResult.Message)`r`n")
+                $lblScanStatus.Text = "Assign failed: $($pushResult.Message)"
+                $lblScanStatus.ForeColor = $script:Theme.Error
+            }
+        } catch {
+            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assign to $ip error: $_`r`n")
+            Write-AppLog -Message "Assign Profile to $ip failed: $_" -Level 'ERROR'
+            $lblScanStatus.Text = "Assign error: $_"
+            $lblScanStatus.ForeColor = $script:Theme.Error
+        }
+    })
+
     $serversCard.Controls.AddRange(@($dgvServers, $btnSelectAll, $btnDeselectAll,
-                                      $btnRefreshServers, $btnViewDetails))
+                                      $btnRefreshServers, $btnViewDetails, $btnAssignProfile))
 
     $scrollContainer.Controls.Add($serversCard)
 
     # ===================================================================
     # Card 3: Deploy Configuration
     # ===================================================================
-    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 560 -Width 790 -Height 250
+    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 560 -Width $cardWidth -Height 250
 
     # --- Profile selector ---
     $lblProfile = New-StyledLabel -Text "Profile:" -X 15 -Y 48 -FontSize 9
@@ -1187,7 +1329,7 @@ function New-DeployView {
     # Deployment progress bar
     $deployProgressBar = New-Object System.Windows.Forms.ProgressBar
     $deployProgressBar.Location = New-Object System.Drawing.Point(280, 125)
-    $deployProgressBar.Size = New-Object System.Drawing.Size(600, 22)
+    $deployProgressBar.Size = New-Object System.Drawing.Size(($cardWidth - 280 - 15), 22)
     $deployProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
     $deployProgressBar.Minimum = 0
     $deployProgressBar.Maximum = 100
@@ -1198,7 +1340,7 @@ function New-DeployView {
     # --- Deployment log (read-only multi-line textbox) ---
     $txtDeployLog = New-Object System.Windows.Forms.TextBox
     $txtDeployLog.Location = New-Object System.Drawing.Point(15, 160)
-    $txtDeployLog.Size = New-Object System.Drawing.Size(870, 75)
+    $txtDeployLog.Size = New-Object System.Drawing.Size(($cardWidth - 30), 75)
     $txtDeployLog.Multiline = $true
     $txtDeployLog.ReadOnly = $true
     $txtDeployLog.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical

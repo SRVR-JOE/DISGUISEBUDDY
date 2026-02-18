@@ -638,7 +638,6 @@ function New-NetworkView {
     # Layout constants
     # -----------------------------------------------------------------------
     $padding        = 20          # Outer padding from content panel edges
-    $cardWidth      = 430         # Width of each adapter card
     $cardHeight     = 295         # Height of each adapter card (compact but room for all fields)
     $cardGapX       = 20          # Horizontal gap between columns
     $cardGapY       = 15          # Vertical gap between rows
@@ -649,8 +648,9 @@ function New-NetworkView {
     $cols           = 2           # Number of columns
     $rows           = 3           # Number of rows
 
-    # Calculate total width needed for the grid
-    $gridTotalWidth  = ($cols * $cardWidth) + (($cols - 1) * $cardGapX) + ($padding * 2)
+    # Compute card width from available content panel width
+    $gridTotalWidth  = $ContentPanel.ClientSize.Width
+    $cardWidth       = [Math]::Floor(($gridTotalWidth - (2 * $padding) - (($cols - 1) * $cardGapX)) / $cols)
     $gridTotalHeight = $gridStartY + ($rows * $cardHeight) + (($rows - 1) * $cardGapY) + $padding
 
     # -----------------------------------------------------------------------
@@ -954,14 +954,14 @@ function New-NetworkView {
         $titleLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml($role.Color)
         $card.Controls.Add($titleLabel)
 
-        $statusBadge = New-StatusBadge -Text ' No Adapter ' -X 320 -Y 12 -Type 'Info'
+        $statusBadge = New-StatusBadge -Text ' No Adapter ' -X ($cardWidth - 110) -Y 12 -Type 'Info'
         $statusBadge.BackColor = $script:Theme.TextMuted
         $card.Controls.Add($statusBadge)
 
         # ---- Row tracking inside card (compact layout) ----
         $innerLeft   = 14         # Left margin for labels
         $inputLeft   = 110        # Left margin for inputs
-        $inputWidth  = 180        # Width of text inputs
+        $inputWidth  = $cardWidth - $inputLeft - 40   # Width of text inputs (responsive)
         $rowH        = 28         # Row height
         $currentY    = 38         # Start Y below title
 
@@ -969,7 +969,7 @@ function New-NetworkView {
         $adapterLabel = New-StyledLabel -Text 'Adapter:' -X $innerLeft -Y ($currentY + 2) -FontSize 9 -IsSecondary
         $card.Controls.Add($adapterLabel)
 
-        $adapterCombo = New-StyledComboBox -X $inputLeft -Y $currentY -Width ($inputWidth + 100) -Items @('(none)')
+        $adapterCombo = New-StyledComboBox -X $inputLeft -Y $currentY -Width ($cardWidth - $inputLeft - 20) -Items @('(none)')
         $adapterCombo.SelectedIndex = 0
 
         # When adapter selection changes, update status badge
@@ -1085,16 +1085,20 @@ function New-NetworkView {
         $currentY += $rowH + 2
 
         # ---- DNS 1 / DNS 2 on the same row ----
+        $dnsAvailableWidth = $cardWidth - $inputLeft - 20
+        $dnsFieldWidth = [Math]::Floor(($dnsAvailableWidth - 55) / 2)
+        $dns2X = $inputLeft + $dnsFieldWidth + 10
+
         $dns1Label = New-StyledLabel -Text 'DNS 1:' -X $innerLeft -Y ($currentY + 2) -FontSize 9 -IsSecondary
         $card.Controls.Add($dns1Label)
 
-        $dns1TextBox = New-StyledTextBox -X $inputLeft -Y $currentY -Width 100 -PlaceholderText 'DNS 1'
+        $dns1TextBox = New-StyledTextBox -X $inputLeft -Y $currentY -Width $dnsFieldWidth -PlaceholderText 'DNS 1'
         $card.Controls.Add($dns1TextBox)
 
-        $dns2Label = New-StyledLabel -Text 'DNS 2:' -X ($inputLeft + 110) -Y ($currentY + 2) -FontSize 9 -IsSecondary
+        $dns2Label = New-StyledLabel -Text 'DNS 2:' -X $dns2X -Y ($currentY + 2) -FontSize 9 -IsSecondary
         $card.Controls.Add($dns2Label)
 
-        $dns2TextBox = New-StyledTextBox -X ($inputLeft + 155) -Y $currentY -Width 100 -PlaceholderText 'DNS 2'
+        $dns2TextBox = New-StyledTextBox -X ($dns2X + 45) -Y $currentY -Width $dnsFieldWidth -PlaceholderText 'DNS 2'
         $card.Controls.Add($dns2TextBox)
         $currentY += $rowH + 6
 

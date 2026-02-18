@@ -187,7 +187,7 @@ function New-DashboardView {
     # ===================================================================
     # Section Header
     # ===================================================================
-    $sectionHeader = New-SectionHeader -Text "Dashboard" -X 20 -Y 15 -Width 790
+    $sectionHeader = New-SectionHeader -Text "Dashboard" -X 20 -Y 15 -Width ($ContentPanel.ClientSize.Width - 40)
 
     $subtitleLabel = New-StyledLabel -Text "DISGUISE BUDDY - Server Configuration Manager" `
         -X 20 -Y 55 -FontSize 9 -IsSecondary
@@ -199,10 +199,11 @@ function New-DashboardView {
     # Row 1: Quick Status Cards (4 cards in a row)
     # ===================================================================
     $cardY = 80
-    $cardWidth = 185
     $cardHeight = 100
     $cardSpacing = 10
     $cardStartX = 20
+    $availableWidth = $ContentPanel.ClientSize.Width - (2 * $cardStartX)
+    $cardWidth = [Math]::Floor(($availableWidth - (3 * $cardSpacing)) / 4)
 
     # --- Gather live data ---
     $currentHostname = Get-CurrentHostname
@@ -214,7 +215,7 @@ function New-DashboardView {
     $card1 = New-StyledCard -Title "Server Name" -X $cardStartX -Y $cardY `
         -Width $cardWidth -Height $cardHeight
 
-    $hostnameStatusBadge = New-StatusBadge -Text "LIVE" -X 135 -Y 15 -Type 'Success'
+    $hostnameStatusBadge = New-StatusBadge -Text "LIVE" -X ($cardWidth - 50) -Y 15 -Type 'Success'
     $card1.Controls.Add($hostnameStatusBadge)
 
     $lblHostnameValue = New-StyledLabel -Text $currentHostname -X 15 -Y 50 -FontSize 14 -IsBold
@@ -230,7 +231,7 @@ function New-DashboardView {
     $profileBadgeType = if ($activeProfile -eq "None") { 'Warning' } else { 'Info' }
     $profileBadgeText = if ($activeProfile -eq "None") { 'NONE' } else { 'ACTIVE' }
     $profileStatusBadge = New-StatusBadge -Text $profileBadgeText `
-        -X 135 -Y 15 -Type $profileBadgeType
+        -X ($cardWidth - 50) -Y 15 -Type $profileBadgeType
     $card2.Controls.Add($profileStatusBadge)
 
     $lblProfileValue = New-StyledLabel -Text $activeProfile -X 15 -Y 50 -FontSize 12 -IsBold
@@ -246,7 +247,7 @@ function New-DashboardView {
     $adapterBadgeType = if ($adapterCount -eq "N/A") { 'Warning' } else { 'Success' }
     $adapterBadgeText = if ($adapterCount -eq "N/A") { 'N/A' } else { 'OK' }
     $adapterStatusBadge = New-StatusBadge -Text $adapterBadgeText `
-        -X 135 -Y 15 -Type $adapterBadgeType
+        -X ($cardWidth - 50) -Y 15 -Type $adapterBadgeType
     $card3.Controls.Add($adapterStatusBadge)
 
     $lblAdapterValue = New-StyledLabel -Text $adapterCount -X 15 -Y 50 -FontSize 12 -IsBold
@@ -262,7 +263,7 @@ function New-DashboardView {
     $shareBadgeType = if ($shareCount -eq "N/A") { 'Warning' } else { 'Info' }
     $shareBadgeText = if ($shareCount -eq "N/A") { 'N/A' } else { 'ACTIVE' }
     $shareStatusBadge = New-StatusBadge -Text $shareBadgeText `
-        -X 135 -Y 15 -Type $shareBadgeType
+        -X ($cardWidth - 50) -Y 15 -Type $shareBadgeType
     $card4.Controls.Add($shareStatusBadge)
 
     $lblShareValue = New-StyledLabel -Text $shareCount -X 15 -Y 50 -FontSize 12 -IsBold
@@ -274,9 +275,9 @@ function New-DashboardView {
     # Row 2: Two-column layout
     # ===================================================================
     $row2Y = $cardY + $cardHeight + 20  # 200
-    $colWidth = 385
-    $colHeight = 300
     $colSpacing = 15
+    $colHeight = 300
+    $colWidth = [Math]::Floor(($ContentPanel.ClientSize.Width - (2 * 20) - $colSpacing) / 2)
 
     # --- Left Column: Network Overview ---
     $networkCard = New-StyledCard -Title "Network Overview" -X 20 -Y $row2Y `
@@ -491,7 +492,7 @@ function New-DashboardView {
     # ===================================================================
     $row3Y = $row2Y + $colHeight + 20  # 520
     $actionsCard = New-StyledCard -Title "Quick Actions" -X 20 -Y $row3Y `
-        -Width 790 -Height 80
+        -Width ($ContentPanel.ClientSize.Width - 40) -Height 80
 
     # Action buttons positioned in a horizontal row
     $actionBtnY = 40

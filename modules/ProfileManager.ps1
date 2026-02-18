@@ -1158,11 +1158,12 @@ function New-ProfilesView {
     $scrollPanel.Controls.Add($subtitleLabel)
 
     # ========================================================================
-    # LEFT COLUMN - Profile List (~350px)
+    # LEFT COLUMN - Profile List (~38% of available width)
     # ========================================================================
     $leftColumnX = 20
     $leftColumnY = 90
-    $leftColumnWidth = 350
+    $availableWidth = $ContentPanel.ClientSize.Width - 40  # 20px margin each side
+    $leftColumnWidth = [Math]::Floor($availableWidth * 0.38)
 
     $leftPanel = New-StyledPanel -X $leftColumnX -Y $leftColumnY `
         -Width $leftColumnWidth -Height 500 -IsCard
@@ -1347,11 +1348,11 @@ function New-ProfilesView {
     $scrollPanel.Controls.Add($leftPanel)
 
     # ========================================================================
-    # RIGHT COLUMN - Profile Detail View (~550px)
+    # RIGHT COLUMN - Profile Detail View (remaining width)
     # ========================================================================
     $rightColumnX = $leftColumnX + $leftColumnWidth + 20
     $rightColumnY = $leftColumnY
-    $rightColumnWidth = 550
+    $rightColumnWidth = $availableWidth - $leftColumnWidth - 20  # gap between columns
 
     $detailPanel = New-StyledPanel -X $rightColumnX -Y $rightColumnY `
         -Width $rightColumnWidth -Height 500 -IsCard
@@ -1545,11 +1546,19 @@ function Update-ProfileDetailPanel {
                        elseif ($adapter.IPAddress) { $script:Theme.Success }
                        else { $script:Theme.Warning }
 
+        # Compute adapter sub-element widths relative to card
+        $adapterCardInner = $innerWidth - 24  # 12px padding each side
+        $roleWidth = [Math]::Floor($adapterCardInner * 0.30)
+        $displayWidth = [Math]::Floor($adapterCardInner * 0.38)
+        $ipWidth = $adapterCardInner - $roleWidth - $displayWidth
+        $displayX = 12 + $roleWidth + 3
+        $ipX = $displayX + $displayWidth + 3
+
         # Role label (left-aligned)
         $roleLabel = New-Object System.Windows.Forms.Label
         $roleLabel.Text = $roleText
         $roleLabel.Location = New-Object System.Drawing.Point(12, $adapterY)
-        $roleLabel.Size = New-Object System.Drawing.Size(160, 20)
+        $roleLabel.Size = New-Object System.Drawing.Size($roleWidth, 20)
         $roleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
         $roleLabel.ForeColor = $script:Theme.Text
         $roleLabel.BackColor = [System.Drawing.Color]::Transparent
@@ -1558,8 +1567,8 @@ function Update-ProfileDetailPanel {
         # Display name label (center)
         $displayLabel = New-Object System.Windows.Forms.Label
         $displayLabel.Text = $adapter.DisplayName
-        $displayLabel.Location = New-Object System.Drawing.Point(175, $adapterY)
-        $displayLabel.Size = New-Object System.Drawing.Size(180, 20)
+        $displayLabel.Location = New-Object System.Drawing.Point($displayX, $adapterY)
+        $displayLabel.Size = New-Object System.Drawing.Size($displayWidth, 20)
         $displayLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8)
         $displayLabel.ForeColor = $script:Theme.TextSecondary
         $displayLabel.BackColor = [System.Drawing.Color]::Transparent
@@ -1568,8 +1577,8 @@ function Update-ProfileDetailPanel {
         # IP / status label (right-aligned)
         $ipLabel = New-Object System.Windows.Forms.Label
         $ipLabel.Text = if (-not $adapter.Enabled) { "Disabled" } else { $ipText }
-        $ipLabel.Location = New-Object System.Drawing.Point(360, $adapterY)
-        $ipLabel.Size = New-Object System.Drawing.Size(150, 20)
+        $ipLabel.Location = New-Object System.Drawing.Point($ipX, $adapterY)
+        $ipLabel.Size = New-Object System.Drawing.Size($ipWidth, 20)
         $ipLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
         $ipLabel.ForeColor = $statusColor
         $ipLabel.BackColor = [System.Drawing.Color]::Transparent
