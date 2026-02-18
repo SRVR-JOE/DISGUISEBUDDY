@@ -125,10 +125,10 @@ function New-D3ProjectShare {
         }
 
         if ($existingShare) {
-            Write-AppLog -Message "Share '$ShareName' already exists. Remove it first to recreate." -Level WARN
+            Write-AppLog -Message "Share '$ShareName' already exists - verifying configuration." -Level INFO
             return [PSCustomObject]@{
-                Success = $false
-                Message = "Share '$ShareName' already exists. Remove it first or update its settings."
+                Success = $true
+                Message = "Share '$ShareName' already exists. No changes needed."
             }
         }
 

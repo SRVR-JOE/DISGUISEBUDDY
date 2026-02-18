@@ -907,12 +907,33 @@ function New-NetworkView {
                     $adapter = $profileObj.NetworkAdapters[$i]
                     $controls = $script:CardControls[$i]
                     if (-not $controls) { continue }
-                    $controls.IPTextBox.Text      = $adapter.IPAddress
-                    $controls.SubnetTextBox.Text   = $adapter.SubnetMask
-                    $controls.GatewayTextBox.Text  = $adapter.Gateway
-                    $controls.DNS1TextBox.Text     = $adapter.DNS1
-                    $controls.DNS2TextBox.Text     = $adapter.DNS2
+                    # Set text and fix ForeColor so values don't appear dimmed as placeholder
+                    foreach ($pair in @(
+                        @($controls.IPTextBox, $adapter.IPAddress),
+                        @($controls.SubnetTextBox, $adapter.SubnetMask),
+                        @($controls.GatewayTextBox, $adapter.Gateway),
+                        @($controls.DNS1TextBox, $adapter.DNS1),
+                        @($controls.DNS2TextBox, $adapter.DNS2)
+                    )) {
+                        $tb = $pair[0]; $val = $pair[1]
+                        if ($val) {
+                            $tb.Text = $val
+                            $tb.ForeColor = $script:Theme.Text
+                        } else {
+                            # Restore placeholder
+                            $tb.Text = $tb.Tag
+                            $tb.ForeColor = $script:Theme.TextMuted
+                        }
+                    }
                     $controls.DHCPCheckBox.Checked = ($adapter.DHCP -eq $true)
+                    # Sync enabled state and adapter selection from profile
+                    if ($null -ne $adapter.Enabled) {
+                        $controls.EnabledCheckBox.Checked = ($adapter.Enabled -eq $true)
+                    }
+                    if ($adapter.AdapterName -and $controls.AdapterCombo) {
+                        $matchIdx = $controls.AdapterCombo.Items.IndexOf($adapter.AdapterName)
+                        if ($matchIdx -ge 0) { $controls.AdapterCombo.SelectedIndex = $matchIdx }
+                    }
                 }
                 Write-AppLog -Message "NetworkConfig: Loaded profile '$selectedName' into adapter cards" -Level 'INFO'
             }
