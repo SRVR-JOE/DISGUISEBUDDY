@@ -1,0 +1,111 @@
+# Theme.ps1 - DISGUISE BUDDY Theme System
+
+# Dark theme (default)
+$script:DarkTheme = @{
+    Background      = [System.Drawing.ColorTranslator]::FromHtml('#1E1E2E')
+    Surface         = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
+    SurfaceLight    = [System.Drawing.ColorTranslator]::FromHtml('#363650')
+    Primary         = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
+    PrimaryLight    = [System.Drawing.ColorTranslator]::FromHtml('#8B5CF6')
+    PrimaryDark     = [System.Drawing.ColorTranslator]::FromHtml('#6D28D9')
+    Accent          = [System.Drawing.ColorTranslator]::FromHtml('#06B6D4')
+    Text            = [System.Drawing.ColorTranslator]::FromHtml('#E2E8F0')
+    TextSecondary   = [System.Drawing.ColorTranslator]::FromHtml('#94A3B8')
+    TextMuted       = [System.Drawing.ColorTranslator]::FromHtml('#64748B')
+    Success         = [System.Drawing.ColorTranslator]::FromHtml('#10B981')
+    Warning         = [System.Drawing.ColorTranslator]::FromHtml('#F59E0B')
+    Error           = [System.Drawing.ColorTranslator]::FromHtml('#EF4444')
+    Border          = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
+    NavBackground   = [System.Drawing.ColorTranslator]::FromHtml('#16162A')
+    NavHover        = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
+    NavActive       = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
+    CardBackground  = [System.Drawing.ColorTranslator]::FromHtml('#232338')
+    InputBackground = [System.Drawing.ColorTranslator]::FromHtml('#1A1A2E')
+}
+
+# Light theme
+$script:LightTheme = @{
+    Background      = [System.Drawing.ColorTranslator]::FromHtml('#F8FAFC')
+    Surface         = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
+    SurfaceLight    = [System.Drawing.ColorTranslator]::FromHtml('#F1F5F9')
+    Primary         = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
+    PrimaryLight    = [System.Drawing.ColorTranslator]::FromHtml('#8B5CF6')
+    PrimaryDark     = [System.Drawing.ColorTranslator]::FromHtml('#6D28D9')
+    Accent          = [System.Drawing.ColorTranslator]::FromHtml('#0891B2')
+    Text            = [System.Drawing.ColorTranslator]::FromHtml('#1E293B')
+    TextSecondary   = [System.Drawing.ColorTranslator]::FromHtml('#475569')
+    TextMuted       = [System.Drawing.ColorTranslator]::FromHtml('#94A3B8')
+    Success         = [System.Drawing.ColorTranslator]::FromHtml('#059669')
+    Warning         = [System.Drawing.ColorTranslator]::FromHtml('#D97706')
+    Error           = [System.Drawing.ColorTranslator]::FromHtml('#DC2626')
+    Border          = [System.Drawing.ColorTranslator]::FromHtml('#E2E8F0')
+    NavBackground   = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
+    NavHover        = [System.Drawing.ColorTranslator]::FromHtml('#F1F5F9')
+    NavActive       = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
+    CardBackground  = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
+    InputBackground = [System.Drawing.ColorTranslator]::FromHtml('#F8FAFC')
+}
+
+# Current active theme
+$script:Theme = $script:DarkTheme
+
+function Set-AppTheme {
+    param([string]$ThemeName)
+    if ($ThemeName -eq 'Light') {
+        $script:Theme = $script:LightTheme
+    } else {
+        $script:Theme = $script:DarkTheme
+    }
+}
+
+function Get-AppTheme {
+    return $script:Theme
+}
+
+function Write-AppLog {
+    <#
+    .SYNOPSIS
+        Writes a timestamped log message to the DISGUISE BUDDY log file.
+    .DESCRIPTION
+        Appends a formatted log entry with timestamp and severity level to
+        logs/disguisebuddy.log relative to the script root directory.
+    .PARAMETER Message
+        The log message text to write.
+    .PARAMETER Level
+        The severity level of the log entry. Valid values: INFO, WARN, ERROR, DEBUG.
+        Defaults to INFO.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('INFO', 'WARN', 'ERROR', 'DEBUG')]
+        [string]$Level = 'INFO'
+    )
+
+    # Determine the script root directory
+    # $PSScriptRoot is set when the script is dot-sourced; fall back to current directory
+    $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot | Split-Path -Parent } else { $PWD.Path }
+
+    $logDir = Join-Path -Path $scriptRoot -ChildPath 'logs'
+    $logFile = Join-Path -Path $logDir -ChildPath 'disguisebuddy.log'
+
+    # Ensure the logs directory exists
+    if (-not (Test-Path -Path $logDir)) {
+        New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+    }
+
+    # Format the log entry with timestamp, level, and message
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
+    $logEntry = "[$timestamp] [$Level] $Message"
+
+    # Append the entry to the log file
+    try {
+        Add-Content -Path $logFile -Value $logEntry -Encoding UTF8
+    } catch {
+        # If logging fails, write to console as a fallback
+        Write-Warning "Failed to write to log file: $_"
+        Write-Warning "Log entry was: $logEntry"
+    }
+}
