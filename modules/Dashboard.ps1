@@ -308,7 +308,7 @@ function New-DashboardView {
     $colAdapterStatus.Name = "Status"
     $colAdapterStatus.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::Fill
 
-    $dgvAdapters.Columns.AddRange(@($colDot, $colRole, $colAdapterIP, $colAdapterStatus))
+    $dgvAdapters.Columns.AddRange([System.Windows.Forms.DataGridViewColumn[]]@($colDot, $colRole, $colAdapterIP, $colAdapterStatus))
     $dgvAdapters.ReadOnly = $true
 
     # Populate adapter rows

@@ -95,6 +95,7 @@ function New-StyledLabel {
     #>
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
         [string]$Text,
 
         [Parameter(Mandatory = $true)]
