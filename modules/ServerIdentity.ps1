@@ -142,6 +142,15 @@ function Test-ServerHostname {
         }
     }
 
+    # Reject reserved Windows device names
+    $reserved = @('CON','PRN','AUX','NUL','COM1','COM2','COM3','COM4','COM5','COM6','COM7','COM8','COM9','LPT1','LPT2','LPT3','LPT4','LPT5','LPT6','LPT7','LPT8','LPT9')
+    if ($reserved -contains $Name.ToUpper()) {
+        return [PSCustomObject]@{
+            IsValid      = $false
+            ErrorMessage = "Hostname '$Name' is a reserved Windows device name."
+        }
+    }
+
     # All checks passed
     return [PSCustomObject]@{
         IsValid      = $true
@@ -502,6 +511,15 @@ All active d3 sessions will be disconnected.
             $result = Set-ServerHostname -NewName $newName
 
             if ($result.Success) {
+                # Update UI to reflect the pending hostname change
+                $card = $this.Parent
+                $hostLabels = $card.Parent.Controls | ForEach-Object {
+                    $_.Controls | Where-Object { $_.Text -eq $env:COMPUTERNAME -and $_.Font.Size -ge 14 }
+                }
+                foreach ($lbl in $hostLabels) { if ($lbl) { $lbl.Text = "$newName (pending reboot)" } }
+                $currentLabel = $card.Controls | Where-Object { $_.Text -eq $env:COMPUTERNAME }
+                foreach ($lbl in $currentLabel) { if ($lbl) { $lbl.Text = "$newName (pending reboot)" } }
+
                 $restartMsg = "$($result.Message)`n`nWould you like to restart now?"
                 $restartChoice = [System.Windows.Forms.MessageBox]::Show(
                     $restartMsg,
