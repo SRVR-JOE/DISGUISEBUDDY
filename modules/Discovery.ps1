@@ -1116,7 +1116,7 @@ function New-DeployView {
 
     $chkCurrentCreds = New-StyledCheckBox -Text "Use Current Credentials" -X 525 -Y 83
     $chkCurrentCreds.Add_CheckedChanged({
-        $isChecked = $chkCurrentCreds.Checked
+        $isChecked = $this.Checked
         $txtUsername.Enabled = -not $isChecked
         $txtPassword.Enabled = -not $isChecked
         if ($isChecked) {
@@ -1478,8 +1478,8 @@ function New-DeployView {
 
     # Ensure cell value changes are committed immediately (needed for checkbox columns)
     $dgvServers.Add_CurrentCellDirtyStateChanged({
-        if ($dgvServers.IsCurrentCellDirty) {
-            $dgvServers.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
+        if ($this.IsCurrentCellDirty) {
+            $this.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
         }
     })
 

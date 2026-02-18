@@ -900,6 +900,29 @@ function New-NetworkView {
                                        -Width 200 `
                                        -Items $profileItems
     $profileCombo.SelectedIndex = 0
+    $profileCombo.Add_SelectedIndexChanged({
+        $selectedName = $this.SelectedItem
+        if (-not $selectedName -or $selectedName -eq 'Default d3 Config') { return }
+        try {
+            $profileObj = Get-Profile -Name $selectedName
+            if ($profileObj -and $profileObj.NetworkAdapters) {
+                for ($i = 0; $i -lt [Math]::Min($profileObj.NetworkAdapters.Count, 6); $i++) {
+                    $adapter = $profileObj.NetworkAdapters[$i]
+                    $controls = $script:CardControls[$i]
+                    if (-not $controls) { continue }
+                    $controls.IPTextBox.Text      = $adapter.IPAddress
+                    $controls.SubnetTextBox.Text   = $adapter.SubnetMask
+                    $controls.GatewayTextBox.Text  = $adapter.Gateway
+                    $controls.DNS1TextBox.Text     = $adapter.DNS1
+                    $controls.DNS2TextBox.Text     = $adapter.DNS2
+                    $controls.DHCPCheckBox.Checked = ($adapter.DHCP -eq $true -or [string]::IsNullOrWhiteSpace($adapter.IPAddress))
+                }
+                Write-AppLog -Message "NetworkConfig: Loaded profile '$selectedName' into adapter cards" -Level 'INFO'
+            }
+        } catch {
+            Write-AppLog -Message "NetworkConfig: Failed to load profile '$selectedName' - $_" -Level 'ERROR'
+        }
+    })
     $scrollPanel.Controls.Add($profileCombo)
 
     # -----------------------------------------------------------------------
@@ -1080,7 +1103,6 @@ function New-NetworkView {
 
         # ---- DHCP checkbox ----
         $dhcpCheck = New-StyledCheckBox -Text 'DHCP' -X $innerLeft -Y $currentY
-        $dhcpCheck.Checked = $role.DefaultDHCP
 
         # Store references to the fields we need to enable/disable
         # We use the Tag property of the checkbox to hold the role index
@@ -1168,23 +1190,8 @@ function New-NetworkView {
         $card.Controls.Add($applyBtn)
 
         # ---------------------------------------------------------------
-        # If DHCP is the default for this role, disable IP fields now
-        # ---------------------------------------------------------------
-        if ($role.DefaultDHCP) {
-            $ipTextBox.Enabled     = $false
-            $subTextBox.Enabled    = $false
-            $gwTextBox.Enabled     = $false
-            $dns1TextBox.Enabled   = $false
-            $dns2TextBox.Enabled   = $false
-            $ipTextBox.BackColor   = $script:Theme.SurfaceLight
-            $subTextBox.BackColor  = $script:Theme.SurfaceLight
-            $gwTextBox.BackColor   = $script:Theme.SurfaceLight
-            $dns1TextBox.BackColor = $script:Theme.SurfaceLight
-            $dns2TextBox.BackColor = $script:Theme.SurfaceLight
-        }
-
-        # ---------------------------------------------------------------
-        # Store control references for this role
+        # Store control references BEFORE setting Checked (which fires
+        # CheckedChanged and needs CardControls to be populated)
         # ---------------------------------------------------------------
         $script:CardControls[$roleIdx] = @{
             Card            = $card
@@ -1199,6 +1206,9 @@ function New-NetworkView {
             EnabledCheckBox = $enabledCheck
             ApplyButton     = $applyBtn
         }
+
+        # Set DHCP default — the CheckedChanged handler will disable fields
+        $dhcpCheck.Checked = $role.DefaultDHCP
 
         # Add card to scroll panel
         $scrollPanel.Controls.Add($card)
