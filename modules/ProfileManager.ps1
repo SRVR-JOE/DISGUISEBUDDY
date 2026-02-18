@@ -66,9 +66,9 @@ function New-DefaultProfile {
             [PSCustomObject]@{
                 Index       = 0
                 Role        = "d3Net"
-                DisplayName = "d3 Network"
-                AdapterName = ""
-                IPAddress   = "10.0.0.10"
+                DisplayName = "NIC A - d3 Network"
+                AdapterName = "NIC A"
+                IPAddress   = "192.168.10.10"
                 SubnetMask  = "255.255.255.0"
                 Gateway     = ""
                 DNS1        = ""
@@ -79,25 +79,25 @@ function New-DefaultProfile {
             },
             [PSCustomObject]@{
                 Index       = 1
-                Role        = "Media"
-                DisplayName = "Media Network"
-                AdapterName = ""
-                IPAddress   = "10.0.1.10"
-                SubnetMask  = "255.255.255.0"
+                Role        = "sACN"
+                DisplayName = "NIC B - Lighting (sACN/Art-Net)"
+                AdapterName = "NIC B"
+                IPAddress   = ""
+                SubnetMask  = ""
                 Gateway     = ""
                 DNS1        = ""
                 DNS2        = ""
-                DHCP        = $false
+                DHCP        = $true
                 VLANID      = $null
                 Enabled     = $true
             },
             [PSCustomObject]@{
                 Index       = 2
-                Role        = "sACN"
-                DisplayName = "Lighting (sACN/Art-Net)"
-                AdapterName = ""
-                IPAddress   = "2.0.0.10"
-                SubnetMask  = "255.0.0.0"
+                Role        = "Media"
+                DisplayName = "NIC C - Media Network"
+                AdapterName = "NIC C"
+                IPAddress   = "192.168.20.10"
+                SubnetMask  = "255.255.255.0"
                 Gateway     = ""
                 DNS1        = ""
                 DNS2        = ""
@@ -108,41 +108,41 @@ function New-DefaultProfile {
             [PSCustomObject]@{
                 Index       = 3
                 Role        = "NDI"
-                DisplayName = "NDI Video"
-                AdapterName = ""
-                IPAddress   = "10.0.3.10"
-                SubnetMask  = "255.255.255.0"
+                DisplayName = "NIC D - NDI Video"
+                AdapterName = "NIC D"
+                IPAddress   = ""
+                SubnetMask  = ""
                 Gateway     = ""
                 DNS1        = ""
                 DNS2        = ""
-                DHCP        = $false
+                DHCP        = $true
                 VLANID      = $null
                 Enabled     = $true
             },
             [PSCustomObject]@{
                 Index       = 4
-                Role        = "Control"
-                DisplayName = "Control (OSC/Automation)"
-                AdapterName = ""
-                IPAddress   = "10.0.4.10"
-                SubnetMask  = "255.255.255.0"
+                Role        = "100G"
+                DisplayName = "NIC E - 100G"
+                AdapterName = "NIC E"
+                IPAddress   = ""
+                SubnetMask  = ""
                 Gateway     = ""
                 DNS1        = ""
                 DNS2        = ""
-                DHCP        = $false
+                DHCP        = $true
                 VLANID      = $null
                 Enabled     = $true
             },
             [PSCustomObject]@{
                 Index       = 5
-                Role        = "Internet"
-                DisplayName = "Internet / Management"
-                AdapterName = ""
+                Role        = "100G"
+                DisplayName = "NIC F - 100G"
+                AdapterName = "NIC F"
                 IPAddress   = ""
                 SubnetMask  = ""
                 Gateway     = ""
-                DNS1        = "8.8.8.8"
-                DNS2        = "8.8.4.4"
+                DNS1        = ""
+                DNS2        = ""
                 DHCP        = $true
                 VLANID      = $null
                 Enabled     = $true
@@ -763,12 +763,12 @@ function Get-CurrentSystemProfile {
 
     # Define the expected adapter roles and their indices
     $roleDefinitions = @(
-        @{ Index = 0; Role = "d3Net";    DisplayName = "d3 Network" },
-        @{ Index = 1; Role = "Media";    DisplayName = "Media Network" },
-        @{ Index = 2; Role = "sACN";     DisplayName = "Lighting (sACN/Art-Net)" },
-        @{ Index = 3; Role = "NDI";      DisplayName = "NDI Video" },
-        @{ Index = 4; Role = "Control";  DisplayName = "Control (OSC/Automation)" },
-        @{ Index = 5; Role = "Internet"; DisplayName = "Internet / Management" }
+        @{ Index = 0; Role = "d3Net"; DisplayName = "NIC A - d3 Network" },
+        @{ Index = 1; Role = "sACN";  DisplayName = "NIC B - Lighting (sACN/Art-Net)" },
+        @{ Index = 2; Role = "Media"; DisplayName = "NIC C - Media Network" },
+        @{ Index = 3; Role = "NDI";   DisplayName = "NIC D - NDI Video" },
+        @{ Index = 4; Role = "100G";  DisplayName = "NIC E - 100G" },
+        @{ Index = 5; Role = "100G";  DisplayName = "NIC F - 100G" }
     )
 
     # Try to read physical network adapters from the system

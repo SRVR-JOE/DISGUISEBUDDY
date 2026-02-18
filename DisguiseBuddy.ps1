@@ -47,6 +47,7 @@ $modulesPath = Join-Path -Path $PSScriptRoot -ChildPath 'modules'
 . (Join-Path $modulesPath 'SMBConfig.ps1')
 . (Join-Path $modulesPath 'ServerIdentity.ps1')
 . (Join-Path $modulesPath 'Discovery.ps1')
+. (Join-Path $modulesPath 'SoftwareInstaller.ps1')
 . (Join-Path $modulesPath 'Dashboard.ps1')
 
 Write-AppLog -Message 'DISGUISE BUDDY starting up' -Level 'INFO'
@@ -186,6 +187,7 @@ $navItems = @(
     @{ Name = 'SMB';            Display = 'SMB Sharing';         Symbol = [char]0x25A1 }  # □
     @{ Name = 'ServerIdentity'; Display = 'Server Identity';     Symbol = [char]0x25B6 }  # ▶
     @{ Name = 'Deploy';         Display = 'Network Deploy';      Symbol = [char]0x25C7 }  # ◇
+    @{ Name = 'Software';       Display = 'Software Installer';  Symbol = [char]0x25B2 }  # ▲
 )
 
 # Store nav buttons for state management
@@ -284,6 +286,7 @@ function Set-ActiveView {
         'SMB'            { New-SMBView -ContentPanel $innerPanel }
         'ServerIdentity' { New-ServerIdentityView -ContentPanel $innerPanel }
         'Deploy'         { New-DeployView -ContentPanel $innerPanel }
+        'Software'       { New-SoftwareInstallerView -ContentPanel $innerPanel }
     }
 
     $contentPanel.ResumeLayout()

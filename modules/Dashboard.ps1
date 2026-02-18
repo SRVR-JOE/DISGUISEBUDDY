@@ -72,14 +72,14 @@ function Get-AdapterSummaryData {
         Falls back to placeholder data on non-Windows systems.
     #>
 
-    # Define the 6 standard disguise adapter roles
+    # Define the 6 standard disguise adapter roles (NIC A-F)
     $roles = @(
-        @{ Role = "Management"; Color = "Blue" },
-        @{ Role = "d3Net";      Color = "Purple" },
-        @{ Role = "Media";      Color = "Green" },
-        @{ Role = "NDI";        Color = "Cyan" },
-        @{ Role = "KVM";        Color = "Orange" },
-        @{ Role = "Backup";     Color = "Gray" }
+        @{ Role = "NIC A - d3Net"; Color = "Purple" },
+        @{ Role = "NIC B - sACN";  Color = "Orange" },
+        @{ Role = "NIC C - Media"; Color = "Cyan" },
+        @{ Role = "NIC D - NDI";   Color = "Green" },
+        @{ Role = "NIC E - 100G";  Color = "Blue" },
+        @{ Role = "NIC F - 100G";  Color = "Gray" }
     )
 
     $summaryData = [System.Collections.ArrayList]::new()

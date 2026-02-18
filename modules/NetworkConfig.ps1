@@ -28,10 +28,10 @@ $script:DetectedAdapters = @()
 $script:AdapterRoles = @(
     @{
         Index      = 0
-        RoleName   = 'd3 Network'
+        RoleName   = 'NIC A - d3 Network'
         ShortName  = 'd3Net'
         Color      = '#7C3AED'   # Purple
-        DefaultIP  = '10.0.0.10'
+        DefaultIP  = '192.168.10.10'
         DefaultSub = '255.255.255.0'
         DefaultGW  = ''
         DefaultDNS1 = ''
@@ -40,23 +40,23 @@ $script:AdapterRoles = @(
     }
     @{
         Index      = 1
-        RoleName   = 'Media'
-        ShortName  = 'Media'
-        Color      = '#06B6D4'   # Cyan
-        DefaultIP  = '10.0.1.10'
-        DefaultSub = '255.255.255.0'
+        RoleName   = 'NIC B - sACN / Art-Net'
+        ShortName  = 'sACN'
+        Color      = '#F59E0B'   # Amber
+        DefaultIP  = ''
+        DefaultSub = ''
         DefaultGW  = ''
         DefaultDNS1 = ''
         DefaultDNS2 = ''
-        DefaultDHCP = $false
+        DefaultDHCP = $true
     }
     @{
         Index      = 2
-        RoleName   = 'sACN / Art-Net'
-        ShortName  = 'sACN'
-        Color      = '#F59E0B'   # Amber
-        DefaultIP  = '2.0.0.10'
-        DefaultSub = '255.0.0.0'
+        RoleName   = 'NIC C - Media'
+        ShortName  = 'Media'
+        Color      = '#06B6D4'   # Cyan
+        DefaultIP  = '192.168.20.10'
+        DefaultSub = '255.255.255.0'
         DefaultGW  = ''
         DefaultDNS1 = ''
         DefaultDNS2 = ''
@@ -64,32 +64,32 @@ $script:AdapterRoles = @(
     }
     @{
         Index      = 3
-        RoleName   = 'NDI'
+        RoleName   = 'NIC D - NDI Video'
         ShortName  = 'NDI'
         Color      = '#10B981'   # Green
-        DefaultIP  = '10.0.3.10'
-        DefaultSub = '255.255.255.0'
+        DefaultIP  = ''
+        DefaultSub = ''
         DefaultGW  = ''
         DefaultDNS1 = ''
         DefaultDNS2 = ''
-        DefaultDHCP = $false
+        DefaultDHCP = $true
     }
     @{
         Index      = 4
-        RoleName   = 'Control'
-        ShortName  = 'Control'
+        RoleName   = 'NIC E - 100G'
+        ShortName  = '100G'
         Color      = '#3B82F6'   # Blue
-        DefaultIP  = '10.0.4.10'
-        DefaultSub = '255.255.255.0'
+        DefaultIP  = ''
+        DefaultSub = ''
         DefaultGW  = ''
         DefaultDNS1 = ''
         DefaultDNS2 = ''
-        DefaultDHCP = $false
+        DefaultDHCP = $true
     }
     @{
         Index      = 5
-        RoleName   = 'Internet / Mgmt'
-        ShortName  = 'Internet'
+        RoleName   = 'NIC F - 100G'
+        ShortName  = '100G'
         Color      = '#64748B'   # Gray
         DefaultIP  = ''
         DefaultSub = ''
