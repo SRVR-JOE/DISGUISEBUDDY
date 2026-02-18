@@ -101,6 +101,20 @@ function Write-AppLog {
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
     $logEntry = "[$timestamp] [$Level] $Message"
 
+    # Rotate log if it exceeds 10 MB
+    if (Test-Path -Path $logFile) {
+        $logSize = (Get-Item -Path $logFile -ErrorAction SilentlyContinue).Length
+        if ($logSize -gt 10MB) {
+            $archivePath = "$logFile.1"
+            try {
+                if (Test-Path $archivePath) { Remove-Item $archivePath -Force }
+                Rename-Item -Path $logFile -NewName (Split-Path $archivePath -Leaf) -Force
+            } catch {
+                # Rotation failed; continue writing to current log
+            }
+        }
+    }
+
     # Append the entry to the log file
     # Retry with short delay to handle transient file lock contention
     $maxRetries = 2

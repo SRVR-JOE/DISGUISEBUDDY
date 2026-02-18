@@ -92,6 +92,17 @@ function New-D3ProjectShare {
         [string]$Permissions = 'Everyone:Full'
     )
 
+    # Validate share name
+    if ([string]::IsNullOrWhiteSpace($ShareName)) {
+        return [PSCustomObject]@{ Success = $false; Message = "Share name cannot be empty." }
+    }
+    if ($ShareName.Length -gt 80) {
+        return [PSCustomObject]@{ Success = $false; Message = "Share name is too long (max 80 characters)." }
+    }
+    if ($ShareName -match '[\\/:*?"<>|]') {
+        return [PSCustomObject]@{ Success = $false; Message = "Share name contains invalid characters." }
+    }
+
     try {
         # Validate and create path if needed
         if (-not (Test-Path -Path $LocalPath)) {

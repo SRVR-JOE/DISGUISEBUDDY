@@ -182,12 +182,10 @@ function Install-Software {
         Write-AppLog -Message "Install-Software: Starting $InstallerPath $Arguments" -Level 'INFO'
 
         if ($extension -eq '.msi' -or $extension -eq '.msp') {
-            # Use msiexec for MSI/MSP files - build argument list as array for safety
-            $msiArgs = @('/i', "`"$InstallerPath`"")
-            if ($Arguments) {
-                $msiArgs += $Arguments -split '\s+'
-            }
-            $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs `
+            # Use msiexec for MSI/MSP files - pass as single string to preserve quoted paths
+            $msiArgString = "/i `"$InstallerPath`""
+            if ($Arguments) { $msiArgString += " $Arguments" }
+            $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgString `
                 -PassThru -ErrorAction Stop
         }
         elseif ($extension -eq '.msix') {

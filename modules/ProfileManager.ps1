@@ -270,10 +270,20 @@ function Save-Profile {
 
     try {
         $json = $Profile | ConvertTo-Json -Depth 10
-        Set-Content -Path $filePath -Value $json -Encoding UTF8 -Force
+        # Atomic write: write to temp file first, then rename to avoid corruption
+        $tempFile = "$filePath.tmp"
+        Set-Content -Path $tempFile -Value $json -Encoding UTF8 -Force
+        if (Test-Path -Path $filePath) {
+            Remove-Item -Path $filePath -Force
+        }
+        Rename-Item -Path $tempFile -NewName (Split-Path $filePath -Leaf) -Force
         Write-AppLog "Saved profile '$($Profile.Name)' to '$filePath'" -Level 'INFO'
     }
     catch {
+        # Clean up temp file if it exists
+        if (Test-Path -Path "$filePath.tmp") {
+            Remove-Item -Path "$filePath.tmp" -Force -ErrorAction SilentlyContinue
+        }
         Write-AppLog "Failed to save profile '$($Profile.Name)': $_" -Level 'ERROR'
         throw "Failed to save profile: $_"
     }

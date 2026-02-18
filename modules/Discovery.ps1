@@ -60,7 +60,9 @@ function Find-DisguiseServers {
     # -----------------------------------------------------------------------
     # Strategy 1 & 2: Parallel TCP port scan + ping sweep using runspaces
     # -----------------------------------------------------------------------
-    $runspacePool = [System.Management.Automation.Runspaces.RunspacePool]::CreateRunspacePool(1, 50)
+    # Limit concurrency to avoid overwhelming the network during live events
+    $maxConcurrency = [Math]::Min(20, $totalIPs)
+    $runspacePool = [System.Management.Automation.Runspaces.RunspacePool]::CreateRunspacePool(1, $maxConcurrency)
     $runspacePool.Open()
 
     $runspaceJobs = [System.Collections.ArrayList]::new()
@@ -106,19 +108,20 @@ function Find-DisguiseServers {
         $result.ResponseTimeMs = [int]$stopwatch.Elapsed.TotalMilliseconds
 
         # --- Ping Sweep ---
+        $ping = $null
         try {
             $ping = New-Object System.Net.NetworkInformation.Ping
             $pingReply = $ping.Send($IPAddress, $Timeout)
             if ($pingReply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
                 $result.PingSuccess = $true
-                # Use ping round-trip time if it is better than TCP timing
                 if ($pingReply.RoundtripTime -gt 0) {
                     $result.ResponseTimeMs = [Math]::Min($result.ResponseTimeMs, [int]$pingReply.RoundtripTime)
                 }
             }
-            $ping.Dispose()
         } catch {
             # Ping failed - host may still be reachable via TCP
+        } finally {
+            if ($ping) { $ping.Dispose() }
         }
 
         # --- Hostname Resolution ---
@@ -1267,12 +1270,13 @@ function New-DeployView {
                                             $statusText, $apiText, $portsText, $responseText)
             }
 
-            # Apply row coloring based on status
+            # Apply row coloring based on status (reuse single font to avoid GDI leaks)
+            $boldStatusFont = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
             foreach ($row in $dgvServers.Rows) {
                 $statusVal = $row.Cells["Status"].Value
                 if ($statusVal -eq "Disguise") {
                     $row.Cells["Status"].Style.ForeColor = $script:Theme.Success
-                    $row.Cells["Status"].Style.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
+                    $row.Cells["Status"].Style.Font = $boldStatusFont
                 } elseif ($statusVal -eq "Online") {
                     $row.Cells["Status"].Style.ForeColor = $script:Theme.Warning
                 }
@@ -1356,12 +1360,13 @@ function New-DeployView {
                                             $statusText, $apiText, $portsText, "N/A")
             }
 
-            # Apply row coloring
+            # Apply row coloring (reuse single font)
+            $boldFont = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
             foreach ($row in $dgvServers.Rows) {
                 $statusVal = $row.Cells["Status"].Value
                 if ($statusVal -eq "Disguise") {
                     $row.Cells["Status"].Style.ForeColor = $script:Theme.Success
-                    $row.Cells["Status"].Style.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
+                    $row.Cells["Status"].Style.Font = $boldFont
                 } elseif ($statusVal -eq "Online") {
                     $row.Cells["Status"].Style.ForeColor = $script:Theme.Warning
                 }

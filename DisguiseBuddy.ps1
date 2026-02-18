@@ -32,6 +32,25 @@ try {
 }
 
 # ============================================================================
+# ADMIN PRIVILEGE CHECK
+# ============================================================================
+try {
+    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal(
+        [Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "DISGUISE BUDDY requires Administrator privileges to configure network adapters, " +
+            "hostname, and SMB shares.`n`nPlease re-launch as Administrator.",
+            "Administrator Required",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+    }
+} catch {
+    # Non-Windows or identity check failed -- continue silently
+}
+
+# ============================================================================
 # DOT-SOURCE MODULES (order matters: Theme -> UIComponents -> everything else)
 # ============================================================================
 
