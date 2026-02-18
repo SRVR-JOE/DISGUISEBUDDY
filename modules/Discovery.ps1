@@ -501,6 +501,13 @@ function Push-ProfileToServer {
 
     [void]$result.Steps.Add($hostnameStep)
 
+    # Abort deployment if a critical step fails
+    if (-not $hostnameStep.Success) {
+        $result.ErrorMessage = "Aborting: Hostname step failed - $($hostnameStep.Message)"
+        Write-AppLog -Message "Push-ProfileToServer: Aborting deployment to $ServerIP after hostname failure" -Level 'ERROR'
+        return $result
+    }
+
     # -----------------------------------------------------------------------
     # Step 2: Configure Network Adapters
     # -----------------------------------------------------------------------
@@ -522,20 +529,21 @@ function Push-ProfileToServer {
                 $results = @()
                 foreach ($adapter in $AdapterConfigs) {
                     try {
-                        # Skip disabled adapters
-                        if ($adapter.Enabled -eq $false) {
+                        # Skip disabled adapters (safe for deserialized objects)
+                        if (-not $adapter.Enabled) {
                             $results += "SKIP: $($adapter.Role) disabled"
                             continue
                         }
 
-                        # Find the adapter by name or role
+                        # Find the adapter by name, description, or interface index
                         $netAdapter = Get-NetAdapter | Where-Object {
                             $_.Name -eq $adapter.AdapterName -or
-                            $_.InterfaceDescription -match $adapter.Role
+                            $_.InterfaceDescription -eq $adapter.AdapterName -or
+                            ($adapter.InterfaceIndex -and $_.InterfaceIndex -eq $adapter.InterfaceIndex)
                         } | Select-Object -First 1
 
                         if (-not $netAdapter) {
-                            $results += "WARN: Adapter for role '$($adapter.Role)' not found"
+                            $results += "WARN: Adapter '$($adapter.AdapterName)' (role: $($adapter.Role)) not found on target"
                             continue
                         }
 
@@ -617,6 +625,13 @@ function Push-ProfileToServer {
     }
 
     [void]$result.Steps.Add($networkStep)
+
+    # Abort deployment if network step fails (server may be unreachable for SMB)
+    if (-not $networkStep.Success) {
+        $result.ErrorMessage = "Aborting: Network config step failed - $($networkStep.Message)"
+        Write-AppLog -Message "Push-ProfileToServer: Aborting deployment to $ServerIP after network failure" -Level 'ERROR'
+        return $result
+    }
 
     # -----------------------------------------------------------------------
     # Step 3: Configure SMB Shares
@@ -1060,7 +1075,7 @@ function New-DeployView {
                                 $row.Cells["Status"].Value = "Configured"
                                 $row.Cells["Status"].Style.ForeColor = $script:Theme.Primary
                             } else {
-                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assign to $ip failed: $($pushResult.Message)`r`n")
+                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assign to $ip failed: $($pushResult.ErrorMessage)`r`n")
                             }
                         } catch {
                             $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assign to $ip error: $_`r`n")
@@ -1197,9 +1212,10 @@ function New-DeployView {
         $profileListBox.Font = New-Object System.Drawing.Font('Segoe UI', 10)
         $profileListBox.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
 
+        $pickerProfiles = @()
         try {
-            $profiles = Get-AllProfiles
-            foreach ($p in $profiles) {
+            $pickerProfiles = @(Get-AllProfiles)
+            foreach ($p in $pickerProfiles) {
                 $desc = if ($p.Description) { " - $($p.Description)" } else { "" }
                 $profileListBox.Items.Add("$($p.Name)$desc") | Out-Null
             }
@@ -1238,13 +1254,12 @@ function New-DeployView {
         if ($dialogResult -ne [System.Windows.Forms.DialogResult]::OK) { return }
         if ($profileListBox.SelectedIndex -lt 0) { return }
 
-        # Extract profile name (strip description after " - ")
-        $selectedText = $profileListBox.SelectedItem.ToString()
-        $profileName = ($selectedText -split ' - ', 2)[0]
+        # Get profile directly by index (avoids name-splitting issues)
+        $profileObj = $pickerProfiles[$profileListBox.SelectedIndex]
+        $profileName = $profileObj.Name
 
         $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assigning '$profileName' to $ip...`r`n")
         try {
-            $profileObj = Get-Profile -Name $profileName
             if (-not $profileObj) {
                 $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Profile '$profileName' not found.`r`n")
                 return
@@ -1257,8 +1272,8 @@ function New-DeployView {
                 $lblScanStatus.Text = "Assigned '$profileName' to $ip"
                 $lblScanStatus.ForeColor = $script:Theme.Success
             } else {
-                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assign to $ip failed: $($pushResult.Message)`r`n")
-                $lblScanStatus.Text = "Assign failed: $($pushResult.Message)"
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Assign to $ip failed: $($pushResult.ErrorMessage)`r`n")
+                $lblScanStatus.Text = "Assign failed: $($pushResult.ErrorMessage)"
                 $lblScanStatus.ForeColor = $script:Theme.Error
             }
         } catch {
@@ -1610,7 +1625,7 @@ function New-DeployView {
             $currentIdx++
             $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] [$currentIdx/$totalServers] Deploying to $serverIP...`r`n")
             $txtDeployLog.Refresh()
-            $deployProgressBar.Value = [int](($currentIdx / $totalServers) * 100)
+            $deployProgressBar.Value = [int]((($currentIdx - 1) / $totalServers) * 100)
             $deployProgressBar.Refresh()
             [System.Windows.Forms.Application]::DoEvents()
 

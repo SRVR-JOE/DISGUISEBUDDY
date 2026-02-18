@@ -219,7 +219,8 @@ function Get-Profile {
     )
 
     $profilesDir = Get-ProfilesDirectory
-    $filePath = Join-Path -Path $profilesDir -ChildPath "$Name.json"
+    $safeName = $Name -replace '[\\/:*?"<>|]', '_'
+    $filePath = Join-Path -Path $profilesDir -ChildPath "$safeName.json"
 
     if (-not (Test-Path -Path $filePath)) {
         Write-AppLog "Profile not found: '$Name'" -Level 'WARN'
@@ -426,6 +427,15 @@ function Import-ProfileFromFile {
             [System.Windows.Forms.MessageBoxIcon]::Warning
         ) | Out-Null
         return $null
+    }
+
+    if (-not $importedProfile.SMBSettings) {
+        # Initialize with empty SMBSettings to prevent null reference errors
+        $importedProfile | Add-Member -NotePropertyName 'SMBSettings' -NotePropertyValue ([PSCustomObject]@{
+            ShareD3Projects = $false
+            D3ProjectsPath  = 'D:\d3 Projects'
+            AdditionalShares = @()
+        }) -Force
     }
 
     # Check if a profile with this name already exists
