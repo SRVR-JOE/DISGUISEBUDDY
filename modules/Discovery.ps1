@@ -740,6 +740,185 @@ function Push-ProfileToServer {
     [void]$result.Steps.Add($smbStep)
 
     # -----------------------------------------------------------------------
+    # Step 4: Install Software from Folder (if enabled in profile)
+    # -----------------------------------------------------------------------
+    $softwareStep = [PSCustomObject]@{
+        StepName = 'Install Software'
+        Success  = $false
+        Message  = ''
+    }
+
+    try {
+        $swSettings = $Profile.SoftwareSettings
+        if (-not $swSettings -or -not $swSettings.AutoInstall) {
+            $softwareStep.Message = 'Skipped - auto-install disabled in profile'
+            $softwareStep.Success = $true
+        } else {
+            $softwareScriptBlock = {
+                param($SWConfig)
+                $results = @()
+                $installedCount = 0
+                $failedCount = 0
+                try {
+                    $folderPath = $SWConfig.FolderPath
+                    if (-not $folderPath) { $folderPath = 'D:\Software' }
+                    if (-not (Test-Path $folderPath)) {
+                        return @{ Success = $true; Message = "Software folder '$folderPath' not found - skipping" }
+                    }
+
+                    $extensions = @('*.exe', '*.msi', '*.msp', '*.msix')
+                    $recurse = [bool]$SWConfig.Recurse
+                    $installers = @()
+                    foreach ($ext in $extensions) {
+                        if ($recurse) {
+                            $installers += Get-ChildItem -Path $folderPath -Filter $ext -Recurse -ErrorAction SilentlyContinue
+                        } else {
+                            $installers += Get-ChildItem -Path $folderPath -Filter $ext -ErrorAction SilentlyContinue
+                        }
+                    }
+
+                    if ($installers.Count -eq 0) {
+                        return @{ Success = $true; Message = "No installers found in '$folderPath'" }
+                    }
+
+                    $parallel = [bool]$SWConfig.ParallelInstall
+
+                    # Determine silent args per installer type
+                    $getSilentArgs = {
+                        param($filePath)
+                        $ext = [System.IO.Path]::GetExtension($filePath).ToLower()
+                        switch ($ext) {
+                            '.msi'  { return '/quiet /norestart' }
+                            '.msp'  { return '/quiet /norestart' }
+                            '.msix' { return '' }
+                            default { return '/S /VERYSILENT /quiet /norestart' }
+                        }
+                    }
+
+                    if ($parallel) {
+                        # Launch all at once
+                        $procs = @()
+                        foreach ($inst in $installers) {
+                            $ext = $inst.Extension.ToLower()
+                            $silentArgs = & $getSilentArgs $inst.FullName
+                            try {
+                                if ($ext -eq '.msi' -or $ext -eq '.msp') {
+                                    $msiFlag = if ($ext -eq '.msp') { '/p' } else { '/i' }
+                                    $proc = Start-Process -FilePath 'msiexec.exe' `
+                                        -ArgumentList "$msiFlag `"$($inst.FullName)`" $silentArgs" `
+                                        -PassThru -ErrorAction Stop
+                                    $procs += @{ Name = $inst.Name; Process = $proc }
+                                }
+                                elseif ($ext -eq '.msix') {
+                                    try {
+                                        Add-AppxPackage -Path $inst.FullName -ErrorAction Stop
+                                        $installedCount++
+                                        $results += "OK: $($inst.Name)"
+                                    } catch {
+                                        $failedCount++
+                                        $results += "FAIL: $($inst.Name) - $_"
+                                    }
+                                }
+                                else {
+                                    $proc = Start-Process -FilePath $inst.FullName `
+                                        -ArgumentList $silentArgs -PassThru -ErrorAction Stop
+                                    $procs += @{ Name = $inst.Name; Process = $proc }
+                                }
+                            } catch {
+                                $failedCount++
+                                $results += "FAIL: $($inst.Name) - $_"
+                            }
+                        }
+                        # Wait for all
+                        foreach ($entry in $procs) {
+                            try {
+                                $exited = $entry.Process.WaitForExit(600000)
+                                if (-not $exited) {
+                                    $failedCount++
+                                    $results += "FAIL: $($entry.Name) - timeout"
+                                }
+                                elseif ($entry.Process.ExitCode -eq 0 -or $entry.Process.ExitCode -eq 3010) {
+                                    $installedCount++
+                                    $results += "OK: $($entry.Name)"
+                                }
+                                else {
+                                    $failedCount++
+                                    $results += "FAIL: $($entry.Name) - exit $($entry.Process.ExitCode)"
+                                }
+                            } catch {
+                                $failedCount++
+                                $results += "FAIL: $($entry.Name) - $_"
+                            }
+                        }
+                    }
+                    else {
+                        # Sequential
+                        foreach ($inst in $installers) {
+                            $ext = $inst.Extension.ToLower()
+                            $silentArgs = & $getSilentArgs $inst.FullName
+                            try {
+                                if ($ext -eq '.msi' -or $ext -eq '.msp') {
+                                    $msiFlag = if ($ext -eq '.msp') { '/p' } else { '/i' }
+                                    $proc = Start-Process -FilePath 'msiexec.exe' `
+                                        -ArgumentList "$msiFlag `"$($inst.FullName)`" $silentArgs" `
+                                        -Wait -PassThru -ErrorAction Stop
+                                }
+                                elseif ($ext -eq '.msix') {
+                                    Add-AppxPackage -Path $inst.FullName -ErrorAction Stop
+                                    $installedCount++
+                                    $results += "OK: $($inst.Name)"
+                                    continue
+                                }
+                                else {
+                                    $proc = Start-Process -FilePath $inst.FullName `
+                                        -ArgumentList $silentArgs -Wait -PassThru -ErrorAction Stop
+                                }
+                                if ($proc.ExitCode -eq 0 -or $proc.ExitCode -eq 3010) {
+                                    $installedCount++
+                                    $results += "OK: $($inst.Name)"
+                                } else {
+                                    $failedCount++
+                                    $results += "FAIL: $($inst.Name) - exit $($proc.ExitCode)"
+                                }
+                            } catch {
+                                $failedCount++
+                                $results += "FAIL: $($inst.Name) - $_"
+                            }
+                        }
+                    }
+
+                    return @{
+                        Success = ($failedCount -eq 0)
+                        Message = "$installedCount installed, $failedCount failed; $($results -join '; ')"
+                    }
+                } catch {
+                    return @{ Success = $false; Message = "Software install error: $_" }
+                }
+            }
+
+            $invokeParams = @{
+                ComputerName = $ServerIP
+                ScriptBlock  = $softwareScriptBlock
+                ArgumentList = @($swSettings)
+                ErrorAction  = 'Stop'
+            }
+            if ($Credential) {
+                $invokeParams.Credential = $Credential
+            }
+
+            $remoteResult = Invoke-Command @invokeParams
+            $softwareStep.Success = $remoteResult.Success
+            $softwareStep.Message = $remoteResult.Message
+        }
+    } catch {
+        $softwareStep.Success = $false
+        $softwareStep.Message = "Remote execution failed: $_"
+        Write-AppLog -Message "Push-ProfileToServer: Software install step failed for $ServerIP - $_" -Level 'ERROR'
+    }
+
+    [void]$result.Steps.Add($softwareStep)
+
+    # -----------------------------------------------------------------------
     # Aggregate overall success
     # -----------------------------------------------------------------------
     $result.Success = ($result.Steps | Where-Object { -not $_.Success }).Count -eq 0
@@ -1056,7 +1235,7 @@ function New-DeployView {
                         if (-not $ip) { return }
 
                         $confirmResult = [System.Windows.Forms.MessageBox]::Show(
-                            "Assign profile '$pName' to server $ip?`n`nThis will push hostname, network, and SMB settings.",
+                            "Assign profile '$pName' to server $ip?`n`nThis will push hostname, network, SMB, and software install settings.",
                             "Assign Profile",
                             [System.Windows.Forms.MessageBoxButtons]::YesNo,
                             [System.Windows.Forms.MessageBoxIcon]::Question)

@@ -488,10 +488,282 @@ function New-DashboardView {
     $scrollContainer.Controls.Add($profilesCard)
 
     # ===================================================================
-    # Row 3: Quick Actions
+    # Row 3: Discovered Servers
     # ===================================================================
-    $row3Y = $row2Y + $colHeight + 20  # 520
-    $actionsCard = New-StyledCard -Title "Quick Actions" -X 20 -Y $row3Y `
+    $row3Y = $row2Y + $colHeight + 20
+    $fullWidth = $ContentPanel.ClientSize.Width - 40
+    $serversCardHeight = 260
+
+    $serversCard = New-StyledCard -Title "Discovered Servers" -X 20 -Y $row3Y `
+        -Width $fullWidth -Height $serversCardHeight
+
+    # DataGridView showing last scan results
+    $script:DashDgvServers = New-StyledDataGridView -X 15 -Y 45 -Width ($fullWidth - 30) -Height 140
+
+    $dColIP = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $dColIP.HeaderText = "IP Address"
+    $dColIP.Name = "IPAddress"
+    $dColIP.Width = 130
+    $dColIP.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
+
+    $dColHostname = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $dColHostname.HeaderText = "Hostname"
+    $dColHostname.Name = "Hostname"
+    $dColHostname.Width = 160
+    $dColHostname.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
+
+    $dColStatus = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $dColStatus.HeaderText = "Status"
+    $dColStatus.Name = "Status"
+    $dColStatus.Width = 100
+    $dColStatus.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
+
+    $dColAPI = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $dColAPI.HeaderText = "d3 API"
+    $dColAPI.Name = "D3API"
+    $dColAPI.Width = 100
+    $dColAPI.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
+
+    $dColPorts = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $dColPorts.HeaderText = "Ports"
+    $dColPorts.Name = "Ports"
+    $dColPorts.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::Fill
+
+    $script:DashDgvServers.Columns.AddRange(@($dColIP, $dColHostname, $dColStatus, $dColAPI, $dColPorts))
+    $script:DashDgvServers.ReadOnly = $true
+
+    # Populate from last scan results (if any)
+    $lastScan = $script:AppState.LastScanResults
+    if ($lastScan -and $lastScan.Count -gt 0) {
+        foreach ($server in $lastScan) {
+            $statusText = if ($server.IsDisguise) { "Disguise" }
+                          elseif ($server.Ports.Count -gt 0) { "Online" }
+                          else { "Unreachable" }
+            $apiText = if ($server.APIVersion) { $server.APIVersion } else { "N/A" }
+            $portsText = if ($server.Ports.Count -gt 0) { $server.Ports -join ", " } else { "None" }
+
+            $rowIdx = $script:DashDgvServers.Rows.Add($server.IPAddress, $server.Hostname,
+                                                       $statusText, $apiText, $portsText)
+
+            if ($statusText -eq "Disguise") {
+                $script:DashDgvServers.Rows[$rowIdx].Cells["Status"].Style.ForeColor = $script:Theme.Success
+                $script:DashDgvServers.Rows[$rowIdx].Cells["Status"].Style.Font =
+                    New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
+            } elseif ($statusText -eq "Online") {
+                $script:DashDgvServers.Rows[$rowIdx].Cells["Status"].Style.ForeColor = $script:Theme.Warning
+            }
+        }
+    }
+
+    $serversCard.Controls.Add($script:DashDgvServers)
+
+    # Status label
+    $dashServerCount = if ($lastScan) { $lastScan.Count } else { 0 }
+    $script:DashServersStatusLabel = New-StyledLabel `
+        -Text "$(if ($dashServerCount -gt 0) { "$dashServerCount server(s) from last scan" } else { "No scan results yet - use Quick Scan or go to Network Deploy" })" `
+        -X 15 -Y 195 -FontSize 9 -IsMuted
+    $script:DashServersStatusLabel.AutoSize = $false
+    $script:DashServersStatusLabel.Width = ($fullWidth - 250)
+    $serversCard.Controls.Add($script:DashServersStatusLabel)
+
+    # Quick Scan button
+    $btnDashQuickScan = New-StyledButton -Text "Quick Scan" -X 15 -Y 218 -Width 130 -Height 30 -IsPrimary
+    $btnDashQuickScan.Add_Click({
+        $this.Enabled = $false
+        $script:DashServersStatusLabel.Text = "Scanning 192.168.10.x ..."
+        $script:DashServersStatusLabel.ForeColor = $script:Theme.Accent
+        $script:DashServersStatusLabel.Refresh()
+        [System.Windows.Forms.Application]::DoEvents()
+
+        try {
+            $quickTargets = @(1,2,3,4,5,10,11,12,13,14,15,20,21,22,23,24,30,50,100,101,102,103,104,105,110,150,200,201,210,250,251,252,253,254)
+            $scanResults = [System.Collections.ArrayList]::new()
+
+            foreach ($octet in $quickTargets) {
+                $ip = "192.168.10.$octet"
+                try {
+                    $testResult = Test-DisguiseServer -IPAddress $ip -TimeoutMs 500
+                    if ($testResult.Ports.Count -gt 0) {
+                        [void]$scanResults.Add([PSCustomObject]@{
+                            IPAddress      = $testResult.IPAddress
+                            Hostname       = $testResult.Hostname
+                            IsDisguise     = $testResult.IsDisguise
+                            ResponseTimeMs = 0
+                            Ports          = $testResult.Ports
+                            APIVersion     = $testResult.DesignerVersion
+                        })
+                    }
+                } catch { }
+                [System.Windows.Forms.Application]::DoEvents()
+            }
+
+            $script:AppState.LastScanResults = $scanResults.ToArray()
+
+            # Refresh grid
+            $script:DashDgvServers.Rows.Clear()
+            foreach ($server in $scanResults) {
+                $statusText = if ($server.IsDisguise) { "Disguise" }
+                              elseif ($server.Ports.Count -gt 0) { "Online" }
+                              else { "Unreachable" }
+                $apiText = if ($server.APIVersion) { $server.APIVersion } else { "N/A" }
+                $portsText = if ($server.Ports.Count -gt 0) { $server.Ports -join ", " } else { "None" }
+                $rowIdx = $script:DashDgvServers.Rows.Add($server.IPAddress, $server.Hostname,
+                                                           $statusText, $apiText, $portsText)
+                if ($statusText -eq "Disguise") {
+                    $script:DashDgvServers.Rows[$rowIdx].Cells["Status"].Style.ForeColor = $script:Theme.Success
+                    $script:DashDgvServers.Rows[$rowIdx].Cells["Status"].Style.Font =
+                        New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
+                }
+            }
+
+            $disguiseCount = ($scanResults | Where-Object { $_.IsDisguise }).Count
+            $script:DashServersStatusLabel.Text = "Found $($scanResults.Count) host(s), $disguiseCount disguise server(s)"
+            $script:DashServersStatusLabel.ForeColor = $script:Theme.Success
+        } catch {
+            $script:DashServersStatusLabel.Text = "Scan failed: $_"
+            $script:DashServersStatusLabel.ForeColor = $script:Theme.Error
+        }
+
+        $this.Enabled = $true
+    })
+    $serversCard.Controls.Add($btnDashQuickScan)
+
+    # Assign Profile button (click a server row, then click this)
+    $btnDashAssign = New-StyledButton -Text "Assign Profile" -X 160 -Y 218 -Width 140 -Height 30
+    $btnDashAssign.Add_Click({
+        $selectedRow = $script:DashDgvServers.CurrentRow
+        if (-not $selectedRow) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Click on a server row first, then click Assign Profile.",
+                "No Server Selected",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+            return
+        }
+        $ip = $selectedRow.Cells["IPAddress"].Value
+        $hostname = $selectedRow.Cells["Hostname"].Value
+        if (-not $ip) { return }
+
+        # Build profile picker dialog
+        $pickerForm = New-Object System.Windows.Forms.Form
+        $pickerForm.Text = "Assign Profile to $ip"
+        $pickerForm.Size = New-Object System.Drawing.Size(400, 340)
+        $pickerForm.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterParent
+        $pickerForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+        $pickerForm.MaximizeBox = $false
+        $pickerForm.MinimizeBox = $false
+        $pickerForm.BackColor = $script:Theme.Background
+        $pickerForm.ForeColor = $script:Theme.Text
+        $pickerForm.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+
+        $pickerHeaderLabel = New-Object System.Windows.Forms.Label
+        $pickerHeaderLabel.Text = "Select a profile to assign:"
+        $pickerHeaderLabel.Location = New-Object System.Drawing.Point(15, 15)
+        $pickerHeaderLabel.AutoSize = $true
+        $pickerHeaderLabel.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+
+        $pickerTargetLabel = New-Object System.Windows.Forms.Label
+        $pickerTargetLabel.Text = "Target: $ip $(if ($hostname) { "($hostname)" })"
+        $pickerTargetLabel.Location = New-Object System.Drawing.Point(15, 42)
+        $pickerTargetLabel.AutoSize = $true
+        $pickerTargetLabel.ForeColor = $script:Theme.TextSecondary
+
+        $profileListBox = New-Object System.Windows.Forms.ListBox
+        $profileListBox.Location = New-Object System.Drawing.Point(15, 70)
+        $profileListBox.Size = New-Object System.Drawing.Size(355, 170)
+        $profileListBox.BackColor = $script:Theme.InputBackground
+        $profileListBox.ForeColor = $script:Theme.Text
+        $profileListBox.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+        $profileListBox.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+
+        $pickerProfiles = @()
+        try {
+            $pickerProfiles = @(Get-AllProfiles)
+            foreach ($p in $pickerProfiles) {
+                $desc = if ($p.Description) { " - $($p.Description)" } else { "" }
+                $profileListBox.Items.Add("$($p.Name)$desc") | Out-Null
+            }
+        } catch {
+            Write-AppLog "Dashboard: Failed to load profiles for picker: $_" -Level 'WARN'
+        }
+        if ($profileListBox.Items.Count -gt 0) { $profileListBox.SelectedIndex = 0 }
+
+        $btnAssign = New-Object System.Windows.Forms.Button
+        $btnAssign.Text = "Assign"
+        $btnAssign.Location = New-Object System.Drawing.Point(175, 252)
+        $btnAssign.Size = New-Object System.Drawing.Size(100, 35)
+        $btnAssign.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+        $btnAssign.BackColor = $script:Theme.Primary
+        $btnAssign.ForeColor = [System.Drawing.Color]::White
+        $btnAssign.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+        $btnAssign.DialogResult = [System.Windows.Forms.DialogResult]::OK
+
+        $btnCancel = New-Object System.Windows.Forms.Button
+        $btnCancel.Text = "Cancel"
+        $btnCancel.Location = New-Object System.Drawing.Point(285, 252)
+        $btnCancel.Size = New-Object System.Drawing.Size(85, 35)
+        $btnCancel.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+        $btnCancel.BackColor = $script:Theme.CardBackground
+        $btnCancel.ForeColor = $script:Theme.TextSecondary
+        $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+
+        $profileListBox.Add_DoubleClick({ $pickerForm.DialogResult = [System.Windows.Forms.DialogResult]::OK; $pickerForm.Close() })
+
+        $pickerForm.AcceptButton = $btnAssign
+        $pickerForm.CancelButton = $btnCancel
+        $pickerForm.Controls.AddRange(@($pickerHeaderLabel, $pickerTargetLabel, $profileListBox, $btnAssign, $btnCancel))
+
+        $dialogResult = $pickerForm.ShowDialog()
+        if ($dialogResult -ne [System.Windows.Forms.DialogResult]::OK) { return }
+        if ($profileListBox.SelectedIndex -lt 0) { return }
+
+        $profileObj = $pickerProfiles[$profileListBox.SelectedIndex]
+        $profileName = $profileObj.Name
+
+        $script:DashServersStatusLabel.Text = "Pushing '$profileName' to $ip..."
+        $script:DashServersStatusLabel.ForeColor = $script:Theme.Accent
+        $script:DashServersStatusLabel.Refresh()
+        [System.Windows.Forms.Application]::DoEvents()
+
+        try {
+            $pushResult = Push-ProfileToServer -ServerIP $ip -Profile $profileObj
+            if ($pushResult.Success) {
+                $selectedRow.Cells["Status"].Value = "Configured"
+                $selectedRow.Cells["Status"].Style.ForeColor = $script:Theme.Primary
+                $script:DashServersStatusLabel.Text = "Profile '$profileName' pushed to $ip successfully"
+                $script:DashServersStatusLabel.ForeColor = $script:Theme.Success
+                $script:AppState.LastAppliedProfile = $profileName
+                $script:DashLblProfileValue.Text = $profileName
+                $script:DashProfileStatusBadge.Text = "ACTIVE"
+                Write-AppLog "Dashboard: Assigned '$profileName' to $ip" -Level 'INFO'
+            } else {
+                $script:DashServersStatusLabel.Text = "Push failed: $($pushResult.ErrorMessage)"
+                $script:DashServersStatusLabel.ForeColor = $script:Theme.Error
+            }
+        } catch {
+            $script:DashServersStatusLabel.Text = "Push error: $_"
+            $script:DashServersStatusLabel.ForeColor = $script:Theme.Error
+            Write-AppLog "Dashboard: Push to $ip failed: $_" -Level 'ERROR'
+        }
+    })
+    $serversCard.Controls.Add($btnDashAssign)
+
+    # Go to full Network Deploy view
+    $btnGoToDeploy = New-StyledButton -Text "Full Network Deploy" -X ($fullWidth - 175) -Y 218 -Width 160 -Height 30
+    $btnGoToDeploy.Add_Click({
+        if ($script:AppState.NavigateTo) {
+            try { $script:AppState.NavigateTo.Invoke('Deploy') } catch { }
+        }
+    })
+    $serversCard.Controls.Add($btnGoToDeploy)
+
+    $scrollContainer.Controls.Add($serversCard)
+
+    # ===================================================================
+    # Row 4: Quick Actions
+    # ===================================================================
+    $row4Y = $row3Y + $serversCardHeight + 20
+    $actionsCard = New-StyledCard -Title "Quick Actions" -X 20 -Y $row4Y `
         -Width ($ContentPanel.ClientSize.Width - 40) -Height 80
 
     # Action buttons positioned in a horizontal row
