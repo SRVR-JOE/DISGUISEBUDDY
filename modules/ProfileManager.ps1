@@ -165,6 +165,12 @@ function New-DefaultProfile {
             SharePermissions = "Everyone:Full"
             AdditionalShares = @()
         }
+        SoftwareSettings = [PSCustomObject]@{
+            AutoInstall     = $false
+            FolderPath      = "D:\Software"
+            ParallelInstall = $true
+            Recurse         = $true
+        }
         CustomSettings  = [PSCustomObject]@{}
     }
 
@@ -557,6 +563,19 @@ function Apply-FullProfile {
         [void]$changesList.AppendLine("  d3 Projects sharing: Disabled")
     }
 
+    # Software install
+    [void]$changesList.AppendLine("")
+    [void]$changesList.AppendLine("SOFTWARE INSTALL:")
+    if ($Profile.SoftwareSettings -and $Profile.SoftwareSettings.AutoInstall) {
+        $parallelLabel = if ($Profile.SoftwareSettings.ParallelInstall) { "Yes (all at once)" } else { "No (one at a time)" }
+        [void]$changesList.AppendLine("  Folder: $($Profile.SoftwareSettings.FolderPath)")
+        [void]$changesList.AppendLine("  Parallel: $parallelLabel")
+        [void]$changesList.AppendLine("  Include subfolders: $($Profile.SoftwareSettings.Recurse)")
+    }
+    else {
+        [void]$changesList.AppendLine("  Auto-install: Disabled")
+    }
+
     [void]$changesList.AppendLine("")
     [void]$changesList.AppendLine("WARNING: This will modify system network and sharing settings.")
     [void]$changesList.AppendLine("Ensure you have reviewed all values before proceeding.")
@@ -704,7 +723,51 @@ function Apply-FullProfile {
     }
 
     # ================================================================
-    # Step 4: Update AppState
+    # Step 4: Install software from folder (if enabled)
+    # ================================================================
+    try {
+        if ($Profile.SoftwareSettings -and $Profile.SoftwareSettings.AutoInstall) {
+            $swFolder = $Profile.SoftwareSettings.FolderPath
+            $swParallel = [bool]$Profile.SoftwareSettings.ParallelInstall
+            $swRecurse = [bool]$Profile.SoftwareSettings.Recurse
+
+            $parallelLabel = if ($swParallel) { "parallel" } else { "sequential" }
+            Write-AppLog "Installing software from '$swFolder' ($parallelLabel, recurse=$swRecurse)" -Level 'INFO'
+
+            $swResult = Install-AllFromFolder -FolderPath $swFolder `
+                -Parallel $swParallel -Recurse $swRecurse
+
+            if ($swResult.Success) {
+                $successCount++
+                [void]$results.AppendLine("[OK] Software: $($swResult.Message)")
+                foreach ($detail in $swResult.Details) {
+                    [void]$results.AppendLine("       $detail")
+                }
+                Write-AppLog "Software install succeeded: $($swResult.Message)" -Level 'INFO'
+            }
+            else {
+                $failCount++
+                [void]$results.AppendLine("[FAIL] Software: $($swResult.Message)")
+                foreach ($detail in $swResult.Details) {
+                    [void]$results.AppendLine("       $detail")
+                }
+                Write-AppLog "Software install had failures: $($swResult.Message)" -Level 'ERROR'
+            }
+        }
+        else {
+            $skipCount++
+            [void]$results.AppendLine("[SKIP] Software: Auto-install disabled in profile")
+            Write-AppLog "Software auto-install disabled in profile - skipping" -Level 'INFO'
+        }
+    }
+    catch {
+        $failCount++
+        [void]$results.AppendLine("[FAIL] Software: Unexpected error - $_")
+        Write-AppLog "Software install error: $_" -Level 'ERROR'
+    }
+
+    # ================================================================
+    # Step 5: Update AppState
     # ================================================================
     $script:AppState.LastAppliedProfile = $Profile.Name
     Write-AppLog "Updated LastAppliedProfile to '$($Profile.Name)'" -Level 'INFO'
@@ -929,6 +992,12 @@ function Get-CurrentSystemProfile {
         ServerName      = $currentHostname
         NetworkAdapters = $adapters
         SMBSettings     = $smbSettings
+        SoftwareSettings = [PSCustomObject]@{
+            AutoInstall     = $false
+            FolderPath      = "D:\Software"
+            ParallelInstall = $true
+            Recurse         = $true
+        }
         CustomSettings  = [PSCustomObject]@{}
     }
 
@@ -1628,6 +1697,38 @@ function Update-ProfileDetailPanel {
     }
 
     $script:DetailPanel.Controls.Add($smbCard)
+    $currentY += 95
+
+    # ---- Software Settings Summary Card ----
+    $swAutoInstall = $false
+    $swFolder = "D:\Software"
+    $swParallel = $true
+    if ($p.SoftwareSettings) {
+        $swAutoInstall = [bool]$p.SoftwareSettings.AutoInstall
+        if ($p.SoftwareSettings.FolderPath) { $swFolder = $p.SoftwareSettings.FolderPath }
+        if ($null -ne $p.SoftwareSettings.ParallelInstall) { $swParallel = [bool]$p.SoftwareSettings.ParallelInstall }
+    }
+
+    $swCard = New-StyledCard -Title "Software Install" -X 15 -Y $currentY `
+        -Width $innerWidth -Height 80
+
+    $swStatus = if ($swAutoInstall) { "Enabled" } else { "Disabled" }
+    $swStatusType = if ($swAutoInstall) { "Success" } else { "Warning" }
+    $swBadge = New-StatusBadge -Text $swStatus -X 12 -Y 26 -Type $swStatusType
+    $swCard.Controls.Add($swBadge)
+
+    if ($swAutoInstall) {
+        $swFolderLabel = New-StyledLabel -Text "Folder: $swFolder" `
+            -X 100 -Y 28 -IsSecondary -FontSize 9
+        $swCard.Controls.Add($swFolderLabel)
+
+        $swModeText = if ($swParallel) { "Parallel (all at once)" } else { "Sequential (one at a time)" }
+        $swModeLabel = New-StyledLabel -Text "Mode: $swModeText" `
+            -X 12 -Y 52 -IsMuted -FontSize 8
+        $swCard.Controls.Add($swModeLabel)
+    }
+
+    $script:DetailPanel.Controls.Add($swCard)
     $currentY += 95
 
     # ---- Save Changes Button ----

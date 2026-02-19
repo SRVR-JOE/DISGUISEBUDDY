@@ -298,6 +298,183 @@ function Install-MultipleFromQueue {
     return $allResults.ToArray()
 }
 
+
+function Install-AllFromFolder {
+    <#
+    .SYNOPSIS
+        Scans a folder for installers and runs them all, optionally in parallel.
+    .DESCRIPTION
+        Used by Apply-FullProfile to auto-install software as part of a profile
+        application. Scans the folder for .exe/.msi/.msix/.msp files, determines
+        silent arguments, and launches them. In parallel mode, all installers are
+        started concurrently and then waited on together. In sequential mode, each
+        installer is run and waited on before starting the next.
+    .PARAMETER FolderPath
+        The folder to scan for installer files.
+    .PARAMETER Parallel
+        If $true, launches all installers concurrently.
+    .PARAMETER Recurse
+        If $true, scans subfolders.
+    .OUTPUTS
+        PSCustomObject with: Success (bool), Message (string), Installed (int), Failed (int), Skipped (int), Details (string[])
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FolderPath,
+
+        [bool]$Parallel = $false,
+
+        [bool]$Recurse = $true
+    )
+
+    $result = [PSCustomObject]@{
+        Success   = $false
+        Message   = ''
+        Installed = 0
+        Failed    = 0
+        Skipped   = 0
+        Details   = @()
+    }
+
+    # Validate folder
+    if ([string]::IsNullOrWhiteSpace($FolderPath)) {
+        $result.Message = "Software folder path is empty."
+        Write-AppLog -Message "Install-AllFromFolder: $($result.Message)" -Level 'WARN'
+        return $result
+    }
+    if (-not (Test-Path -Path $FolderPath -ErrorAction SilentlyContinue)) {
+        $result.Message = "Software folder not found: $FolderPath"
+        Write-AppLog -Message "Install-AllFromFolder: $($result.Message)" -Level 'WARN'
+        return $result
+    }
+
+    # Find installers
+    $installers = Find-Installers -FolderPath $FolderPath -Recurse:$Recurse
+    if ($installers.Count -eq 0) {
+        $result.Success = $true
+        $result.Message = "No installers found in $FolderPath"
+        Write-AppLog -Message "Install-AllFromFolder: $($result.Message)" -Level 'INFO'
+        return $result
+    }
+
+    Write-AppLog -Message "Install-AllFromFolder: Found $($installers.Count) installer(s) in $FolderPath (Parallel=$Parallel)" -Level 'INFO'
+    $details = [System.Collections.ArrayList]::new()
+
+    if ($Parallel) {
+        # ---- PARALLEL MODE: launch all at once, then wait ----
+        $processes = [System.Collections.ArrayList]::new()
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+        foreach ($inst in $installers) {
+            $silentArgs = Get-InstallerSilentArgs -InstallerPath $inst.FullPath
+            $extension = $inst.Extension.ToLower()
+
+            try {
+                Write-AppLog -Message "Install-AllFromFolder: [PARALLEL] Launching $($inst.Name)" -Level 'INFO'
+
+                $proc = $null
+                if ($extension -eq '.msi' -or $extension -eq '.msp') {
+                    $msiFlag = if ($extension -eq '.msp') { '/p' } else { '/i' }
+                    $msiArgString = "$msiFlag `"$($inst.FullPath)`""
+                    if ($silentArgs) { $msiArgString += " $silentArgs" }
+                    $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgString `
+                        -PassThru -ErrorAction Stop
+                }
+                elseif ($extension -eq '.msix') {
+                    # MSIX must be synchronous (Add-AppxPackage has no -PassThru)
+                    try {
+                        Add-AppxPackage -Path $inst.FullPath -ErrorAction Stop
+                        $result.Installed++
+                        [void]$details.Add("[OK] $($inst.Name) - MSIX installed")
+                        Write-AppLog -Message "Install-AllFromFolder: [OK] $($inst.Name) (MSIX)" -Level 'INFO'
+                    } catch {
+                        $result.Failed++
+                        [void]$details.Add("[FAIL] $($inst.Name) - $_")
+                        Write-AppLog -Message "Install-AllFromFolder: [FAIL] $($inst.Name) (MSIX) - $_" -Level 'ERROR'
+                    }
+                    continue
+                }
+                else {
+                    $proc = Start-Process -FilePath $inst.FullPath -ArgumentList $silentArgs `
+                        -PassThru -ErrorAction Stop
+                }
+
+                if ($proc) {
+                    [void]$processes.Add([PSCustomObject]@{
+                        Name    = $inst.Name
+                        Process = $proc
+                    })
+                }
+            }
+            catch {
+                $result.Failed++
+                [void]$details.Add("[FAIL] $($inst.Name) - Failed to launch: $_")
+                Write-AppLog -Message "Install-AllFromFolder: [FAIL] $($inst.Name) - $_" -Level 'ERROR'
+            }
+        }
+
+        # Wait for all launched processes (10 minute timeout each)
+        foreach ($entry in $processes) {
+            try {
+                $exited = $entry.Process.WaitForExit(600000)
+                if (-not $exited) {
+                    $result.Failed++
+                    [void]$details.Add("[FAIL] $($entry.Name) - Timed out after 10 minutes")
+                    Write-AppLog -Message "Install-AllFromFolder: [TIMEOUT] $($entry.Name)" -Level 'ERROR'
+                }
+                elseif ($entry.Process.ExitCode -eq 0 -or $entry.Process.ExitCode -eq 3010) {
+                    $result.Installed++
+                    $extra = if ($entry.Process.ExitCode -eq 3010) { " (reboot required)" } else { "" }
+                    [void]$details.Add("[OK] $($entry.Name)$extra")
+                    Write-AppLog -Message "Install-AllFromFolder: [OK] $($entry.Name) exit=$($entry.Process.ExitCode)" -Level 'INFO'
+                }
+                else {
+                    $result.Failed++
+                    [void]$details.Add("[FAIL] $($entry.Name) - Exit code $($entry.Process.ExitCode)")
+                    Write-AppLog -Message "Install-AllFromFolder: [FAIL] $($entry.Name) exit=$($entry.Process.ExitCode)" -Level 'ERROR'
+                }
+            }
+            catch {
+                $result.Failed++
+                [void]$details.Add("[FAIL] $($entry.Name) - Error waiting: $_")
+                Write-AppLog -Message "Install-AllFromFolder: [FAIL] $($entry.Name) - $_" -Level 'ERROR'
+            }
+        }
+
+        $stopwatch.Stop()
+        Write-AppLog -Message "Install-AllFromFolder: Parallel batch complete in $([int]$stopwatch.Elapsed.TotalSeconds)s" -Level 'INFO'
+    }
+    else {
+        # ---- SEQUENTIAL MODE: one at a time ----
+        $idx = 0
+        foreach ($inst in $installers) {
+            $idx++
+            $silentArgs = Get-InstallerSilentArgs -InstallerPath $inst.FullPath
+            Write-AppLog -Message "Install-AllFromFolder: [$idx/$($installers.Count)] $($inst.Name)" -Level 'INFO'
+
+            $installResult = Install-Software -InstallerPath $inst.FullPath `
+                -Arguments $silentArgs -WaitForExit
+
+            if ($installResult.Success) {
+                $result.Installed++
+                [void]$details.Add("[OK] $($inst.Name) - $($installResult.Message) ($($installResult.Duration))")
+            }
+            else {
+                $result.Failed++
+                [void]$details.Add("[FAIL] $($inst.Name) - $($installResult.Message)")
+            }
+        }
+    }
+
+    $result.Details = $details.ToArray()
+    $result.Success = ($result.Failed -eq 0)
+    $result.Message = "Software install complete: $($result.Installed) installed, $($result.Failed) failed"
+    Write-AppLog -Message "Install-AllFromFolder: $($result.Message)" -Level 'INFO'
+
+    return $result
+}
+
 # ============================================================================
 # UI View Function - Software Installer
 # ============================================================================

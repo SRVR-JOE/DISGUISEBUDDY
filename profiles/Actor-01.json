@@ -97,5 +97,11 @@
         "SharePermissions": "Everyone:Full",
         "AdditionalShares": []
     },
+    "SoftwareSettings": {
+        "AutoInstall": true,
+        "FolderPath": "D:\\Software",
+        "ParallelInstall": true,
+        "Recurse": true
+    },
     "CustomSettings": {}
 }
