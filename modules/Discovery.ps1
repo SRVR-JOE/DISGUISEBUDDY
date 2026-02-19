@@ -4,14 +4,8 @@
 # Also provides the New-DeployView UI function for the Network Deploy panel.
 
 # ============================================================================
-# Initialize shared application state if not already present
+# Application state is initialized in DisguiseBuddy.ps1 before modules load
 # ============================================================================
-if (-not $script:AppState) {
-    $script:AppState = @{
-        LastAppliedProfile = ''
-        LastScanResults    = @()
-    }
-}
 
 # ============================================================================
 # Backend Functions
@@ -60,6 +54,8 @@ function Find-DisguiseServers {
     # -----------------------------------------------------------------------
     # Strategy 1 & 2: Parallel TCP port scan + ping sweep using runspaces
     # -----------------------------------------------------------------------
+    $runspacePool = $null
+    try {
     $runspacePool = [System.Management.Automation.Runspaces.RunspacePool]::CreateRunspacePool(1, 50)
     $runspacePool.Open()
 
@@ -133,13 +129,13 @@ function Find-DisguiseServers {
 
         # If port 80 is open, attempt a quick disguise API probe
         if ($openPorts -contains 80) {
+            $httpClient = $null
             try {
                 $httpClient = New-Object System.Net.Http.HttpClient
                 $httpClient.Timeout = [TimeSpan]::FromMilliseconds($Timeout * 3)
                 $apiResponse = $httpClient.GetStringAsync("http://$IPAddress/api/service/system").Result
                 if ($apiResponse -match 'hostname|version|d3|disguise') {
                     $result.IsDisguise = $true
-                    # Try to extract version info from the JSON response
                     try {
                         $parsed = $apiResponse | ConvertFrom-Json
                         if ($parsed.version) {
@@ -151,9 +147,10 @@ function Find-DisguiseServers {
                         $result.APIVersion = 'Unknown'
                     }
                 }
-                $httpClient.Dispose()
             } catch {
                 # API not responding or not a disguise server
+            } finally {
+                if ($httpClient) { $httpClient.Dispose() }
             }
         }
 
@@ -208,9 +205,13 @@ function Find-DisguiseServers {
         }
     }
 
-    # Clean up the runspace pool
-    $runspacePool.Close()
-    $runspacePool.Dispose()
+    } finally {
+        # Clean up the runspace pool even if an exception occurred
+        if ($runspacePool) {
+            $runspacePool.Close()
+            $runspacePool.Dispose()
+        }
+    }
 
     # -----------------------------------------------------------------------
     # Strategy 3: For hosts with port 80 open that were not yet identified
@@ -303,6 +304,7 @@ function Test-DisguiseServer {
 
     # --- Disguise REST API Check (port 80) ---
     if ($openPorts -contains 80) {
+        $httpClient = $null
         try {
             $httpClient = New-Object System.Net.Http.HttpClient
             $httpClient.Timeout = [TimeSpan]::FromMilliseconds($TimeoutMs)
@@ -312,7 +314,6 @@ function Test-DisguiseServer {
                 $result.APIAvailable = $true
                 try {
                     $parsed = $apiResponse | ConvertFrom-Json
-                    # Identify as disguise server if the response contains expected fields
                     if ($parsed.hostname -or $parsed.version -or $parsed.d3VersionString) {
                         $result.IsDisguise = $true
                         $result.DesignerVersion = if ($parsed.d3VersionString) {
@@ -324,34 +325,35 @@ function Test-DisguiseServer {
                         }
                     }
                 } catch {
-                    # Response was not valid JSON - still mark API as available
                     if ($apiResponse -match 'disguise|d3') {
                         $result.IsDisguise = $true
                     }
                 }
             }
-            $httpClient.Dispose()
         } catch {
             # API not reachable or timed out
+        } finally {
+            if ($httpClient) { $httpClient.Dispose() }
         }
     }
 
     # --- SMC API Check ---
     # The SMC typically runs on a separate management interface; try the standard API endpoint
+    $httpClient = $null
     try {
         $httpClient = New-Object System.Net.Http.HttpClient
         $httpClient.Timeout = [TimeSpan]::FromMilliseconds($TimeoutMs)
         $smcResponse = $httpClient.GetStringAsync("http://$IPAddress/api/networkadapters").Result
         if ($smcResponse) {
             $result.SMCAvailable = $true
-            # If we got a response from SMC but did not yet confirm disguise, do so now
             if (-not $result.IsDisguise -and ($smcResponse -match 'adapter|network|interface')) {
                 $result.IsDisguise = $true
             }
         }
-        $httpClient.Dispose()
     } catch {
         # SMC API not available on this host
+    } finally {
+        if ($httpClient) { $httpClient.Dispose() }
     }
 
     Write-AppLog -Message "Test-DisguiseServer: $IPAddress - IsDisguise=$($result.IsDisguise), API=$($result.APIAvailable), Ports=$($result.Ports -join ',')" -Level 'INFO'
@@ -376,6 +378,7 @@ function Get-RemoteServerInfo {
         [string]$IPAddress
     )
 
+    $httpClient = $null
     try {
         $httpClient = New-Object System.Net.Http.HttpClient
         $httpClient.Timeout = [TimeSpan]::FromSeconds(5)
@@ -386,10 +389,10 @@ function Get-RemoteServerInfo {
             Write-AppLog -Message "Get-RemoteServerInfo: Successfully retrieved info from $IPAddress" -Level 'INFO'
             return $parsed
         }
-
-        $httpClient.Dispose()
     } catch {
         Write-AppLog -Message "Get-RemoteServerInfo: Failed to reach $IPAddress - $_" -Level 'WARN'
+    } finally {
+        if ($httpClient) { $httpClient.Dispose() }
     }
 
     return $null
@@ -432,12 +435,25 @@ function Push-ProfileToServer {
         [PSCredential]$Credential
     )
 
+    # Validate that ServerIP is a valid IPv4 address to prevent injection
+    $ipValid = $false
+    try {
+        $parsedIP = [System.Net.IPAddress]::None
+        $ipValid = [System.Net.IPAddress]::TryParse($ServerIP, [ref]$parsedIP) -and $parsedIP.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork
+    } catch { }
+
     $result = [PSCustomObject]@{
         ServerIP     = $ServerIP
         Success      = $false
         Steps        = [System.Collections.ArrayList]::new()
         ErrorMessage = ''
         Timestamp    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    }
+
+    if (-not $ipValid) {
+        $result.ErrorMessage = "Invalid IPv4 address: '$ServerIP'"
+        Write-AppLog -Message "Push-ProfileToServer: Invalid IP address '$ServerIP'" -Level 'ERROR'
+        return $result
     }
 
     Write-AppLog -Message "Push-ProfileToServer: Starting deployment of profile '$($Profile.Name)' to $ServerIP" -Level 'INFO'
@@ -1254,7 +1270,7 @@ function New-DeployView {
                         [void]$results.Add($serverObj)
                     }
                 } catch {
-                    # Skip unreachable hosts silently
+                    Write-AppLog -Message "Scan: Could not test host $($testResult.IPAddress): $_" -Level 'DEBUG'
                 }
             }
 
@@ -1349,6 +1365,9 @@ function New-DeployView {
                 $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
                 $credential = New-Object System.Management.Automation.PSCredential($username, $securePassword)
             }
+            # Clear plaintext password from memory
+            $password = $null
+            $txtPassword.Text = ''
         }
 
         # Load the selected profile

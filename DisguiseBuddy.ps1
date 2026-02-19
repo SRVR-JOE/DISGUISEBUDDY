@@ -32,6 +32,16 @@ try {
 }
 
 # ============================================================================
+# APPLICATION STATE (initialize before modules so they can reference it)
+# ============================================================================
+
+$script:AppState = @{
+    LastAppliedProfile = ''
+    LastScanResults    = @()
+    CurrentView        = 'Dashboard'
+}
+
+# ============================================================================
 # DOT-SOURCE MODULES (order matters: Theme -> UIComponents -> everything else)
 # ============================================================================
 
@@ -50,18 +60,6 @@ $modulesPath = Join-Path -Path $PSScriptRoot -ChildPath 'modules'
 . (Join-Path $modulesPath 'Dashboard.ps1')
 
 Write-AppLog -Message 'DISGUISE BUDDY starting up' -Level 'INFO'
-
-# ============================================================================
-# APPLICATION STATE
-# ============================================================================
-
-if (-not $script:AppState) {
-    $script:AppState = @{
-        LastAppliedProfile = ''
-        LastScanResults    = @()
-        CurrentView        = 'Dashboard'
-    }
-}
 
 # ============================================================================
 # MAIN FORM

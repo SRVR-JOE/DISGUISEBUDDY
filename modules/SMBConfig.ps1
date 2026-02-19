@@ -433,7 +433,7 @@ function New-SMBView {
         $account = $card.Controls['cmbAccount'].SelectedItem
         $access = $card.Controls['cmbAccess'].SelectedItem
 
-        if (-not $shareName -or $shareName -eq 'd3 Projects' -and $shareName -eq '') {
+        if (-not $shareName -or $shareName -eq '') {
             $shareName = 'd3 Projects'
         }
         # Use placeholder fallback
@@ -766,7 +766,9 @@ function New-SMBView {
                     $grid.Rows.Add($s.Name, $s.Path, $s.ShareState) | Out-Null
                 }
             }
-            catch { }
+            catch {
+                Write-AppLog -Message "Failed to refresh SMB shares list: $_" -Level 'WARN'
+            }
         }
     }
     $card2.Controls.Add($btnCreateNew)
@@ -805,7 +807,9 @@ function New-SMBView {
                         $grid.Rows.Add($s.Name, $s.Path, $s.ShareState) | Out-Null
                     }
                 }
-                catch { }
+                catch {
+                    Write-AppLog -Message "Failed to refresh SMB shares after removal: $_" -Level 'WARN'
+                }
             }
             else {
                 [System.Windows.Forms.MessageBox]::Show(

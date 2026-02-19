@@ -3,14 +3,8 @@
 # displaying quick status cards, network overview, recent profiles, and quick actions.
 
 # ============================================================================
-# Initialize shared application state if not already present
+# Application state is initialized in DisguiseBuddy.ps1 before modules load
 # ============================================================================
-if (-not $script:AppState) {
-    $script:AppState = @{
-        LastAppliedProfile = ''
-        LastScanResults    = @()
-    }
-}
 
 # ============================================================================
 # Helper Functions (private to this module)
