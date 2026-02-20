@@ -205,8 +205,19 @@ function Get-AllProfiles {
         }
     }
 
-    # Sort profiles alphabetically by name
-    return @($profiles | Sort-Object -Property Name)
+    # Sort profiles by role priority: Director first, then Actor, then Understudy
+    # Within each role group, sort numerically by the trailing number
+    $rolePriority = @{ 'Director' = 0; 'Actor' = 1; 'Understudy' = 2 }
+    return @($profiles | Sort-Object -Property {
+        $name = $_.Name
+        # Extract the role prefix (everything before the first hyphen, or the full name)
+        $role = if ($name -match '^([A-Za-z]+)') { $Matches[1] } else { $name }
+        $priority = if ($rolePriority.ContainsKey($role)) { $rolePriority[$role] } else { 99 }
+        # Extract trailing number for sub-sorting (e.g. Actor-01 -> 1)
+        $num = if ($name -match '(\d+)$') { [int]$Matches[1] } else { 0 }
+        # Composite sort key: priority * 1000 + number
+        ($priority * 1000) + $num
+    })
 }
 
 
