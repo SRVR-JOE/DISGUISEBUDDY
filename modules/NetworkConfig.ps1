@@ -112,14 +112,26 @@ function Test-IPAddressFormat {
     <#
     .SYNOPSIS
         Validates whether a string is a well-formed IPv4 address.
+    .DESCRIPTION
+        Checks format (4 dotted-decimal octets, each 0-255, no leading zeros)
+        and optionally rejects reserved/invalid ranges:
+          - 0.x.x.x (current network, invalid as host address)
+          - 255.255.255.255 (limited broadcast)
+          - 127.x.x.x (loopback - warned but allowed when -AllowReserved is set)
+        Use -AllowReserved to permit loopback addresses for testing scenarios.
     .PARAMETER IP
         The string to validate.
+    .PARAMETER AllowReserved
+        When set, loopback (127.x.x.x) addresses produce a warning but return $true.
+        Without this switch, loopback addresses return $false.
     .OUTPUTS
         [bool] $true if the string is a valid IPv4 address, $false otherwise.
     #>
     param(
         [Parameter(Mandatory = $true)]
-        [string]$IP
+        [string]$IP,
+
+        [switch]$AllowReserved
     )
 
     if ([string]::IsNullOrWhiteSpace($IP)) { return $false }
@@ -140,6 +152,29 @@ function Test-IPAddressFormat {
                     # Reject leading zeros (e.g., "01", "001")
                     if ($octet.Length -gt 1 -and $octet.StartsWith('0')) { return $false }
                 }
+
+                # --- Reserved / invalid range checks ---
+                $firstOctet = [int]$octets[0]
+
+                # Reject 0.x.x.x (current network / invalid as host)
+                if ($firstOctet -eq 0) {
+                    return $false
+                }
+
+                # Reject 255.255.255.255 (limited broadcast)
+                if ($IP.Trim() -eq '255.255.255.255') {
+                    return $false
+                }
+
+                # Loopback range 127.x.x.x
+                if ($firstOctet -eq 127) {
+                    if ($AllowReserved) {
+                        Write-Warning "IP address '$IP' is in the loopback range (127.x.x.x). Allowed for testing."
+                        return $true
+                    }
+                    return $false
+                }
+
                 return $true
             }
         }
@@ -151,6 +186,12 @@ function Test-SubnetMaskFormat {
     <#
     .SYNOPSIS
         Validates whether a string is a valid dotted-decimal subnet mask.
+    .DESCRIPTION
+        Checks that the mask is a well-formed IPv4 address AND that the binary
+        representation is contiguous (a run of 1-bits followed by 0-bits only).
+        Invalid / non-contiguous masks like 255.255.128.255 are rejected.
+        Uses its own octet parsing rather than Test-IPAddressFormat to avoid
+        the reserved-range checks that would reject valid mask octets.
     .PARAMETER Mask
         The subnet mask string (e.g., "255.255.255.0").
     .OUTPUTS
@@ -163,18 +204,30 @@ function Test-SubnetMaskFormat {
 
     if ([string]::IsNullOrWhiteSpace($Mask)) { return $false }
 
-    # Must be valid IP format first
-    if (-not (Test-IPAddressFormat -IP $Mask)) { return $false }
-
-    # A valid subnet mask in binary is a contiguous run of 1s followed by 0s.
+    # Parse as dotted-decimal: must be exactly 4 numeric octets 0-255
     $octets = $Mask.Trim().Split('.')
+    if ($octets.Count -ne 4) { return $false }
+
+    foreach ($octet in $octets) {
+        if ($octet -notmatch '^\d{1,3}$') { return $false }
+        $val = [int]$octet
+        if ($val -lt 0 -or $val -gt 255) { return $false }
+        # Reject leading zeros (e.g., "01", "001")
+        if ($octet.Length -gt 1 -and $octet.StartsWith('0')) { return $false }
+    }
+
+    # Build full 32-bit binary string and verify contiguity
     $binary = ''
     foreach ($octet in $octets) {
         $binary += [Convert]::ToString([int]$octet, 2).PadLeft(8, '0')
     }
 
-    # The binary string must match pattern: one or more 1s then zero or more 0s
-    return ($binary -match '^1*0*$') -and ($binary -ne '00000000000000000000000000000000')
+    # A valid subnet mask in binary is a contiguous run of 1s followed by 0s.
+    # Reject all-zeros (0.0.0.0) as it is not a usable subnet mask.
+    if ($binary -eq '00000000000000000000000000000000') { return $false }
+
+    # The regex ensures no '1' appears after the first '0' -- i.e., contiguous.
+    return ($binary -match '^1+0*$')
 }
 
 function Convert-SubnetMaskToPrefix {
@@ -662,6 +715,10 @@ function New-NetworkView {
     $scrollPanel = New-ScrollPanel -X 0 -Y 0 `
                                    -Width $ContentPanel.ClientSize.Width `
                                    -Height $ContentPanel.ClientSize.Height
+    $scrollPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor `
+                          [System.Windows.Forms.AnchorStyles]::Bottom -bor `
+                          [System.Windows.Forms.AnchorStyles]::Left -bor `
+                          [System.Windows.Forms.AnchorStyles]::Right
 
     # Resize the scroll panel when the content panel resizes
     $ContentPanel.Add_Resize({
@@ -836,6 +893,14 @@ function New-NetworkView {
         )
         if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
 
+        # Show "Applying..." state on the button
+        $btn = $this
+        $originalText = $btn.Text
+        $btn.Text = 'Applying...'
+        $btn.Enabled = $false
+        $btn.BackColor = $script:Theme.TextMuted
+        $btn.Refresh()
+
         $results = @()
         $successCount = 0
         $failCount = 0
@@ -857,6 +922,19 @@ function New-NetworkView {
             }
         }
 
+        # Show success/failure feedback on the button
+        if ($failCount -gt 0) {
+            $btn.Text = "$failCount Failed"
+            $btn.BackColor = $script:Theme.Error
+            $btn.ForeColor = [System.Drawing.Color]::White
+        } else {
+            $btn.Text = 'All Applied'
+            $btn.BackColor = $script:Theme.Success
+            $btn.ForeColor = [System.Drawing.Color]::White
+        }
+        $btn.Refresh()
+        Start-Sleep -Milliseconds 800
+
         $summary = "Apply All Results:`n" +
                    "----------------------------`n" +
                    "  Success: $successCount`n" +
@@ -877,6 +955,13 @@ function New-NetworkView {
             [System.Windows.Forms.MessageBoxButtons]::OK,
             $icon
         )
+
+        # Restore button to original state
+        $btn.Text = $originalText
+        $btn.Enabled = $true
+        $btn.BackColor = $script:Theme.Primary
+        $btn.ForeColor = [System.Drawing.Color]::White
+        $btn.Tag = 'Primary'
     }
     $scrollPanel.Controls.Add($btnApplyAll)
 
@@ -917,6 +1002,7 @@ function New-NetworkView {
 
         # --- Card panel ---
         $card = New-StyledPanel -X $cardX -Y $cardY -Width $cardWidth -Height $cardHeight -IsCard
+        $card.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
 
         # --- Colored accent bar on the left edge (4px wide, full height) ---
         $accentBar = New-Object System.Windows.Forms.Panel
@@ -994,6 +1080,11 @@ function New-NetworkView {
         $ipValidLabel.Font = New-Object System.Drawing.Font('Segoe UI', 9)
         $card.Controls.Add($ipValidLabel)
 
+        # Tooltip provider for validation feedback (shared per card)
+        $ipToolTip = New-Object System.Windows.Forms.ToolTip
+        $ipToolTip.InitialDelay = 200
+        $ipToolTip.AutoPopDelay = 5000
+
         $ipTextBox.Add_TextChanged({
             $tb = $this
             $validLabel = $tb.Parent.Controls | Where-Object {
@@ -1005,12 +1096,40 @@ function New-NetworkView {
                 $text = $tb.Text.Trim()
                 if ([string]::IsNullOrWhiteSpace($text) -or $text -eq $tb.Tag) {
                     $validLabel.Text = ''
+                    $tb.BackColor = $script:Theme.InputBackground
                 } elseif (Test-IPAddressFormat -IP $text) {
                     $validLabel.Text = [char]0x2713   # checkmark
                     $validLabel.ForeColor = $script:Theme.Success
+                    $tb.BackColor = $script:Theme.InputBackground
                 } else {
                     $validLabel.Text = [char]0x2717   # X mark
                     $validLabel.ForeColor = $script:Theme.Error
+                    # Tint background to indicate error
+                    $tb.BackColor = [System.Drawing.Color]::FromArgb(40, 239, 68, 68)
+
+                    # Determine specific error for tooltip
+                    $errMsg = 'Invalid IP address format'
+                    $octets = $text.Split('.')
+                    if ($octets.Count -eq 4) {
+                        $allNumeric = $true
+                        foreach ($o in $octets) {
+                            if ($o -notmatch '^\d{1,3}$') { $allNumeric = $false; break }
+                        }
+                        if ($allNumeric) {
+                            $firstOctet = [int]$octets[0]
+                            if ($firstOctet -eq 0) {
+                                $errMsg = 'Addresses starting with 0 are reserved (current network)'
+                            } elseif ($firstOctet -eq 127) {
+                                $errMsg = 'Loopback range (127.x.x.x) is not allowed for adapters'
+                            } elseif ($text -eq '255.255.255.255') {
+                                $errMsg = 'Broadcast address is not a valid host address'
+                            }
+                        }
+                    }
+                    # Set tooltip on the validation label
+                    $ttip = $validLabel.Parent.Controls | Where-Object { $_ -is [System.Windows.Forms.ToolTip] }
+                    # Use Tag on label to pass tooltip text for hover
+                    $validLabel.Tag = $errMsg
                 }
             }
         })
@@ -1045,12 +1164,41 @@ function New-NetworkView {
                 $text = $tb.Text.Trim()
                 if ([string]::IsNullOrWhiteSpace($text) -or $text -eq $tb.Tag) {
                     $validLabel.Text = ''
+                    $tb.BackColor = $script:Theme.InputBackground
                 } elseif (Test-SubnetMaskFormat -Mask $text) {
                     $validLabel.Text = [char]0x2713
                     $validLabel.ForeColor = $script:Theme.Success
+                    $tb.BackColor = $script:Theme.InputBackground
                 } else {
                     $validLabel.Text = [char]0x2717
                     $validLabel.ForeColor = $script:Theme.Error
+                    # Tint background to indicate error
+                    $tb.BackColor = [System.Drawing.Color]::FromArgb(40, 239, 68, 68)
+
+                    # Determine specific error for tooltip
+                    $errMsg = 'Invalid subnet mask format'
+                    $octets = $text.Split('.')
+                    if ($octets.Count -eq 4) {
+                        $allNumeric = $true
+                        foreach ($o in $octets) {
+                            if ($o -notmatch '^\d{1,3}$') { $allNumeric = $false; break }
+                        }
+                        if ($allNumeric) {
+                            # Check if all octets are valid but mask is non-contiguous
+                            $allInRange = $true
+                            foreach ($o in $octets) {
+                                if ([int]$o -gt 255) { $allInRange = $false; break }
+                            }
+                            if ($allInRange) {
+                                $bin = ''
+                                foreach ($o in $octets) { $bin += [Convert]::ToString([int]$o, 2).PadLeft(8, '0') }
+                                if ($bin -notmatch '^1+0*$') {
+                                    $errMsg = 'Subnet mask is not contiguous (bits must be all 1s then all 0s)'
+                                }
+                            }
+                        }
+                    }
+                    $validLabel.Tag = $errMsg
                 }
             }
         })
@@ -1146,10 +1294,24 @@ function New-NetworkView {
                 return
             }
 
+            # Show "Applying..." state
+            $originalText = $btn.Text
+            $btn.Text = 'Applying...'
+            $btn.Enabled = $false
+            $btn.BackColor = $script:Theme.TextMuted
+            $btn.Refresh()
+
             $roleName = $script:AdapterRoles[$rIdx].RoleName
             $result = Invoke-ApplyAdapterConfig -RoleIndex $rIdx
 
             if ($result.Success) {
+                # Brief success feedback on the button itself
+                $btn.Text = 'Done'
+                $btn.BackColor = $script:Theme.Success
+                $btn.ForeColor = [System.Drawing.Color]::White
+                $btn.Refresh()
+                Start-Sleep -Milliseconds 800
+
                 [System.Windows.Forms.MessageBox]::Show(
                     $result.Message,
                     "DISGUISE BUDDY - $roleName",
@@ -1157,6 +1319,13 @@ function New-NetworkView {
                     [System.Windows.Forms.MessageBoxIcon]::Information
                 )
             } else {
+                # Brief failure feedback on the button itself
+                $btn.Text = 'Failed'
+                $btn.BackColor = $script:Theme.Error
+                $btn.ForeColor = [System.Drawing.Color]::White
+                $btn.Refresh()
+                Start-Sleep -Milliseconds 800
+
                 [System.Windows.Forms.MessageBox]::Show(
                     $result.Message,
                     "DISGUISE BUDDY - $roleName",
@@ -1164,6 +1333,13 @@ function New-NetworkView {
                     [System.Windows.Forms.MessageBoxIcon]::Warning
                 )
             }
+
+            # Restore button to original state
+            $btn.Text = $originalText
+            $btn.Enabled = $true
+            $btn.BackColor = $script:Theme.Primary
+            $btn.ForeColor = [System.Drawing.Color]::White
+            $btn.Tag = 'Primary'
         }
         $card.Controls.Add($applyBtn)
 

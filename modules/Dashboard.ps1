@@ -179,15 +179,28 @@ function New-DashboardView {
                               [System.Windows.Forms.AnchorStyles]::Bottom
 
     # ===================================================================
-    # Section Header
+    # Section Header with Refresh Button
     # ===================================================================
     $sectionHeader = New-SectionHeader -Text "Dashboard" -X 20 -Y 10 -Width 900
 
     $subtitleLabel = New-StyledLabel -Text "DISGUISE BUDDY - Server Configuration Manager" `
         -X 20 -Y 48 -FontSize 9 -IsSecondary
 
+    # Refresh button in the header area
+    $btnRefreshDashboard = New-StyledButton -Text ([char]0x21BB + " Refresh") -X 820 -Y 10 `
+        -Width 100 -Height 30
+    $btnRefreshDashboard.Add_Click({
+        try {
+            Write-AppLog -Message "Dashboard: Refreshing all data" -Level 'INFO'
+            Set-ActiveView -ViewName 'Dashboard'
+        } catch {
+            Write-AppLog -Message "Dashboard: Refresh failed - $_" -Level 'WARN'
+        }
+    })
+
     $scrollContainer.Controls.Add($sectionHeader)
     $scrollContainer.Controls.Add($subtitleLabel)
+    $scrollContainer.Controls.Add($btnRefreshDashboard)
 
     # ===================================================================
     # Row 1: Quick Status Cards (4 cards in a row)
@@ -208,10 +221,17 @@ function New-DashboardView {
     $card1 = New-StyledCard -Title "Server Name" -X $cardStartX -Y $cardY `
         -Width $cardWidth -Height $cardHeight
 
+    # Left accent border - Accent (cyan) for hostname
+    $card1Accent = New-Object System.Windows.Forms.Panel
+    $card1Accent.Location = New-Object System.Drawing.Point(0, 0)
+    $card1Accent.Size = New-Object System.Drawing.Size(4, $cardHeight)
+    $card1Accent.BackColor = $script:Theme.Accent
+    $card1.Controls.Add($card1Accent)
+
     $hostnameStatusBadge = New-StatusBadge -Text "LIVE" -X 150 -Y 15 -Type 'Success'
     $card1.Controls.Add($hostnameStatusBadge)
 
-    $lblHostnameValue = New-StyledLabel -Text $currentHostname -X 15 -Y 50 -FontSize 14 -IsBold
+    $lblHostnameValue = New-StyledLabel -Text $currentHostname -X 15 -Y 50 -FontSize 14 -IsBold -MaxWidth ($cardWidth - 30)
     $card1.Controls.Add($lblHostnameValue)
 
     $scrollContainer.Controls.Add($card1)
@@ -221,12 +241,19 @@ function New-DashboardView {
     $card2 = New-StyledCard -Title "Active Profile" -X $card2X -Y $cardY `
         -Width $cardWidth -Height $cardHeight
 
+    # Left accent border - Primary (purple) for profile
+    $card2Accent = New-Object System.Windows.Forms.Panel
+    $card2Accent.Location = New-Object System.Drawing.Point(0, 0)
+    $card2Accent.Size = New-Object System.Drawing.Size(4, $cardHeight)
+    $card2Accent.BackColor = $script:Theme.Primary
+    $card2.Controls.Add($card2Accent)
+
     $profileBadgeType = if ($activeProfile -eq "None") { 'Warning' } else { 'Info' }
     $profileStatusBadge = New-StatusBadge -Text $profileBadgeType.ToUpper() `
         -X 150 -Y 15 -Type $profileBadgeType
     $card2.Controls.Add($profileStatusBadge)
 
-    $lblProfileValue = New-StyledLabel -Text $activeProfile -X 15 -Y 50 -FontSize 12 -IsBold
+    $lblProfileValue = New-StyledLabel -Text $activeProfile -X 15 -Y 50 -FontSize 12 -IsBold -MaxWidth ($cardWidth - 30)
     $card2.Controls.Add($lblProfileValue)
 
     $scrollContainer.Controls.Add($card2)
@@ -236,12 +263,19 @@ function New-DashboardView {
     $card3 = New-StyledCard -Title "Network Adapters" -X $card3X -Y $cardY `
         -Width $cardWidth -Height $cardHeight
 
+    # Left accent border - Success (green) for adapters
+    $card3Accent = New-Object System.Windows.Forms.Panel
+    $card3Accent.Location = New-Object System.Drawing.Point(0, 0)
+    $card3Accent.Size = New-Object System.Drawing.Size(4, $cardHeight)
+    $card3Accent.BackColor = $script:Theme.Success
+    $card3.Controls.Add($card3Accent)
+
     $adapterBadgeType = if ($adapterCount -eq "N/A") { 'Warning' } else { 'Success' }
     $adapterStatusBadge = New-StatusBadge -Text $adapterBadgeType.ToUpper() `
         -X 150 -Y 15 -Type $adapterBadgeType
     $card3.Controls.Add($adapterStatusBadge)
 
-    $lblAdapterValue = New-StyledLabel -Text $adapterCount -X 15 -Y 50 -FontSize 12 -IsBold
+    $lblAdapterValue = New-StyledLabel -Text $adapterCount -X 15 -Y 50 -FontSize 12 -IsBold -MaxWidth ($cardWidth - 30)
     $card3.Controls.Add($lblAdapterValue)
 
     $scrollContainer.Controls.Add($card3)
@@ -251,12 +285,19 @@ function New-DashboardView {
     $card4 = New-StyledCard -Title "SMB Shares" -X $card4X -Y $cardY `
         -Width $cardWidth -Height $cardHeight
 
+    # Left accent border - Warning (orange) for SMB
+    $card4Accent = New-Object System.Windows.Forms.Panel
+    $card4Accent.Location = New-Object System.Drawing.Point(0, 0)
+    $card4Accent.Size = New-Object System.Drawing.Size(4, $cardHeight)
+    $card4Accent.BackColor = $script:Theme.Warning
+    $card4.Controls.Add($card4Accent)
+
     $shareBadgeType = if ($shareCount -eq "N/A") { 'Warning' } else { 'Info' }
     $shareStatusBadge = New-StatusBadge -Text $shareBadgeType.ToUpper() `
         -X 150 -Y 15 -Type $shareBadgeType
     $card4.Controls.Add($shareStatusBadge)
 
-    $lblShareValue = New-StyledLabel -Text $shareCount -X 15 -Y 50 -FontSize 12 -IsBold
+    $lblShareValue = New-StyledLabel -Text $shareCount -X 15 -Y 50 -FontSize 12 -IsBold -MaxWidth ($cardWidth - 30)
     $card4.Controls.Add($lblShareValue)
 
     $scrollContainer.Controls.Add($card4)
@@ -339,13 +380,10 @@ function New-DashboardView {
     $btnConfigureNetwork = New-StyledButton -Text "Configure" -X 15 -Y 258 `
         -Width 120 -Height 30 -IsPrimary
     $btnConfigureNetwork.Add_Click({
-        # Navigate to the Network view (if a navigation callback is available in AppState)
-        if ($script:AppState.NavigateTo) {
-            try {
-                $script:AppState.NavigateTo.Invoke('Network')
-            } catch {
-                Write-AppLog -Message "Dashboard: Navigate to Network failed - $_" -Level 'WARN'
-            }
+        try {
+            Set-ActiveView -ViewName 'Network'
+        } catch {
+            Write-AppLog -Message "Dashboard: Navigate to Network failed - $_" -Level 'WARN'
         }
     })
     $networkCard.Controls.Add($btnConfigureNetwork)
@@ -409,41 +447,33 @@ function New-DashboardView {
             $btnQuickApply.Tag = $profileName
             $btnQuickApply.Add_Click({
                 $targetProfileName = $this.Tag
-                $confirmResult = [System.Windows.Forms.MessageBox]::Show(
-                    "Apply profile '$targetProfileName' to the local machine?",
-                    "Quick Apply",
-                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
-                    [System.Windows.Forms.MessageBoxIcon]::Question)
-
-                if ($confirmResult -eq [System.Windows.Forms.DialogResult]::Yes) {
-                    try {
-                        $profileToApply = Get-Profile -Name $targetProfileName
-                        if ($profileToApply) {
+                try {
+                    $profileToApply = Get-Profile -Name $targetProfileName
+                    if ($profileToApply) {
+                        # Apply-FullProfile shows its own confirmation dialog and results summary
+                        $applyResult = Apply-FullProfile -Profile $profileToApply
+                        if ($applyResult) {
                             $script:AppState.LastAppliedProfile = $targetProfileName
-                            # Refresh the active profile display on the dashboard
-                            $lblProfileValue.Text = $targetProfileName
-                            $profileStatusBadge.Text = "INFO"
-                            $profileStatusBadge.BackColor = $script:Theme.Accent
-                            [System.Windows.Forms.MessageBox]::Show(
-                                "Profile '$targetProfileName' marked as active.`nUse Network Deploy to push to remote servers.",
-                                "Profile Applied",
-                                [System.Windows.Forms.MessageBoxButtons]::OK,
-                                [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
-                            Write-AppLog -Message "Dashboard: Quick Apply - profile '$targetProfileName' set as active" -Level 'INFO'
+                            Write-AppLog -Message "Dashboard: Quick Apply - profile '$targetProfileName' applied successfully" -Level 'INFO'
+                            # Refresh the dashboard to show updated status
+                            Set-ActiveView -ViewName 'Dashboard'
                         } else {
-                            [System.Windows.Forms.MessageBox]::Show(
-                                "Profile '$targetProfileName' could not be loaded.",
-                                "Error",
-                                [System.Windows.Forms.MessageBoxButtons]::OK,
-                                [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+                            Write-AppLog -Message "Dashboard: Quick Apply - profile '$targetProfileName' had errors" -Level 'WARN'
                         }
-                    } catch {
+                    } else {
                         [System.Windows.Forms.MessageBox]::Show(
-                            "Error applying profile: $_",
+                            "Profile '$targetProfileName' could not be loaded.",
                             "Error",
                             [System.Windows.Forms.MessageBoxButtons]::OK,
                             [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
                     }
+                } catch {
+                    [System.Windows.Forms.MessageBox]::Show(
+                        "Error applying profile: $_",
+                        "Error",
+                        [System.Windows.Forms.MessageBoxButtons]::OK,
+                        [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+                    Write-AppLog -Message "Dashboard: Quick Apply failed - $_" -Level 'ERROR'
                 }
             })
             $profilesCard.Controls.Add($btnQuickApply)
@@ -465,12 +495,10 @@ function New-DashboardView {
     $btnManageProfiles = New-StyledButton -Text "Manage Profiles" -X 15 -Y 258 `
         -Width 140 -Height 30 -IsPrimary
     $btnManageProfiles.Add_Click({
-        if ($script:AppState.NavigateTo) {
-            try {
-                $script:AppState.NavigateTo.Invoke('Profiles')
-            } catch {
-                Write-AppLog -Message "Dashboard: Navigate to Profiles failed - $_" -Level 'WARN'
-            }
+        try {
+            Set-ActiveView -ViewName 'Profiles'
+        } catch {
+            Write-AppLog -Message "Dashboard: Navigate to Profiles failed - $_" -Level 'WARN'
         }
     })
     $profilesCard.Controls.Add($btnManageProfiles)
@@ -482,7 +510,7 @@ function New-DashboardView {
     # ===================================================================
     $row3Y = $row2Y + $colHeight + 20  # 520
     $actionsCard = New-StyledCard -Title "Quick Actions" -X 20 -Y $row3Y `
-        -Width 900 -Height 80
+        -Width 920 -Height 80
 
     # Action buttons positioned in a horizontal row
     $actionBtnY = 40
@@ -493,12 +521,10 @@ function New-DashboardView {
     $btnActionScan = New-StyledButton -Text "Scan Network" -X 15 -Y $actionBtnY `
         -Width 140 -Height $actionBtnHeight -IsPrimary
     $btnActionScan.Add_Click({
-        if ($script:AppState.NavigateTo) {
-            try {
-                $script:AppState.NavigateTo.Invoke('Deploy')
-            } catch {
-                Write-AppLog -Message "Dashboard: Navigate to Deploy failed - $_" -Level 'WARN'
-            }
+        try {
+            Set-ActiveView -ViewName 'Deploy'
+        } catch {
+            Write-AppLog -Message "Dashboard: Navigate to Deploy failed - $_" -Level 'WARN'
         }
     })
     $actionsCard.Controls.Add($btnActionScan)
@@ -568,45 +594,51 @@ function New-DashboardView {
             return
         }
 
-        $confirmResult = [System.Windows.Forms.MessageBox]::Show(
-            "Re-apply the last used profile '$lastProfile'?",
-            "Apply Last Profile",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Question)
-
-        if ($confirmResult -eq [System.Windows.Forms.DialogResult]::Yes) {
-            try {
-                $profileObj = Get-Profile -Name $lastProfile
-                if ($profileObj) {
-                    # Mark as active (actual deployment goes through the Deploy view)
-                    $lblProfileValue.Text = $lastProfile
-                    [System.Windows.Forms.MessageBox]::Show(
-                        "Profile '$lastProfile' marked as active.`nUse Network Deploy to push to remote servers.",
-                        "Profile Active",
-                        [System.Windows.Forms.MessageBoxButtons]::OK,
-                        [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
-                    Write-AppLog -Message "Dashboard: Re-applied last profile '$lastProfile'" -Level 'INFO'
+        try {
+            $profileObj = Get-Profile -Name $lastProfile
+            if ($profileObj) {
+                # Apply-FullProfile shows its own confirmation dialog and results summary
+                $applyResult = Apply-FullProfile -Profile $profileObj
+                if ($applyResult) {
+                    Write-AppLog -Message "Dashboard: Re-applied last profile '$lastProfile' successfully" -Level 'INFO'
+                    # Refresh the dashboard to show updated status
+                    Set-ActiveView -ViewName 'Dashboard'
                 } else {
-                    [System.Windows.Forms.MessageBox]::Show(
-                        "Profile '$lastProfile' was not found. It may have been deleted.",
-                        "Profile Not Found",
-                        [System.Windows.Forms.MessageBoxButtons]::OK,
-                        [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+                    Write-AppLog -Message "Dashboard: Re-apply of '$lastProfile' had errors" -Level 'WARN'
                 }
-            } catch {
+            } else {
                 [System.Windows.Forms.MessageBox]::Show(
-                    "Error loading profile: $_",
-                    "Error",
+                    "Profile '$lastProfile' was not found. It may have been deleted.",
+                    "Profile Not Found",
                     [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+                    [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
             }
+        } catch {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Error loading profile: $_",
+                "Error",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
         }
     })
     $actionsCard.Controls.Add($btnActionApplyLast)
 
+    # --- Button: Manage Shares ---
+    $btnActionShares = New-StyledButton -Text "Manage Shares" `
+        -X (15 + 140 + $actionBtnSpacing + 185 + $actionBtnSpacing + 155 + $actionBtnSpacing) -Y $actionBtnY `
+        -Width 140 -Height $actionBtnHeight
+    $btnActionShares.Add_Click({
+        try {
+            Set-ActiveView -ViewName 'SMB'
+        } catch {
+            Write-AppLog -Message "Dashboard: Navigate to SMB failed - $_" -Level 'WARN'
+        }
+    })
+    $actionsCard.Controls.Add($btnActionShares)
+
     # --- Button: Open d3 Projects ---
     $btnActionOpenD3 = New-StyledButton -Text "Open d3 Projects" `
-        -X (15 + 140 + $actionBtnSpacing + 185 + $actionBtnSpacing + 155 + $actionBtnSpacing) -Y $actionBtnY `
+        -X (15 + 140 + $actionBtnSpacing + 185 + $actionBtnSpacing + 155 + $actionBtnSpacing + 140 + $actionBtnSpacing) -Y $actionBtnY `
         -Width 150 -Height $actionBtnHeight
     $btnActionOpenD3.Add_Click({
         # Common d3 project folder locations

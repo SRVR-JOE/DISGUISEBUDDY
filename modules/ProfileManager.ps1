@@ -250,6 +250,72 @@ function Save-Profile {
         throw "Profile name cannot be empty."
     }
 
+    # Validate ServerName if present (NetBIOS rules: max 15 chars, no invalid chars)
+    if ($Profile.PSObject.Properties['ServerName'] -and -not [string]::IsNullOrWhiteSpace($Profile.ServerName)) {
+        $serverName = $Profile.ServerName
+        if ($serverName.Length -gt 15) {
+            Write-AppLog "Profile validation failed: ServerName '$serverName' exceeds 15 characters." -Level 'ERROR'
+            throw "ServerName '$serverName' exceeds the 15-character NetBIOS limit."
+        }
+        # NetBIOS invalid characters: \ / : * ? " < > | , plus spaces and periods (as sole name)
+        if ($serverName -match '[\\/:*?"<>|,\.\s]') {
+            Write-AppLog "Profile validation failed: ServerName '$serverName' contains invalid characters." -Level 'ERROR'
+            throw "ServerName '$serverName' contains characters not allowed in NetBIOS names (\ / : * ? `" < > | , . or spaces)."
+        }
+    }
+
+    # Validate IP addresses in NetworkAdapters if present
+    if ($Profile.PSObject.Properties['NetworkAdapters'] -and $null -ne $Profile.NetworkAdapters) {
+        foreach ($adapter in $Profile.NetworkAdapters) {
+            if ($null -eq $adapter) { continue }
+
+            # Skip validation for DHCP-enabled or disabled adapters with no IP set
+            $isDHCP = $false
+            if ($adapter.PSObject.Properties['DHCP']) { $isDHCP = $adapter.DHCP }
+            if ($isDHCP) { continue }
+
+            $isEnabled = $true
+            if ($adapter.PSObject.Properties['Enabled']) { $isEnabled = $adapter.Enabled }
+            if (-not $isEnabled) { continue }
+
+            # Validate IPAddress if non-empty
+            if ($adapter.PSObject.Properties['IPAddress'] -and -not [string]::IsNullOrWhiteSpace($adapter.IPAddress)) {
+                $ipAddr = $adapter.IPAddress
+                $parsed = $null
+                $isValidIP = [System.Net.IPAddress]::TryParse($ipAddr.Trim(), [ref]$parsed)
+                if (-not $isValidIP -or $parsed.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+                    $roleName = if ($adapter.PSObject.Properties['Role']) { $adapter.Role } else { "Index $($adapter.Index)" }
+                    Write-AppLog "Profile validation failed: Invalid IP '$ipAddr' for adapter $roleName." -Level 'ERROR'
+                    throw "Invalid IP address '$ipAddr' for adapter $roleName. Expected IPv4 format (e.g. 10.0.0.10)."
+                }
+            }
+
+            # Validate SubnetMask if non-empty
+            if ($adapter.PSObject.Properties['SubnetMask'] -and -not [string]::IsNullOrWhiteSpace($adapter.SubnetMask)) {
+                $mask = $adapter.SubnetMask
+                $parsed = $null
+                $isValidMask = [System.Net.IPAddress]::TryParse($mask.Trim(), [ref]$parsed)
+                if (-not $isValidMask -or $parsed.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+                    $roleName = if ($adapter.PSObject.Properties['Role']) { $adapter.Role } else { "Index $($adapter.Index)" }
+                    Write-AppLog "Profile validation failed: Invalid SubnetMask '$mask' for adapter $roleName." -Level 'ERROR'
+                    throw "Invalid subnet mask '$mask' for adapter $roleName. Expected format (e.g. 255.255.255.0)."
+                }
+            }
+
+            # Validate Gateway if non-empty
+            if ($adapter.PSObject.Properties['Gateway'] -and -not [string]::IsNullOrWhiteSpace($adapter.Gateway)) {
+                $gw = $adapter.Gateway
+                $parsed = $null
+                $isValidGW = [System.Net.IPAddress]::TryParse($gw.Trim(), [ref]$parsed)
+                if (-not $isValidGW -or $parsed.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+                    $roleName = if ($adapter.PSObject.Properties['Role']) { $adapter.Role } else { "Index $($adapter.Index)" }
+                    Write-AppLog "Profile validation failed: Invalid Gateway '$gw' for adapter $roleName." -Level 'ERROR'
+                    throw "Invalid gateway '$gw' for adapter $roleName. Expected IPv4 format."
+                }
+            }
+        }
+    }
+
     # Update the Modified timestamp
     $Profile.Modified = (Get-Date).ToString('o')
 
@@ -492,37 +558,65 @@ function Apply-FullProfile {
     [void]$changesList.AppendLine("")
 
     # Server name
+    $summaryServerName = if ($Profile.PSObject.Properties['ServerName'] -and $Profile.ServerName) { $Profile.ServerName } else { "(Not set)" }
     [void]$changesList.AppendLine("SERVER NAME:")
-    [void]$changesList.AppendLine("  Hostname: $($Profile.ServerName)")
+    [void]$changesList.AppendLine("  Hostname: $summaryServerName")
     [void]$changesList.AppendLine("")
 
     # Network adapters
     [void]$changesList.AppendLine("NETWORK ADAPTERS:")
-    foreach ($adapter in $Profile.NetworkAdapters) {
-        if ($adapter.Enabled) {
-            $ipInfo = if ($adapter.DHCP) { "DHCP" } else { "$($adapter.IPAddress) / $($adapter.SubnetMask)" }
-            [void]$changesList.AppendLine("  [$($adapter.Index)] $($adapter.DisplayName) ($($adapter.Role)): $ipInfo")
-            if ($adapter.Gateway) {
-                [void]$changesList.AppendLine("       Gateway: $($adapter.Gateway)")
+    $summaryAdapters = @()
+    if ($Profile.PSObject.Properties['NetworkAdapters'] -and $null -ne $Profile.NetworkAdapters) {
+        $summaryAdapters = @($Profile.NetworkAdapters)
+    }
+    if ($summaryAdapters.Count -eq 0) {
+        [void]$changesList.AppendLine("  (No adapters defined)")
+    }
+    foreach ($adapter in $summaryAdapters) {
+        if ($null -eq $adapter) { continue }
+
+        $sAdIndex = if ($adapter.PSObject.Properties['Index']) { $adapter.Index } else { "?" }
+        $sAdDisplayName = if ($adapter.PSObject.Properties['DisplayName']) { $adapter.DisplayName } else { "Unknown" }
+        $sAdRole = if ($adapter.PSObject.Properties['Role']) { $adapter.Role } else { "Unknown" }
+        $sAdEnabled = if ($adapter.PSObject.Properties['Enabled']) { $adapter.Enabled } else { $true }
+        $sAdDHCP = if ($adapter.PSObject.Properties['DHCP']) { $adapter.DHCP } else { $false }
+        $sAdIP = if ($adapter.PSObject.Properties['IPAddress']) { $adapter.IPAddress } else { "" }
+        $sAdSubnet = if ($adapter.PSObject.Properties['SubnetMask']) { $adapter.SubnetMask } else { "" }
+        $sAdGateway = if ($adapter.PSObject.Properties['Gateway']) { $adapter.Gateway } else { "" }
+        $sAdDNS1 = if ($adapter.PSObject.Properties['DNS1']) { $adapter.DNS1 } else { "" }
+        $sAdDNS2 = if ($adapter.PSObject.Properties['DNS2']) { $adapter.DNS2 } else { "" }
+
+        if ($sAdEnabled) {
+            $ipInfo = if ($sAdDHCP) { "DHCP" } else { "$sAdIP / $sAdSubnet" }
+            [void]$changesList.AppendLine("  [$sAdIndex] $sAdDisplayName ($sAdRole): $ipInfo")
+            if ($sAdGateway) {
+                [void]$changesList.AppendLine("       Gateway: $sAdGateway")
             }
-            if ($adapter.DNS1) {
-                $dnsStr = $adapter.DNS1
-                if ($adapter.DNS2) { $dnsStr += ", $($adapter.DNS2)" }
+            if ($sAdDNS1) {
+                $dnsStr = $sAdDNS1
+                if ($sAdDNS2) { $dnsStr += ", $sAdDNS2" }
                 [void]$changesList.AppendLine("       DNS: $dnsStr")
             }
         }
         else {
-            [void]$changesList.AppendLine("  [$($adapter.Index)] $($adapter.DisplayName) ($($adapter.Role)): DISABLED")
+            [void]$changesList.AppendLine("  [$sAdIndex] $sAdDisplayName ($sAdRole): DISABLED")
         }
     }
     [void]$changesList.AppendLine("")
 
     # SMB settings
     [void]$changesList.AppendLine("SMB SHARING:")
-    if ($Profile.SMBSettings.ShareD3Projects) {
-        [void]$changesList.AppendLine("  Share Name: $($Profile.SMBSettings.ShareName)")
-        [void]$changesList.AppendLine("  Path: $($Profile.SMBSettings.ProjectsPath)")
-        [void]$changesList.AppendLine("  Permissions: $($Profile.SMBSettings.SharePermissions)")
+    $summarySMBEnabled = $Profile.PSObject.Properties['SMBSettings'] -and
+                         $null -ne $Profile.SMBSettings -and
+                         $Profile.SMBSettings.PSObject.Properties['ShareD3Projects'] -and
+                         $Profile.SMBSettings.ShareD3Projects
+    if ($summarySMBEnabled) {
+        $sSmbShareName = if ($Profile.SMBSettings.PSObject.Properties['ShareName']) { $Profile.SMBSettings.ShareName } else { "(Unknown)" }
+        $sSmbPath = if ($Profile.SMBSettings.PSObject.Properties['ProjectsPath']) { $Profile.SMBSettings.ProjectsPath } else { "(Unknown)" }
+        $sSmbPerms = if ($Profile.SMBSettings.PSObject.Properties['SharePermissions']) { $Profile.SMBSettings.SharePermissions } else { "(Unknown)" }
+        [void]$changesList.AppendLine("  Share Name: $sSmbShareName")
+        [void]$changesList.AppendLine("  Path: $sSmbPath")
+        [void]$changesList.AppendLine("  Permissions: $sSmbPerms")
     }
     else {
         [void]$changesList.AppendLine("  d3 Projects sharing: Disabled")
@@ -553,12 +647,13 @@ function Apply-FullProfile {
     $failCount = 0
     $skipCount = 0
     $restartNeeded = $false
+    $stepResults = @()
 
     # ================================================================
     # Step 1: Change hostname (if different from current)
     # ================================================================
     try {
-        if ($Profile.ServerName -and $Profile.ServerName -ne $env:COMPUTERNAME) {
+        if ($Profile.PSObject.Properties['ServerName'] -and $Profile.ServerName -and $Profile.ServerName -ne $env:COMPUTERNAME) {
             Write-AppLog "Applying hostname change: '$env:COMPUTERNAME' -> '$($Profile.ServerName)'" -Level 'INFO'
             $hostnameResult = Set-ServerHostname -NewName $Profile.ServerName
 
@@ -589,18 +684,39 @@ function Apply-FullProfile {
     # ================================================================
     # Step 2: Configure network adapters
     # ================================================================
-    foreach ($adapter in $Profile.NetworkAdapters) {
-        $adapterLabel = "[$($adapter.Index)] $($adapter.DisplayName) ($($adapter.Role))"
+    $adaptersToApply = @()
+    if ($Profile.PSObject.Properties['NetworkAdapters'] -and $null -ne $Profile.NetworkAdapters) {
+        $adaptersToApply = @($Profile.NetworkAdapters)
+    }
+
+    if ($adaptersToApply.Count -eq 0) {
+        $skipCount++
+        [void]$results.AppendLine("[SKIP] Network Adapters: No adapters defined in profile")
+        Write-AppLog "No NetworkAdapters defined in profile - skipping network config" -Level 'WARN'
+    }
+
+    foreach ($adapter in $adaptersToApply) {
+        if ($null -eq $adapter) {
+            $skipCount++
+            [void]$results.AppendLine("[SKIP] Network Adapter: Null adapter entry in profile")
+            continue
+        }
+
+        $adIndex = if ($adapter.PSObject.Properties['Index']) { $adapter.Index } else { "?" }
+        $adDisplayName = if ($adapter.PSObject.Properties['DisplayName']) { $adapter.DisplayName } else { "Unknown" }
+        $adRole = if ($adapter.PSObject.Properties['Role']) { $adapter.Role } else { "Unknown" }
+        $adapterLabel = "[$adIndex] $adDisplayName ($adRole)"
 
         try {
-            if (-not $adapter.Enabled) {
+            $adEnabled = if ($adapter.PSObject.Properties['Enabled']) { $adapter.Enabled } else { $true }
+            if (-not $adEnabled) {
                 $skipCount++
                 [void]$results.AppendLine("[SKIP] $adapterLabel : Disabled in profile")
                 Write-AppLog "Skipping adapter $adapterLabel - disabled in profile" -Level 'INFO'
                 continue
             }
 
-            $adapterName = $adapter.AdapterName
+            $adapterName = if ($adapter.PSObject.Properties['AdapterName']) { $adapter.AdapterName } else { "" }
             if ([string]::IsNullOrWhiteSpace($adapterName)) {
                 $skipCount++
                 [void]$results.AppendLine("[SKIP] $adapterLabel : No physical adapter assigned")
@@ -608,18 +724,25 @@ function Apply-FullProfile {
                 continue
             }
 
-            if ($adapter.DHCP) {
+            $adDHCP = if ($adapter.PSObject.Properties['DHCP']) { $adapter.DHCP } else { $false }
+            if ($adDHCP) {
                 Write-AppLog "Setting adapter '$adapterName' ($adapterLabel) to DHCP" -Level 'INFO'
                 $adapterResult = Set-AdapterDHCP -AdapterName $adapterName
             }
             else {
-                Write-AppLog "Setting adapter '$adapterName' ($adapterLabel) to static IP=$($adapter.IPAddress)" -Level 'INFO'
+                $adIP = if ($adapter.PSObject.Properties['IPAddress']) { $adapter.IPAddress } else { "" }
+                $adSubnet = if ($adapter.PSObject.Properties['SubnetMask']) { $adapter.SubnetMask } else { "" }
+                $adGateway = if ($adapter.PSObject.Properties['Gateway']) { $adapter.Gateway } else { "" }
+                $adDNS1 = if ($adapter.PSObject.Properties['DNS1']) { $adapter.DNS1 } else { "" }
+                $adDNS2 = if ($adapter.PSObject.Properties['DNS2']) { $adapter.DNS2 } else { "" }
+
+                Write-AppLog "Setting adapter '$adapterName' ($adapterLabel) to static IP=$adIP" -Level 'INFO'
                 $adapterResult = Set-AdapterStaticIP -AdapterName $adapterName `
-                    -IPAddress $adapter.IPAddress `
-                    -SubnetMask $adapter.SubnetMask `
-                    -Gateway $adapter.Gateway `
-                    -DNS1 $adapter.DNS1 `
-                    -DNS2 $adapter.DNS2
+                    -IPAddress $adIP `
+                    -SubnetMask $adSubnet `
+                    -Gateway $adGateway `
+                    -DNS1 $adDNS1 `
+                    -DNS2 $adDNS2
             }
 
             if ($adapterResult.Success) {
@@ -644,12 +767,21 @@ function Apply-FullProfile {
     # Step 3: Configure SMB sharing
     # ================================================================
     try {
-        if ($Profile.SMBSettings.ShareD3Projects) {
-            Write-AppLog "Creating SMB share '$($Profile.SMBSettings.ShareName)' at '$($Profile.SMBSettings.ProjectsPath)'" -Level 'INFO'
+        $applySMB = $Profile.PSObject.Properties['SMBSettings'] -and
+                    $null -ne $Profile.SMBSettings -and
+                    $Profile.SMBSettings.PSObject.Properties['ShareD3Projects'] -and
+                    $Profile.SMBSettings.ShareD3Projects
+
+        if ($applySMB) {
+            $smbShareName = if ($Profile.SMBSettings.PSObject.Properties['ShareName']) { $Profile.SMBSettings.ShareName } else { "d3 Projects" }
+            $smbLocalPath = if ($Profile.SMBSettings.PSObject.Properties['ProjectsPath']) { $Profile.SMBSettings.ProjectsPath } else { "D:\d3 Projects" }
+            $smbPerms = if ($Profile.SMBSettings.PSObject.Properties['SharePermissions']) { $Profile.SMBSettings.SharePermissions } else { "Everyone:Full" }
+
+            Write-AppLog "Creating SMB share '$smbShareName' at '$smbLocalPath'" -Level 'INFO'
             $smbResult = New-D3ProjectShare `
-                -LocalPath $Profile.SMBSettings.ProjectsPath `
-                -ShareName $Profile.SMBSettings.ShareName `
-                -Permissions $Profile.SMBSettings.SharePermissions
+                -LocalPath $smbLocalPath `
+                -ShareName $smbShareName `
+                -Permissions $smbPerms
 
             if ($smbResult.Success) {
                 $successCount++
@@ -908,35 +1040,8 @@ function Get-CurrentSystemProfile {
 }
 
 
-function Convert-PrefixToSubnetMask {
-    <#
-    .SYNOPSIS
-        Converts a CIDR prefix length to a dotted-decimal subnet mask string.
-    .PARAMETER PrefixLength
-        The prefix length (0-32).
-    .OUTPUTS
-        [string] - Dotted-decimal subnet mask (e.g. "255.255.255.0").
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [int]$PrefixLength
-    )
-
-    if ($PrefixLength -lt 0 -or $PrefixLength -gt 32) {
-        return "255.255.255.0"
-    }
-
-    $mask = ([Math]::Pow(2, 32) - [Math]::Pow(2, 32 - $PrefixLength))
-    $maskUInt = [UInt32]$mask
-
-    $b1 = ($maskUInt -shr 24) -band 0xFF
-    $b2 = ($maskUInt -shr 16) -band 0xFF
-    $b3 = ($maskUInt -shr 8) -band 0xFF
-    $b4 = $maskUInt -band 0xFF
-
-    return "$b1.$b2.$b3.$b4"
-}
-
+# NOTE: Convert-PrefixToSubnetMask is defined in NetworkConfig.ps1 and available
+# in the shared scope since both modules are dot-sourced by DisguiseBuddy.ps1.
 
 # ============================================================================
 # UI HELPER FUNCTIONS - Dialogs and small components
@@ -1116,6 +1221,367 @@ function Show-NewProfileDialog {
         }
     }
     return $null
+}
+
+
+function Show-EditFullProfileDialog {
+    <#
+    .SYNOPSIS
+        Opens a scrollable dialog to edit all sections of a profile:
+        ServerName, all 6 network adapters, and SMB settings.
+    .PARAMETER Profile
+        The profile object to edit. Modified in-place if user clicks Save.
+    .OUTPUTS
+        [bool] - $true if changes were saved, $false if cancelled.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$Profile
+    )
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Edit Profile - $($Profile.Name)"
+    $form.Size = New-Object System.Drawing.Size(620, 700)
+    $form.StartPosition = 'CenterParent'
+    $form.FormBorderStyle = 'Sizable'
+    $form.MinimumSize = New-Object System.Drawing.Size(600, 500)
+    $form.MaximizeBox = $true
+    $form.MinimizeBox = $false
+    $form.BackColor = $script:Theme.Background
+    $form.ForeColor = $script:Theme.Text
+
+    # Scrollable content panel
+    $scrollPanel = New-Object System.Windows.Forms.Panel
+    $scrollPanel.Location = New-Object System.Drawing.Point(0, 0)
+    $scrollPanel.Size = New-Object System.Drawing.Size(($form.ClientSize.Width), ($form.ClientSize.Height - 50))
+    $scrollPanel.AutoScroll = $true
+    $scrollPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
+        [System.Windows.Forms.AnchorStyles]::Left -bor
+        [System.Windows.Forms.AnchorStyles]::Right -bor
+        [System.Windows.Forms.AnchorStyles]::Bottom
+
+    $labelFont = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    $inputFont = New-Object System.Drawing.Font("Segoe UI", 9)
+    $sectionFont = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+    $innerWidth = 540
+    $currentY = 15
+
+    # ---- Server Name Section ----
+    $serverSectionLabel = New-Object System.Windows.Forms.Label
+    $serverSectionLabel.Text = "Server Name"
+    $serverSectionLabel.Location = New-Object System.Drawing.Point(15, $currentY)
+    $serverSectionLabel.Size = New-Object System.Drawing.Size($innerWidth, 22)
+    $serverSectionLabel.Font = $sectionFont
+    $serverSectionLabel.ForeColor = $script:Theme.Primary
+    $scrollPanel.Controls.Add($serverSectionLabel)
+    $currentY += 28
+
+    $serverNameLabel = New-Object System.Windows.Forms.Label
+    $serverNameLabel.Text = "Hostname (max 15 chars):"
+    $serverNameLabel.Location = New-Object System.Drawing.Point(15, $currentY)
+    $serverNameLabel.Size = New-Object System.Drawing.Size(180, 20)
+    $serverNameLabel.Font = $labelFont
+    $serverNameLabel.ForeColor = $script:Theme.Text
+    $scrollPanel.Controls.Add($serverNameLabel)
+
+    $serverNameBox = New-Object System.Windows.Forms.TextBox
+    $serverNameBox.Location = New-Object System.Drawing.Point(200, ($currentY - 2))
+    $serverNameBox.Size = New-Object System.Drawing.Size(200, 24)
+    $serverNameBox.Font = $inputFont
+    $serverNameBox.MaxLength = 15
+    $serverNameBox.BackColor = $script:Theme.InputBackground
+    $serverNameBox.ForeColor = $script:Theme.Text
+    $serverNameBox.Text = if ($Profile.PSObject.Properties['ServerName']) { $Profile.ServerName } else { "" }
+    $scrollPanel.Controls.Add($serverNameBox)
+    $currentY += 35
+
+    # ---- Separator ----
+    $sep1 = New-Object System.Windows.Forms.Label
+    $sep1.Location = New-Object System.Drawing.Point(15, $currentY)
+    $sep1.Size = New-Object System.Drawing.Size($innerWidth, 1)
+    $sep1.BackColor = $script:Theme.Border
+    $scrollPanel.Controls.Add($sep1)
+    $currentY += 10
+
+    # ---- Network Adapters Section ----
+    $netSectionLabel = New-Object System.Windows.Forms.Label
+    $netSectionLabel.Text = "Network Adapters"
+    $netSectionLabel.Location = New-Object System.Drawing.Point(15, $currentY)
+    $netSectionLabel.Size = New-Object System.Drawing.Size($innerWidth, 22)
+    $netSectionLabel.Font = $sectionFont
+    $netSectionLabel.ForeColor = $script:Theme.Primary
+    $scrollPanel.Controls.Add($netSectionLabel)
+    $currentY += 28
+
+    # Store adapter textbox references for reading on Save
+    $adapterControls = @()
+
+    $adapters = @()
+    if ($Profile.PSObject.Properties['NetworkAdapters'] -and $null -ne $Profile.NetworkAdapters) {
+        $adapters = @($Profile.NetworkAdapters)
+    }
+
+    for ($i = 0; $i -lt 6; $i++) {
+        $adapter = if ($i -lt $adapters.Count) { $adapters[$i] } else { $null }
+
+        $roleName = if ($null -ne $adapter -and $adapter.PSObject.Properties['Role']) { $adapter.Role } else { "Adapter $i" }
+        $displayName = if ($null -ne $adapter -and $adapter.PSObject.Properties['DisplayName']) { $adapter.DisplayName } else { "Adapter $i" }
+
+        # Adapter header
+        $adHeaderLabel = New-Object System.Windows.Forms.Label
+        $adHeaderLabel.Text = "[$i] $displayName ($roleName)"
+        $adHeaderLabel.Location = New-Object System.Drawing.Point(15, $currentY)
+        $adHeaderLabel.Size = New-Object System.Drawing.Size($innerWidth, 20)
+        $adHeaderLabel.Font = $labelFont
+        $adHeaderLabel.ForeColor = $script:Theme.Accent
+        $scrollPanel.Controls.Add($adHeaderLabel)
+        $currentY += 24
+
+        # IP Address
+        $ipLbl = New-Object System.Windows.Forms.Label
+        $ipLbl.Text = "IP:"
+        $ipLbl.Location = New-Object System.Drawing.Point(30, ($currentY + 2))
+        $ipLbl.Size = New-Object System.Drawing.Size(30, 20)
+        $ipLbl.Font = $inputFont
+        $ipLbl.ForeColor = $script:Theme.TextSecondary
+        $scrollPanel.Controls.Add($ipLbl)
+
+        $ipBox = New-Object System.Windows.Forms.TextBox
+        $ipBox.Location = New-Object System.Drawing.Point(65, $currentY)
+        $ipBox.Size = New-Object System.Drawing.Size(120, 22)
+        $ipBox.Font = $inputFont
+        $ipBox.BackColor = $script:Theme.InputBackground
+        $ipBox.ForeColor = $script:Theme.Text
+        $ipBox.Text = if ($null -ne $adapter -and $adapter.PSObject.Properties['IPAddress']) { $adapter.IPAddress } else { "" }
+        $scrollPanel.Controls.Add($ipBox)
+
+        # Subnet Mask
+        $subLbl = New-Object System.Windows.Forms.Label
+        $subLbl.Text = "Mask:"
+        $subLbl.Location = New-Object System.Drawing.Point(195, ($currentY + 2))
+        $subLbl.Size = New-Object System.Drawing.Size(40, 20)
+        $subLbl.Font = $inputFont
+        $subLbl.ForeColor = $script:Theme.TextSecondary
+        $scrollPanel.Controls.Add($subLbl)
+
+        $subBox = New-Object System.Windows.Forms.TextBox
+        $subBox.Location = New-Object System.Drawing.Point(240, $currentY)
+        $subBox.Size = New-Object System.Drawing.Size(120, 22)
+        $subBox.Font = $inputFont
+        $subBox.BackColor = $script:Theme.InputBackground
+        $subBox.ForeColor = $script:Theme.Text
+        $subBox.Text = if ($null -ne $adapter -and $adapter.PSObject.Properties['SubnetMask']) { $adapter.SubnetMask } else { "" }
+        $scrollPanel.Controls.Add($subBox)
+
+        # Gateway
+        $gwLbl = New-Object System.Windows.Forms.Label
+        $gwLbl.Text = "GW:"
+        $gwLbl.Location = New-Object System.Drawing.Point(370, ($currentY + 2))
+        $gwLbl.Size = New-Object System.Drawing.Size(30, 20)
+        $gwLbl.Font = $inputFont
+        $gwLbl.ForeColor = $script:Theme.TextSecondary
+        $scrollPanel.Controls.Add($gwLbl)
+
+        $gwBox = New-Object System.Windows.Forms.TextBox
+        $gwBox.Location = New-Object System.Drawing.Point(405, $currentY)
+        $gwBox.Size = New-Object System.Drawing.Size(120, 22)
+        $gwBox.Font = $inputFont
+        $gwBox.BackColor = $script:Theme.InputBackground
+        $gwBox.ForeColor = $script:Theme.Text
+        $gwBox.Text = if ($null -ne $adapter -and $adapter.PSObject.Properties['Gateway']) { $adapter.Gateway } else { "" }
+        $scrollPanel.Controls.Add($gwBox)
+        $currentY += 26
+
+        # DHCP checkbox
+        $dhcpCheck = New-Object System.Windows.Forms.CheckBox
+        $dhcpCheck.Text = "DHCP"
+        $dhcpCheck.Location = New-Object System.Drawing.Point(30, $currentY)
+        $dhcpCheck.Size = New-Object System.Drawing.Size(65, 20)
+        $dhcpCheck.Font = $inputFont
+        $dhcpCheck.ForeColor = $script:Theme.Text
+        $dhcpCheck.Checked = if ($null -ne $adapter -and $adapter.PSObject.Properties['DHCP']) { $adapter.DHCP } else { $false }
+        $scrollPanel.Controls.Add($dhcpCheck)
+
+        # Enabled checkbox
+        $enabledCheck = New-Object System.Windows.Forms.CheckBox
+        $enabledCheck.Text = "Enabled"
+        $enabledCheck.Location = New-Object System.Drawing.Point(100, $currentY)
+        $enabledCheck.Size = New-Object System.Drawing.Size(75, 20)
+        $enabledCheck.Font = $inputFont
+        $enabledCheck.ForeColor = $script:Theme.Text
+        $enabledCheck.Checked = if ($null -ne $adapter -and $adapter.PSObject.Properties['Enabled']) { $adapter.Enabled } else { $true }
+        $scrollPanel.Controls.Add($enabledCheck)
+
+        $currentY += 28
+
+        # Store references
+        $adapterControls += @{
+            Index     = $i
+            IPBox     = $ipBox
+            SubnetBox = $subBox
+            GatewayBox = $gwBox
+            DHCPCheck = $dhcpCheck
+            EnabledCheck = $enabledCheck
+        }
+    }
+
+    # ---- Separator ----
+    $sep2 = New-Object System.Windows.Forms.Label
+    $sep2.Location = New-Object System.Drawing.Point(15, $currentY)
+    $sep2.Size = New-Object System.Drawing.Size($innerWidth, 1)
+    $sep2.BackColor = $script:Theme.Border
+    $scrollPanel.Controls.Add($sep2)
+    $currentY += 10
+
+    # ---- SMB Settings Section ----
+    $smbSectionLabel = New-Object System.Windows.Forms.Label
+    $smbSectionLabel.Text = "SMB Sharing"
+    $smbSectionLabel.Location = New-Object System.Drawing.Point(15, $currentY)
+    $smbSectionLabel.Size = New-Object System.Drawing.Size($innerWidth, 22)
+    $smbSectionLabel.Font = $sectionFont
+    $smbSectionLabel.ForeColor = $script:Theme.Primary
+    $scrollPanel.Controls.Add($smbSectionLabel)
+    $currentY += 28
+
+    $smbSettings = if ($Profile.PSObject.Properties['SMBSettings'] -and $null -ne $Profile.SMBSettings) { $Profile.SMBSettings } else { $null }
+
+    $shareCheck = New-Object System.Windows.Forms.CheckBox
+    $shareCheck.Text = "Share d3 Projects"
+    $shareCheck.Location = New-Object System.Drawing.Point(15, $currentY)
+    $shareCheck.Size = New-Object System.Drawing.Size(150, 20)
+    $shareCheck.Font = $inputFont
+    $shareCheck.ForeColor = $script:Theme.Text
+    $shareCheck.Checked = if ($null -ne $smbSettings -and $smbSettings.PSObject.Properties['ShareD3Projects']) { $smbSettings.ShareD3Projects } else { $false }
+    $scrollPanel.Controls.Add($shareCheck)
+    $currentY += 26
+
+    # Share Name
+    $shareNameLbl = New-Object System.Windows.Forms.Label
+    $shareNameLbl.Text = "Share Name:"
+    $shareNameLbl.Location = New-Object System.Drawing.Point(15, ($currentY + 2))
+    $shareNameLbl.Size = New-Object System.Drawing.Size(85, 20)
+    $shareNameLbl.Font = $inputFont
+    $shareNameLbl.ForeColor = $script:Theme.TextSecondary
+    $scrollPanel.Controls.Add($shareNameLbl)
+
+    $shareNameBox = New-Object System.Windows.Forms.TextBox
+    $shareNameBox.Location = New-Object System.Drawing.Point(105, $currentY)
+    $shareNameBox.Size = New-Object System.Drawing.Size(200, 22)
+    $shareNameBox.Font = $inputFont
+    $shareNameBox.BackColor = $script:Theme.InputBackground
+    $shareNameBox.ForeColor = $script:Theme.Text
+    $shareNameBox.Text = if ($null -ne $smbSettings -and $smbSettings.PSObject.Properties['ShareName']) { $smbSettings.ShareName } else { "d3 Projects" }
+    $scrollPanel.Controls.Add($shareNameBox)
+    $currentY += 26
+
+    # Projects Path
+    $projPathLbl = New-Object System.Windows.Forms.Label
+    $projPathLbl.Text = "Path:"
+    $projPathLbl.Location = New-Object System.Drawing.Point(15, ($currentY + 2))
+    $projPathLbl.Size = New-Object System.Drawing.Size(85, 20)
+    $projPathLbl.Font = $inputFont
+    $projPathLbl.ForeColor = $script:Theme.TextSecondary
+    $scrollPanel.Controls.Add($projPathLbl)
+
+    $projPathBox = New-Object System.Windows.Forms.TextBox
+    $projPathBox.Location = New-Object System.Drawing.Point(105, $currentY)
+    $projPathBox.Size = New-Object System.Drawing.Size(380, 22)
+    $projPathBox.Font = $inputFont
+    $projPathBox.BackColor = $script:Theme.InputBackground
+    $projPathBox.ForeColor = $script:Theme.Text
+    $projPathBox.Text = if ($null -ne $smbSettings -and $smbSettings.PSObject.Properties['ProjectsPath']) { $smbSettings.ProjectsPath } else { "D:\d3 Projects" }
+    $scrollPanel.Controls.Add($projPathBox)
+    $currentY += 30
+
+    # Add padding at end for scroll
+    $padLabel = New-Object System.Windows.Forms.Label
+    $padLabel.Location = New-Object System.Drawing.Point(0, $currentY)
+    $padLabel.Size = New-Object System.Drawing.Size(1, 10)
+    $scrollPanel.Controls.Add($padLabel)
+
+    $form.Controls.Add($scrollPanel)
+
+    # ---- Button bar at bottom ----
+    $btnPanel = New-Object System.Windows.Forms.Panel
+    $btnPanel.Location = New-Object System.Drawing.Point(0, ($form.ClientSize.Height - 50))
+    $btnPanel.Size = New-Object System.Drawing.Size($form.ClientSize.Width, 50)
+    $btnPanel.BackColor = $script:Theme.Surface
+    $btnPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor
+        [System.Windows.Forms.AnchorStyles]::Left -bor
+        [System.Windows.Forms.AnchorStyles]::Right
+
+    $saveButton = New-Object System.Windows.Forms.Button
+    $saveButton.Text = "Save"
+    $saveButton.Location = New-Object System.Drawing.Point(($form.ClientSize.Width - 200), 8)
+    $saveButton.Size = New-Object System.Drawing.Size(85, 34)
+    $saveButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $saveButton.FlatStyle = 'Flat'
+    $saveButton.BackColor = $script:Theme.Primary
+    $saveButton.ForeColor = [System.Drawing.Color]::White
+    $saveButton.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    $saveButton.Anchor = [System.Windows.Forms.AnchorStyles]::Right
+    $btnPanel.Controls.Add($saveButton)
+
+    $cancelButton = New-Object System.Windows.Forms.Button
+    $cancelButton.Text = "Cancel"
+    $cancelButton.Location = New-Object System.Drawing.Point(($form.ClientSize.Width - 100), 8)
+    $cancelButton.Size = New-Object System.Drawing.Size(85, 34)
+    $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $cancelButton.FlatStyle = 'Flat'
+    $cancelButton.BackColor = $script:Theme.Surface
+    $cancelButton.ForeColor = $script:Theme.Text
+    $cancelButton.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $cancelButton.Anchor = [System.Windows.Forms.AnchorStyles]::Right
+    $btnPanel.Controls.Add($cancelButton)
+
+    $form.Controls.Add($btnPanel)
+    $form.AcceptButton = $saveButton
+    $form.CancelButton = $cancelButton
+
+    $dialogResult = $form.ShowDialog()
+
+    if ($dialogResult -eq [System.Windows.Forms.DialogResult]::OK) {
+        # Apply changes to the profile object
+        $Profile.ServerName = $serverNameBox.Text.Trim()
+
+        # Update network adapters
+        for ($i = 0; $i -lt $adapterControls.Count; $i++) {
+            $ctrl = $adapterControls[$i]
+            $idx = $ctrl.Index
+
+            # Ensure the adapter array and entry exist
+            if ($null -eq $Profile.NetworkAdapters) {
+                $Profile.NetworkAdapters = @()
+            }
+            if ($idx -lt $Profile.NetworkAdapters.Count -and $null -ne $Profile.NetworkAdapters[$idx]) {
+                $Profile.NetworkAdapters[$idx].IPAddress = $ctrl.IPBox.Text.Trim()
+                $Profile.NetworkAdapters[$idx].SubnetMask = $ctrl.SubnetBox.Text.Trim()
+                $Profile.NetworkAdapters[$idx].Gateway = $ctrl.GatewayBox.Text.Trim()
+                $Profile.NetworkAdapters[$idx].DHCP = $ctrl.DHCPCheck.Checked
+                $Profile.NetworkAdapters[$idx].Enabled = $ctrl.EnabledCheck.Checked
+            }
+        }
+
+        # Update SMB settings
+        if ($null -eq $Profile.SMBSettings) {
+            $Profile.SMBSettings = [PSCustomObject]@{
+                ShareD3Projects  = $false
+                ProjectsPath     = "D:\d3 Projects"
+                ShareName        = "d3 Projects"
+                SharePermissions = "Everyone:Full"
+                AdditionalShares = @()
+            }
+        }
+        $Profile.SMBSettings.ShareD3Projects = $shareCheck.Checked
+        $Profile.SMBSettings.ShareName = $shareNameBox.Text.Trim()
+        $Profile.SMBSettings.ProjectsPath = $projPathBox.Text.Trim()
+
+        $form.Dispose()
+        return $true
+    }
+
+    $form.Dispose()
+    return $false
 }
 
 
@@ -1394,12 +1860,29 @@ function Refresh-ProfileList {
     if ($null -eq $script:ProfileListBox) { return }
 
     $script:ProfileListBox.Items.Clear()
-    $profiles = Get-AllProfiles
+
+    # Ensure profiles directory exists (first-run scenario)
+    $profilesDir = Get-ProfilesDirectory
+
+    $profiles = @()
+    try {
+        $profiles = Get-AllProfiles
+    }
+    catch {
+        Write-AppLog "Failed to load profiles during refresh: $_" -Level 'ERROR'
+        $profiles = @()
+    }
+
+    if ($null -eq $profiles) { $profiles = @() }
 
     foreach ($p in $profiles) {
+        if ($null -eq $p) { continue }
+
         # Format: Name|Description|ModifiedDate (pipe-delimited for custom drawing)
+        $pName = if ($p.PSObject.Properties['Name'] -and $p.Name) { $p.Name } else { "(Unnamed)" }
+        $pDesc = if ($p.PSObject.Properties['Description']) { "$($p.Description)" } else { "" }
         $modifiedStr = ""
-        if ($p.Modified) {
+        if ($p.PSObject.Properties['Modified'] -and $p.Modified) {
             try {
                 $modifiedDate = [DateTime]::Parse($p.Modified)
                 $modifiedStr = "Modified: $($modifiedDate.ToString('yyyy-MM-dd HH:mm'))"
@@ -1409,7 +1892,7 @@ function Refresh-ProfileList {
             }
         }
 
-        $displayText = "$($p.Name)|$($p.Description)|$modifiedStr"
+        $displayText = "$pName|$pDesc|$modifiedStr"
         $script:ProfileListBox.Items.Add($displayText) | Out-Null
     }
 
@@ -1429,9 +1912,12 @@ function Select-ProfileInList {
     param([string]$Name)
 
     if ($null -eq $script:ProfileListBox) { return }
+    if ([string]::IsNullOrWhiteSpace($Name)) { return }
 
     for ($i = 0; $i -lt $script:ProfileListBox.Items.Count; $i++) {
-        $itemText = $script:ProfileListBox.Items[$i].ToString()
+        $item = $script:ProfileListBox.Items[$i]
+        if ($null -eq $item) { continue }
+        $itemText = $item.ToString()
         $itemName = ($itemText -split '\|', 3)[0]
         if ($itemName -eq $Name) {
             $script:ProfileListBox.SelectedIndex = $i
@@ -1486,13 +1972,22 @@ function Update-ProfileDetailPanel {
     $currentY = 12
     $innerWidth = $panelWidth - 40
 
+    # Safely read profile properties with null fallbacks
+    $profileName = if ($p.PSObject.Properties['Name'] -and $p.Name) { $p.Name } else { "(Unnamed)" }
+    $profileDesc = if ($p.PSObject.Properties['Description']) { "$($p.Description)" } else { "" }
+    $profileServerName = if ($p.PSObject.Properties['ServerName'] -and $p.ServerName) { $p.ServerName } else { "(Not set)" }
+    $profileCreated = if ($p.PSObject.Properties['Created']) { "$($p.Created)" } else { "" }
+    $profileModified = if ($p.PSObject.Properties['Modified']) { "$($p.Modified)" } else { "" }
+    $profileAdapters = if ($p.PSObject.Properties['NetworkAdapters'] -and $null -ne $p.NetworkAdapters) { @($p.NetworkAdapters) } else { @() }
+    $profileSMB = if ($p.PSObject.Properties['SMBSettings'] -and $null -ne $p.SMBSettings) { $p.SMBSettings } else { $null }
+
     # ---- Profile Name (editable) ----
     $nameLabel = New-StyledLabel -Text "Profile Name" -X 15 -Y $currentY -FontSize 9 -IsSecondary
     $script:DetailPanel.Controls.Add($nameLabel)
     $currentY += 22
 
     $script:ProfileNameBox = New-StyledTextBox -X 15 -Y $currentY -Width $innerWidth -Height 30
-    $script:ProfileNameBox.Text = $p.Name
+    $script:ProfileNameBox.Text = $profileName
     $script:ProfileNameBox.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $script:DetailPanel.Controls.Add($script:ProfileNameBox)
     $currentY += 40
@@ -1503,21 +1998,25 @@ function Update-ProfileDetailPanel {
     $currentY += 22
 
     $script:ProfileDescBox = New-StyledTextBox -X 15 -Y $currentY -Width $innerWidth -Height 28
-    $script:ProfileDescBox.Text = $p.Description
+    $script:ProfileDescBox.Text = $profileDesc
     $script:DetailPanel.Controls.Add($script:ProfileDescBox)
     $currentY += 38
 
     # ---- Timestamps (read-only) ----
     $createdStr = ""
     $modifiedStr = ""
-    try {
-        $createdStr = ([DateTime]::Parse($p.Created)).ToString('yyyy-MM-dd HH:mm')
+    if ($profileCreated) {
+        try {
+            $createdStr = ([DateTime]::Parse($profileCreated)).ToString('yyyy-MM-dd HH:mm')
+        }
+        catch { $createdStr = $profileCreated }
     }
-    catch { $createdStr = "$($p.Created)" }
-    try {
-        $modifiedStr = ([DateTime]::Parse($p.Modified)).ToString('yyyy-MM-dd HH:mm')
+    if ($profileModified) {
+        try {
+            $modifiedStr = ([DateTime]::Parse($profileModified)).ToString('yyyy-MM-dd HH:mm')
+        }
+        catch { $modifiedStr = $profileModified }
     }
-    catch { $modifiedStr = "$($p.Modified)" }
 
     $timestampLabel = New-StyledLabel -Text "Created: $createdStr  |  Modified: $modifiedStr" `
         -X 15 -Y $currentY -IsMuted -FontSize 8
@@ -1527,29 +2026,37 @@ function Update-ProfileDetailPanel {
     # ---- Server Name Card ----
     $serverCard = New-StyledCard -Title "Server Name" -X 15 -Y $currentY `
         -Width $innerWidth -Height 55
-    $serverValueLabel = New-StyledLabel -Text $p.ServerName -X 12 -Y 25 -FontSize 11 -IsBold
+    $serverValueLabel = New-StyledLabel -Text $profileServerName -X 12 -Y 25 -FontSize 11 -IsBold
     $serverCard.Controls.Add($serverValueLabel)
     $script:DetailPanel.Controls.Add($serverCard)
     $currentY += 65
 
     # ---- Network Adapters Summary Card ----
-    $adapterCount = 0
-    if ($p.NetworkAdapters) { $adapterCount = $p.NetworkAdapters.Count }
+    $adapterCount = $profileAdapters.Count
     $adapterCardHeight = 30 + ($adapterCount * 24)
 
     $adapterCard = New-StyledCard -Title "Network Adapters ($adapterCount)" -X 15 -Y $currentY `
         -Width $innerWidth -Height $adapterCardHeight
 
     $adapterY = 26
-    foreach ($adapter in $p.NetworkAdapters) {
-        $roleText = "[$($adapter.Index)] $($adapter.Role)"
-        $ipText = if ($adapter.DHCP) { "DHCP" }
-                  elseif ($adapter.IPAddress) { $adapter.IPAddress }
+    foreach ($adapter in $profileAdapters) {
+        if ($null -eq $adapter) { continue }
+
+        $adIndex = if ($adapter.PSObject.Properties['Index']) { $adapter.Index } else { "?" }
+        $adRole = if ($adapter.PSObject.Properties['Role']) { $adapter.Role } else { "Unknown" }
+        $adDisplayName = if ($adapter.PSObject.Properties['DisplayName']) { $adapter.DisplayName } else { $adRole }
+        $adIPAddress = if ($adapter.PSObject.Properties['IPAddress']) { $adapter.IPAddress } else { "" }
+        $adDHCP = if ($adapter.PSObject.Properties['DHCP']) { $adapter.DHCP } else { $false }
+        $adEnabled = if ($adapter.PSObject.Properties['Enabled']) { $adapter.Enabled } else { $true }
+
+        $roleText = "[$adIndex] $adRole"
+        $ipText = if ($adDHCP) { "DHCP" }
+                  elseif ($adIPAddress) { $adIPAddress }
                   else { "Not configured" }
 
-        $statusColor = if (-not $adapter.Enabled) { $script:Theme.TextMuted }
-                       elseif ($adapter.DHCP) { $script:Theme.Accent }
-                       elseif ($adapter.IPAddress) { $script:Theme.Success }
+        $statusColor = if (-not $adEnabled) { $script:Theme.TextMuted }
+                       elseif ($adDHCP) { $script:Theme.Accent }
+                       elseif ($adIPAddress) { $script:Theme.Success }
                        else { $script:Theme.Warning }
 
         # Role label (left-aligned)
@@ -1564,7 +2071,7 @@ function Update-ProfileDetailPanel {
 
         # Display name label (center)
         $displayLabel = New-Object System.Windows.Forms.Label
-        $displayLabel.Text = $adapter.DisplayName
+        $displayLabel.Text = $adDisplayName
         $displayLabel.Location = New-Object System.Drawing.Point(175, $adapterY)
         $displayLabel.Size = New-Object System.Drawing.Size(180, 20)
         $displayLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8)
@@ -1574,7 +2081,7 @@ function Update-ProfileDetailPanel {
 
         # IP / status label (right-aligned)
         $ipLabel = New-Object System.Windows.Forms.Label
-        $ipLabel.Text = if (-not $adapter.Enabled) { "Disabled" } else { $ipText }
+        $ipLabel.Text = if (-not $adEnabled) { "Disabled" } else { $ipText }
         $ipLabel.Location = New-Object System.Drawing.Point(360, $adapterY)
         $ipLabel.Size = New-Object System.Drawing.Size(150, 20)
         $ipLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
@@ -1593,22 +2100,26 @@ function Update-ProfileDetailPanel {
     $smbCard = New-StyledCard -Title "SMB Sharing" -X 15 -Y $currentY `
         -Width $innerWidth -Height 80
 
-    $smbStatus = if ($p.SMBSettings.ShareD3Projects) {
-        "Enabled"
+    $smbShareEnabled = $false
+    if ($null -ne $profileSMB -and $profileSMB.PSObject.Properties['ShareD3Projects']) {
+        $smbShareEnabled = $profileSMB.ShareD3Projects
     }
-    else {
-        "Disabled"
-    }
-    $smbStatusType = if ($p.SMBSettings.ShareD3Projects) { "Success" } else { "Warning" }
+
+    $smbStatus = if ($smbShareEnabled) { "Enabled" } else { "Disabled" }
+    $smbStatusType = if ($smbShareEnabled) { "Success" } else { "Warning" }
     $smbBadge = New-StatusBadge -Text $smbStatus -X 12 -Y 26 -Type $smbStatusType
     $smbCard.Controls.Add($smbBadge)
 
-    if ($p.SMBSettings.ShareD3Projects) {
-        $shareInfoLabel = New-StyledLabel -Text "Share: $($p.SMBSettings.ShareName)  |  Path: $($p.SMBSettings.ProjectsPath)" `
+    if ($smbShareEnabled -and $null -ne $profileSMB) {
+        $smbShareName = if ($profileSMB.PSObject.Properties['ShareName']) { $profileSMB.ShareName } else { "(Unknown)" }
+        $smbProjectsPath = if ($profileSMB.PSObject.Properties['ProjectsPath']) { $profileSMB.ProjectsPath } else { "(Unknown)" }
+        $smbPermissions = if ($profileSMB.PSObject.Properties['SharePermissions']) { $profileSMB.SharePermissions } else { "(Unknown)" }
+
+        $shareInfoLabel = New-StyledLabel -Text "Share: $smbShareName  |  Path: $smbProjectsPath" `
             -X 100 -Y 28 -IsSecondary -FontSize 9
         $smbCard.Controls.Add($shareInfoLabel)
 
-        $permLabel = New-StyledLabel -Text "Permissions: $($p.SMBSettings.SharePermissions)" `
+        $permLabel = New-StyledLabel -Text "Permissions: $smbPermissions" `
             -X 12 -Y 52 -IsMuted -FontSize 8
         $smbCard.Controls.Add($permLabel)
     }
@@ -1685,13 +2196,24 @@ function Update-ProfileDetailPanel {
     $editBtn = New-StyledButton -Text "Edit Full Profile" -X $actionX -Y $actionY `
         -Width 130 -Height 36 -OnClick {
         if ($null -eq $script:SelectedProfile) { return }
-        # Placeholder: Full profile editor will be in a separate module/view
-        [System.Windows.Forms.MessageBox]::Show(
-            "The full profile editor will open here.`nThis feature is coming in a future update.",
-            "Edit Profile",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Information
-        ) | Out-Null
+
+        $editResult = Show-EditFullProfileDialog -Profile $script:SelectedProfile
+        if ($editResult) {
+            try {
+                Save-Profile -Profile $script:SelectedProfile
+                Refresh-ProfileList
+                Select-ProfileInList -Name $script:SelectedProfile.Name
+                Update-ProfileDetailPanel
+            }
+            catch {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Failed to save profile changes:`n$_",
+                    "Save Error",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Error
+                ) | Out-Null
+            }
+        }
     }
     $script:DetailPanel.Controls.Add($editBtn)
     $actionX += 140

@@ -228,6 +228,7 @@ function New-ServerIdentityView {
 
     # Clear existing content
     $ContentPanel.Controls.Clear()
+    $ContentPanel.SuspendLayout()
 
     # Create a scrollable container for all content
     $scrollPanel = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
@@ -261,62 +262,112 @@ function New-ServerIdentityView {
     $lblHostnameHint = New-StyledLabel -Text "Server Hostname" -X 15 -Y 85 -IsMuted -FontSize 9
     $card1.Controls.Add($lblHostnameHint)
 
-    # System info grid
-    $infoStartY = 115
-    $infoRowHeight = 28
-    $labelX = 15
-    $valueX = 160
+    # System info grid displayed inside a clean sub-panel with aligned columns
+    $infoPanel = New-Object System.Windows.Forms.Panel
+    $infoPanel.Location = New-Object System.Drawing.Point(15, 110)
+    $infoPanel.Size = New-Object System.Drawing.Size(860, 170)
+    $infoPanel.BackColor = $script:Theme.Surface
 
-    # OS
-    $lblOS = New-StyledLabel -Text "OS:" -X $labelX -Y $infoStartY -IsBold -FontSize 9.5
-    $card1.Controls.Add($lblOS)
-    $lblOSValue = New-StyledLabel -Text $sysInfo.OSVersion -X $valueX -Y $infoStartY -FontSize 9.5 -MaxWidth 700
-    $card1.Controls.Add($lblOSValue)
-    $infoStartY += $infoRowHeight
+    # Separator line above the info panel
+    $infoSep = New-Object System.Windows.Forms.Panel
+    $infoSep.Location = New-Object System.Drawing.Point(0, 0)
+    $infoSep.Size = New-Object System.Drawing.Size(860, 1)
+    $infoSep.BackColor = $script:Theme.Border
+    $infoPanel.Controls.Add($infoSep)
 
-    # Domain / Workgroup
-    $lblDomain = New-StyledLabel -Text "$($sysInfo.DomainType):" -X $labelX -Y $infoStartY -IsBold -FontSize 9.5
-    $card1.Controls.Add($lblDomain)
-    $lblDomainValue = New-StyledLabel -Text $sysInfo.Domain -X $valueX -Y $infoStartY -FontSize 9.5
-    $card1.Controls.Add($lblDomainValue)
-    $infoStartY += $infoRowHeight
+    $infoRowHeight = 26
+    $infoY = 12
 
-    # Uptime
-    $lblUptime = New-StyledLabel -Text "Uptime:" -X $labelX -Y $infoStartY -IsBold -FontSize 9.5
-    $card1.Controls.Add($lblUptime)
-    $lblUptimeValue = New-StyledLabel -Text $sysInfo.Uptime -X $valueX -Y $infoStartY -FontSize 9.5
-    $card1.Controls.Add($lblUptimeValue)
-    $infoStartY += $infoRowHeight
+    # Left column: labels at X=10, values at X=130
+    $leftLabelX = 10
+    $leftValueX = 130
+    # Right column: labels at X=440, values at X=560
+    $rightLabelX = 440
+    $rightValueX = 560
 
-    # Model
-    $lblModel = New-StyledLabel -Text "Model:" -X $labelX -Y $infoStartY -IsBold -FontSize 9.5
-    $card1.Controls.Add($lblModel)
-    $lblModelValue = New-StyledLabel -Text $sysInfo.Model -X $valueX -Y $infoStartY -FontSize 9.5 -MaxWidth 700
-    $card1.Controls.Add($lblModelValue)
-    $infoStartY += $infoRowHeight
+    # Row 1: OS (left), Domain/Workgroup (right)
+    $lblOS = New-StyledLabel -Text "OS:" -X $leftLabelX -Y $infoY -IsBold -FontSize 9.5
+    $infoPanel.Controls.Add($lblOS)
+    $lblOSValue = New-StyledLabel -Text $sysInfo.OSVersion -X $leftValueX -Y $infoY -FontSize 9.5 -MaxWidth 290
+    $infoPanel.Controls.Add($lblOSValue)
 
-    # Serial Number
-    $lblSerial = New-StyledLabel -Text "Serial Number:" -X $labelX -Y $infoStartY -IsBold -FontSize 9.5
-    $card1.Controls.Add($lblSerial)
-    $lblSerialValue = New-StyledLabel -Text $sysInfo.SerialNumber -X $valueX -Y $infoStartY -FontSize 9.5
-    $card1.Controls.Add($lblSerialValue)
+    $lblDomain = New-StyledLabel -Text "$($sysInfo.DomainType):" -X $rightLabelX -Y $infoY -IsBold -FontSize 9.5
+    $infoPanel.Controls.Add($lblDomain)
+    $lblDomainValue = New-StyledLabel -Text $sysInfo.Domain -X $rightValueX -Y $infoY -FontSize 9.5 -MaxWidth 280
+    $infoPanel.Controls.Add($lblDomainValue)
+    $infoY += $infoRowHeight
+
+    # Row 2: Uptime (left), Model (right)
+    $lblUptime = New-StyledLabel -Text "Uptime:" -X $leftLabelX -Y $infoY -IsBold -FontSize 9.5
+    $infoPanel.Controls.Add($lblUptime)
+    $lblUptimeValue = New-StyledLabel -Text $sysInfo.Uptime -X $leftValueX -Y $infoY -FontSize 9.5
+    $infoPanel.Controls.Add($lblUptimeValue)
+
+    $lblModel = New-StyledLabel -Text "Model:" -X $rightLabelX -Y $infoY -IsBold -FontSize 9.5
+    $infoPanel.Controls.Add($lblModel)
+    $lblModelValue = New-StyledLabel -Text $sysInfo.Model -X $rightValueX -Y $infoY -FontSize 9.5 -MaxWidth 280
+    $infoPanel.Controls.Add($lblModelValue)
+    $infoY += $infoRowHeight
+
+    # Row 3: Serial Number (left - spanning)
+    $lblSerial = New-StyledLabel -Text "Serial Number:" -X $leftLabelX -Y $infoY -IsBold -FontSize 9.5
+    $infoPanel.Controls.Add($lblSerial)
+    $lblSerialValue = New-StyledLabel -Text $sysInfo.SerialNumber -X $leftValueX -Y $infoY -FontSize 9.5
+    $infoPanel.Controls.Add($lblSerialValue)
+
+    $card1.Controls.Add($infoPanel)
 
     $scrollPanel.Controls.Add($card1)
 
     # ========================================================================
     # Card 2: Change Hostname
     # ========================================================================
-    $card2 = New-StyledCard -Title "Change Hostname" -X 20 -Y 410 -Width 900 -Height 400
+    $card2 = New-StyledCard -Title "Change Hostname" -X 20 -Y 410 -Width 900 -Height 450
 
     $yPos = 45
 
-    # Warning label
-    $lblWarning = New-StyledLabel -Text "WARNING: Changing the hostname requires a restart. All d3Net sessions will be disrupted." -X 15 -Y $yPos -FontSize 9.5 -MaxWidth 860
-    $lblWarning.ForeColor = $script:Theme.Warning
-    $lblWarning.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
-    $card2.Controls.Add($lblWarning)
+    # Prominent restart warning panel with distinct visual styling
+    $warningPanel = New-Object System.Windows.Forms.Panel
+    $warningPanel.Location = New-Object System.Drawing.Point(15, $yPos)
+    $warningPanel.Size = New-Object System.Drawing.Size(860, 50)
+    $warningPanel.BackColor = [System.Drawing.Color]::FromArgb(50, 245, 158, 11)  # Semi-transparent warning
 
-    $yPos += 35
+    # Warning accent bar on the left
+    $warningAccent = New-Object System.Windows.Forms.Panel
+    $warningAccent.Location = New-Object System.Drawing.Point(0, 0)
+    $warningAccent.Size = New-Object System.Drawing.Size(4, 50)
+    $warningAccent.BackColor = $script:Theme.Warning
+    $warningPanel.Controls.Add($warningAccent)
+
+    # Warning icon/label
+    $lblWarningIcon = New-Object System.Windows.Forms.Label
+    $lblWarningIcon.Text = [char]0x26A0  # Warning triangle
+    $lblWarningIcon.Location = New-Object System.Drawing.Point(14, 6)
+    $lblWarningIcon.AutoSize = $true
+    $lblWarningIcon.Font = New-Object System.Drawing.Font('Segoe UI', 16)
+    $lblWarningIcon.ForeColor = $script:Theme.Warning
+    $warningPanel.Controls.Add($lblWarningIcon)
+
+    $lblWarningTitle = New-Object System.Windows.Forms.Label
+    $lblWarningTitle.Text = "RESTART REQUIRED"
+    $lblWarningTitle.Location = New-Object System.Drawing.Point(44, 5)
+    $lblWarningTitle.AutoSize = $true
+    $lblWarningTitle.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+    $lblWarningTitle.ForeColor = $script:Theme.Warning
+    $warningPanel.Controls.Add($lblWarningTitle)
+
+    $lblWarningDetail = New-Object System.Windows.Forms.Label
+    $lblWarningDetail.Text = "Changing the hostname requires a system restart. All active d3Net sessions and UNC share connections will be disrupted."
+    $lblWarningDetail.Location = New-Object System.Drawing.Point(44, 26)
+    $lblWarningDetail.AutoSize = $false
+    $lblWarningDetail.Size = New-Object System.Drawing.Size(800, 18)
+    $lblWarningDetail.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $lblWarningDetail.ForeColor = $script:Theme.Text
+    $warningPanel.Controls.Add($lblWarningDetail)
+
+    $card2.Controls.Add($warningPanel)
+
+    $yPos += 60
 
     # Current hostname
     $lblCurrentHost = New-StyledLabel -Text "Current Hostname:" -X 15 -Y $yPos -IsBold
@@ -339,7 +390,15 @@ function New-ServerIdentityView {
     $lblCharCount.Name = 'lblCharCount'
     $card2.Controls.Add($lblCharCount)
 
-    $yPos += 35
+    $yPos += 28
+
+    # NetBIOS rules reminder text near the input
+    $lblNetBIOSRules = New-StyledLabel -Text "NetBIOS rules: Max 15 chars, A-Z / 0-9 / hyphens only, cannot start or end with hyphen" `
+                                       -X 200 -Y $yPos -IsMuted -FontSize 8 -MaxWidth 680
+    $lblNetBIOSRules.Name = 'lblNetBIOSRules'
+    $card2.Controls.Add($lblNetBIOSRules)
+
+    $yPos += 22
 
     # Validation feedback label
     $lblValidation = New-StyledLabel -Text "" -X 200 -Y $yPos -FontSize 9 -MaxWidth 680
@@ -351,6 +410,7 @@ function New-ServerIdentityView {
         $card = $this.Parent
         $validationLabel = $card.Controls['lblValidation']
         $charCountLabel = $card.Controls['lblCharCount']
+        $rulesLabel = $card.Controls['lblNetBIOSRules']
         $previewPanel = $card.Controls['pnlPreview']
         $inputText = $this.Text
 
@@ -359,27 +419,44 @@ function New-ServerIdentityView {
             $validationLabel.Text = ''
             $charCountLabel.Text = '0/15 characters'
             $charCountLabel.ForeColor = $script:Theme.TextMuted
+            $this.BackColor = $script:Theme.InputBackground
+            if ($rulesLabel) { $rulesLabel.ForeColor = $script:Theme.TextMuted }
             if ($previewPanel) { $previewPanel.Visible = $false }
             return
         }
 
-        # Update character count
+        # Update character count with visual feedback
         $len = $inputText.Length
         $charCountLabel.Text = "$len/15 characters"
         if ($len -gt 15) {
             $charCountLabel.ForeColor = $script:Theme.Error
+            $charCountLabel.Font = New-Object System.Drawing.Font('Segoe UI', 8.5, [System.Drawing.FontStyle]::Bold)
         }
         elseif ($len -gt 12) {
             $charCountLabel.ForeColor = $script:Theme.Warning
+            $charCountLabel.Font = New-Object System.Drawing.Font('Segoe UI', 8.5, [System.Drawing.FontStyle]::Bold)
         }
         else {
             $charCountLabel.ForeColor = $script:Theme.TextMuted
+            $charCountLabel.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
         }
 
         if ([string]::IsNullOrWhiteSpace($inputText)) {
             $validationLabel.Text = ''
+            $this.BackColor = $script:Theme.InputBackground
+            if ($rulesLabel) { $rulesLabel.ForeColor = $script:Theme.TextMuted }
             if ($previewPanel) { $previewPanel.Visible = $false }
             return
+        }
+
+        # Check for invalid characters and highlight which ones
+        $invalidFound = @()
+        foreach ($ch in $inputText.ToCharArray()) {
+            if ($ch -notmatch '[a-zA-Z0-9\-]') {
+                if ($invalidFound -notcontains $ch) {
+                    $invalidFound += $ch
+                }
+            }
         }
 
         # Run validation
@@ -387,11 +464,22 @@ function New-ServerIdentityView {
         if ($result.IsValid) {
             $validationLabel.Text = "[OK] Valid hostname"
             $validationLabel.ForeColor = $script:Theme.Success
+            $this.BackColor = $script:Theme.InputBackground
+            if ($rulesLabel) { $rulesLabel.ForeColor = $script:Theme.TextMuted }
             if ($previewPanel) { $previewPanel.Visible = $true }
         }
         else {
-            $validationLabel.Text = "[X] $($result.ErrorMessage)"
+            # Build detailed error with invalid character callout
+            $errText = "[X] $($result.ErrorMessage)"
+            if ($invalidFound.Count -gt 0) {
+                $badChars = ($invalidFound | ForEach-Object { "'$_'" }) -join ', '
+                $errText = "[X] Invalid characters found: $badChars -- Only A-Z, 0-9, and hyphens are allowed."
+            }
+            $validationLabel.Text = $errText
             $validationLabel.ForeColor = $script:Theme.Error
+            # Tint the textbox background to indicate error
+            $this.BackColor = [System.Drawing.Color]::FromArgb(40, 239, 68, 68)
+            if ($rulesLabel) { $rulesLabel.ForeColor = $script:Theme.Warning }
             if ($previewPanel) { $previewPanel.Visible = $false }
         }
 
@@ -534,7 +622,7 @@ All active d3 sessions will be disconnected.
     # ========================================================================
     # Card 3: Naming Conventions
     # ========================================================================
-    $card3 = New-StyledCard -Title "Naming Conventions" -X 20 -Y 830 -Width 900 -Height 260
+    $card3 = New-StyledCard -Title "Naming Conventions" -X 20 -Y 880 -Width 900 -Height 260
 
     $yPos = 50
 
@@ -588,4 +676,5 @@ All active d3 sessions will be disconnected.
 
     # Add scroll panel to content panel
     $ContentPanel.Controls.Add($scrollPanel)
+    $ContentPanel.ResumeLayout()
 }

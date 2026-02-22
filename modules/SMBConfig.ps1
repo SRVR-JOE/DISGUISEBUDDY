@@ -93,6 +93,16 @@ function New-D3ProjectShare {
     )
 
     try {
+        # Validate path format before any filesystem operations
+        $pathValidation = Test-SharePathFormat -Path $LocalPath
+        if (-not $pathValidation.IsValid) {
+            Write-AppLog -Message "Share path validation failed for '$LocalPath': $($pathValidation.ErrorMessage)" -Level WARN
+            return [PSCustomObject]@{
+                Success = $false
+                Message = "Invalid share path: $($pathValidation.ErrorMessage)"
+            }
+        }
+
         # Validate and create path if needed
         if (-not (Test-Path -Path $LocalPath)) {
             Write-AppLog -Message "Path '$LocalPath' does not exist. Creating directory." -Level INFO
@@ -241,6 +251,70 @@ function Set-D3SharePermissions {
     }
 }
 
+function Test-SharePathFormat {
+    <#
+    .SYNOPSIS
+        Validates that a share path is a valid local path suitable for SMB sharing.
+    .DESCRIPTION
+        Checks that the path is not a UNC path (\\server\share), does not contain
+        invalid path characters, and appears to be a valid local filesystem path.
+    .PARAMETER Path
+        The filesystem path to validate.
+    .OUTPUTS
+        PSCustomObject with IsValid (bool) and ErrorMessage (string) properties.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return [PSCustomObject]@{ IsValid = $false; ErrorMessage = 'Path cannot be empty.' }
+    }
+
+    $trimmed = $Path.Trim()
+
+    # Reject UNC paths - shares must be local paths
+    if ($trimmed.StartsWith('\\')) {
+        return [PSCustomObject]@{
+            IsValid      = $false
+            ErrorMessage = 'UNC paths (\\server\share) are not allowed. Share paths must be local (e.g., D:\d3 Projects).'
+        }
+    }
+
+    # Check for invalid path characters (excluding \ and : which are valid in Windows paths)
+    $invalidChars = [System.IO.Path]::GetInvalidPathChars()
+    foreach ($ch in $invalidChars) {
+        if ($trimmed.Contains($ch)) {
+            return [PSCustomObject]@{
+                IsValid      = $false
+                ErrorMessage = "Path contains an invalid character: '$ch'"
+            }
+        }
+    }
+
+    # Also reject these characters that are invalid in folder names on Windows
+    $extraInvalid = @('*', '?', '"', '<', '>', '|')
+    foreach ($ch in $extraInvalid) {
+        if ($trimmed.Contains($ch)) {
+            return [PSCustomObject]@{
+                IsValid      = $false
+                ErrorMessage = "Path contains an invalid character: '$ch'"
+            }
+        }
+    }
+
+    # Ensure the path looks like a rooted local path (e.g., C:\..., D:\...)
+    if (-not [System.IO.Path]::IsPathRooted($trimmed)) {
+        return [PSCustomObject]@{
+            IsValid      = $false
+            ErrorMessage = 'Path must be an absolute local path (e.g., D:\d3 Projects).'
+        }
+    }
+
+    return [PSCustomObject]@{ IsValid = $true; ErrorMessage = '' }
+}
+
 function Test-D3ProjectsPath {
     <#
     .SYNOPSIS
@@ -287,6 +361,7 @@ function New-SMBView {
 
     # Clear existing content
     $ContentPanel.Controls.Clear()
+    $ContentPanel.SuspendLayout()
 
     # Create a scrollable container for all content
     $scrollPanel = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
@@ -389,13 +464,25 @@ function New-SMBView {
     $card1.Controls.Add($lblPermSection)
     $yPos += 28
 
-    # Current permissions display
+    # Current permissions display with clear permission type labels
     $permText = "No permissions loaded"
     if ($d3ShareActive) {
         try {
             $perms = Get-SharePermissions -ShareName 'd3 Projects'
             if ($perms -and $perms.Count -gt 0) {
-                $permText = ($perms | ForEach-Object { "$($_.AccountName): $($_.AccessRight)" }) -join ', '
+                $permEntries = @()
+                foreach ($perm in $perms) {
+                    # Map AccessRight to human-readable label
+                    $accessLabel = switch ($perm.AccessRight) {
+                        'Full'   { 'Full Control' }
+                        'Change' { 'Change (Read/Write)' }
+                        'Read'   { 'Read Only' }
+                        default  { $perm.AccessRight }
+                    }
+                    $controlLabel = if ($perm.AccessControlType -eq 'Deny') { '[DENY]' } else { '' }
+                    $permEntries += "$($perm.AccountName) - $accessLabel $controlLabel".Trim()
+                }
+                $permText = $permEntries -join '  |  '
             }
         }
         catch {
@@ -451,6 +538,21 @@ function New-SMBView {
             return
         }
 
+        # Confirm permission change before applying
+        $accessLabel = switch ($access) {
+            'Full'   { 'Full Control' }
+            'Change' { 'Change (Read/Write)' }
+            'Read'   { 'Read Only' }
+            default  { $access }
+        }
+        $confirmPerm = [System.Windows.Forms.MessageBox]::Show(
+            "Are you sure you want to change permissions on '$shareName'?`n`nAccount: $account`nAccess: $accessLabel`n`nThis will revoke existing access for '$account' and grant $accessLabel.",
+            "Confirm Permission Change",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+        if ($confirmPerm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+
         $result = Set-D3SharePermissions -ShareName $shareName -AccountName $account -AccessRight $access
 
         if ($result.Success) {
@@ -460,11 +562,21 @@ function New-SMBView {
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             )
-            # Refresh permissions label
+            # Refresh permissions label with clear type labels
             $perms = Get-SharePermissions -ShareName $shareName
             if ($perms -and $perms.Count -gt 0) {
-                $permDisplay = ($perms | ForEach-Object { "$($_.AccountName): $($_.AccessRight)" }) -join ', '
-                $card.Controls['lblCurrentPerms'].Text = "Current: $permDisplay"
+                $permEntries = @()
+                foreach ($p in $perms) {
+                    $aLabel = switch ($p.AccessRight) {
+                        'Full'   { 'Full Control' }
+                        'Change' { 'Change (Read/Write)' }
+                        'Read'   { 'Read Only' }
+                        default  { $p.AccessRight }
+                    }
+                    $cLabel = if ($p.AccessControlType -eq 'Deny') { '[DENY]' } else { '' }
+                    $permEntries += "$($p.AccountName) - $aLabel $cLabel".Trim()
+                }
+                $card.Controls['lblCurrentPerms'].Text = "Current: $($permEntries -join '  |  ')"
             }
         }
         else {
@@ -507,7 +619,19 @@ function New-SMBView {
             return
         }
 
-        # Validate path
+        # Validate path format first
+        $pathCheck = Test-SharePathFormat -Path $localPath
+        if (-not $pathCheck.IsValid) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Invalid share path: $($pathCheck.ErrorMessage)",
+                "Path Validation Failed",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            )
+            return
+        }
+
+        # Validate path exists or offer to create
         if (-not (Test-D3ProjectsPath -Path $localPath)) {
             $createDir = [System.Windows.Forms.MessageBox]::Show(
                 "The path '$localPath' does not exist. Create it now?",
@@ -725,6 +849,18 @@ function New-SMBView {
                 return
             }
 
+            # Validate path format before creating
+            $pathCheck = Test-SharePathFormat -Path $sPath
+            if (-not $pathCheck.IsValid) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Invalid share path: $($pathCheck.ErrorMessage)",
+                    "Path Validation Failed",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Error
+                )
+                return
+            }
+
             $permString = "${sAccount}:${sAccess}"
             $result = New-D3ProjectShare -LocalPath $sPath -ShareName $sName -Permissions $permString
 
@@ -936,4 +1072,5 @@ function New-SMBView {
 
     # Add scroll panel to content panel
     $ContentPanel.Controls.Add($scrollPanel)
+    $ContentPanel.ResumeLayout()
 }

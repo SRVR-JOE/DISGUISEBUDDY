@@ -2,52 +2,79 @@
 
 # Dark theme (default)
 $script:DarkTheme = @{
-    Background      = [System.Drawing.ColorTranslator]::FromHtml('#1E1E2E')
-    Surface         = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
-    SurfaceLight    = [System.Drawing.ColorTranslator]::FromHtml('#363650')
-    Primary         = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
-    PrimaryLight    = [System.Drawing.ColorTranslator]::FromHtml('#8B5CF6')
-    PrimaryDark     = [System.Drawing.ColorTranslator]::FromHtml('#6D28D9')
-    Accent          = [System.Drawing.ColorTranslator]::FromHtml('#06B6D4')
-    Text            = [System.Drawing.ColorTranslator]::FromHtml('#E2E8F0')
-    TextSecondary   = [System.Drawing.ColorTranslator]::FromHtml('#94A3B8')
-    TextMuted       = [System.Drawing.ColorTranslator]::FromHtml('#64748B')
-    Success         = [System.Drawing.ColorTranslator]::FromHtml('#10B981')
-    Warning         = [System.Drawing.ColorTranslator]::FromHtml('#F59E0B')
-    Error           = [System.Drawing.ColorTranslator]::FromHtml('#EF4444')
-    Border          = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
-    NavBackground   = [System.Drawing.ColorTranslator]::FromHtml('#16162A')
-    NavHover        = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
-    NavActive       = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
-    CardBackground  = [System.Drawing.ColorTranslator]::FromHtml('#232338')
-    InputBackground = [System.Drawing.ColorTranslator]::FromHtml('#1A1A2E')
+    Background        = [System.Drawing.ColorTranslator]::FromHtml('#1E1E2E')
+    Surface           = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
+    SurfaceLight      = [System.Drawing.ColorTranslator]::FromHtml('#363650')
+    Primary           = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
+    PrimaryLight      = [System.Drawing.ColorTranslator]::FromHtml('#8B5CF6')
+    PrimaryDark       = [System.Drawing.ColorTranslator]::FromHtml('#6D28D9')
+    Accent            = [System.Drawing.ColorTranslator]::FromHtml('#06B6D4')
+    Text              = [System.Drawing.ColorTranslator]::FromHtml('#E2E8F0')
+    TextSecondary     = [System.Drawing.ColorTranslator]::FromHtml('#94A3B8')
+    TextMuted         = [System.Drawing.ColorTranslator]::FromHtml('#64748B')
+    Success           = [System.Drawing.ColorTranslator]::FromHtml('#10B981')
+    Warning           = [System.Drawing.ColorTranslator]::FromHtml('#F59E0B')
+    Error             = [System.Drawing.ColorTranslator]::FromHtml('#EF4444')
+    SuccessBackground = [System.Drawing.ColorTranslator]::FromHtml('#0D3B2E')
+    WarningBackground = [System.Drawing.ColorTranslator]::FromHtml('#3B2E0D')
+    ErrorBackground   = [System.Drawing.ColorTranslator]::FromHtml('#3B0D0D')
+    Border            = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
+    NavBackground     = [System.Drawing.ColorTranslator]::FromHtml('#16162A')
+    NavHover          = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
+    NavActive         = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
+    CardBackground    = [System.Drawing.ColorTranslator]::FromHtml('#232338')
+    InputBackground   = [System.Drawing.ColorTranslator]::FromHtml('#1A1A2E')
+    InputBorder       = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
+    Scrollbar         = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
 }
 
 # Light theme
 $script:LightTheme = @{
-    Background      = [System.Drawing.ColorTranslator]::FromHtml('#F8FAFC')
-    Surface         = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
-    SurfaceLight    = [System.Drawing.ColorTranslator]::FromHtml('#F1F5F9')
-    Primary         = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
-    PrimaryLight    = [System.Drawing.ColorTranslator]::FromHtml('#8B5CF6')
-    PrimaryDark     = [System.Drawing.ColorTranslator]::FromHtml('#6D28D9')
-    Accent          = [System.Drawing.ColorTranslator]::FromHtml('#0891B2')
-    Text            = [System.Drawing.ColorTranslator]::FromHtml('#1E293B')
-    TextSecondary   = [System.Drawing.ColorTranslator]::FromHtml('#475569')
-    TextMuted       = [System.Drawing.ColorTranslator]::FromHtml('#94A3B8')
-    Success         = [System.Drawing.ColorTranslator]::FromHtml('#059669')
-    Warning         = [System.Drawing.ColorTranslator]::FromHtml('#D97706')
-    Error           = [System.Drawing.ColorTranslator]::FromHtml('#DC2626')
-    Border          = [System.Drawing.ColorTranslator]::FromHtml('#E2E8F0')
-    NavBackground   = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
-    NavHover        = [System.Drawing.ColorTranslator]::FromHtml('#F1F5F9')
-    NavActive       = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
-    CardBackground  = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
-    InputBackground = [System.Drawing.ColorTranslator]::FromHtml('#F8FAFC')
+    Background        = [System.Drawing.ColorTranslator]::FromHtml('#F8FAFC')
+    Surface           = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
+    SurfaceLight      = [System.Drawing.ColorTranslator]::FromHtml('#F1F5F9')
+    Primary           = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
+    PrimaryLight      = [System.Drawing.ColorTranslator]::FromHtml('#8B5CF6')
+    PrimaryDark       = [System.Drawing.ColorTranslator]::FromHtml('#6D28D9')
+    Accent            = [System.Drawing.ColorTranslator]::FromHtml('#0891B2')
+    Text              = [System.Drawing.ColorTranslator]::FromHtml('#1E293B')
+    TextSecondary     = [System.Drawing.ColorTranslator]::FromHtml('#475569')
+    TextMuted         = [System.Drawing.ColorTranslator]::FromHtml('#94A3B8')
+    Success           = [System.Drawing.ColorTranslator]::FromHtml('#059669')
+    Warning           = [System.Drawing.ColorTranslator]::FromHtml('#D97706')
+    Error             = [System.Drawing.ColorTranslator]::FromHtml('#DC2626')
+    SuccessBackground = [System.Drawing.ColorTranslator]::FromHtml('#ECFDF5')
+    WarningBackground = [System.Drawing.ColorTranslator]::FromHtml('#FFFBEB')
+    ErrorBackground   = [System.Drawing.ColorTranslator]::FromHtml('#FEF2F2')
+    Border            = [System.Drawing.ColorTranslator]::FromHtml('#E2E8F0')
+    NavBackground     = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
+    NavHover          = [System.Drawing.ColorTranslator]::FromHtml('#F1F5F9')
+    NavActive         = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
+    CardBackground    = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
+    InputBackground   = [System.Drawing.ColorTranslator]::FromHtml('#F8FAFC')
+    InputBorder       = [System.Drawing.ColorTranslator]::FromHtml('#CBD5E1')
+    Scrollbar         = [System.Drawing.ColorTranslator]::FromHtml('#E2E8F0')
 }
 
 # Current active theme
 $script:Theme = $script:DarkTheme
+
+# Theme change callback registry
+$script:ThemeChangeCallbacks = [System.Collections.ArrayList]::new()
+
+function Register-ThemeChangeCallback {
+    <#
+    .SYNOPSIS
+        Registers a callback scriptblock to be invoked when the theme changes.
+    .PARAMETER Callback
+        A scriptblock that will be called after Set-AppTheme applies a new theme.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Callback
+    )
+    $script:ThemeChangeCallbacks.Add($Callback) | Out-Null
+}
 
 function Set-AppTheme {
     param([string]$ThemeName)
@@ -56,10 +83,252 @@ function Set-AppTheme {
     } else {
         $script:Theme = $script:DarkTheme
     }
+
+    # Persist theme preference
+    Save-ThemePreference -ThemeName $ThemeName
+
+    # Notify registered callbacks
+    foreach ($cb in $script:ThemeChangeCallbacks) {
+        try {
+            & $cb
+        } catch {
+            Write-AppLog -Message "Theme change callback error: $_" -Level 'WARN'
+        }
+    }
 }
 
 function Get-AppTheme {
     return $script:Theme
+}
+
+function Get-AppThemeName {
+    <#
+    .SYNOPSIS
+        Returns the name of the currently active theme ('Dark' or 'Light').
+    #>
+    if ($script:Theme -eq $script:LightTheme) {
+        return 'Light'
+    } else {
+        return 'Dark'
+    }
+}
+
+# ============================================================================
+# THEME PERSISTENCE
+# ============================================================================
+
+function Save-ThemePreference {
+    <#
+    .SYNOPSIS
+        Saves the user's theme preference to settings/theme.json.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ThemeName
+    )
+
+    $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot | Split-Path -Parent } else { $PWD.Path }
+    $settingsDir = Join-Path -Path $scriptRoot -ChildPath 'settings'
+    $settingsFile = Join-Path -Path $settingsDir -ChildPath 'theme.json'
+
+    # Ensure the settings directory exists
+    if (-not (Test-Path -Path $settingsDir)) {
+        New-Item -Path $settingsDir -ItemType Directory -Force | Out-Null
+    }
+
+    $themeData = @{ Theme = $ThemeName } | ConvertTo-Json
+    try {
+        Set-Content -Path $settingsFile -Value $themeData -Encoding UTF8
+    } catch {
+        Write-AppLog -Message "Failed to save theme preference: $_" -Level 'WARN'
+    }
+}
+
+function Load-ThemePreference {
+    <#
+    .SYNOPSIS
+        Loads the user's saved theme preference from settings/theme.json.
+        If no saved preference exists, keeps the current (default) theme.
+    #>
+    $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot | Split-Path -Parent } else { $PWD.Path }
+    $settingsFile = Join-Path -Path $scriptRoot -ChildPath 'settings' | Join-Path -ChildPath 'theme.json'
+
+    if (Test-Path -Path $settingsFile) {
+        try {
+            $themeData = Get-Content -Path $settingsFile -Raw | ConvertFrom-Json
+            if ($themeData.Theme -eq 'Light') {
+                $script:Theme = $script:LightTheme
+            } else {
+                $script:Theme = $script:DarkTheme
+            }
+            Write-AppLog -Message "Loaded saved theme preference: $($themeData.Theme)" -Level 'DEBUG'
+        } catch {
+            Write-AppLog -Message "Failed to load theme preference: $_" -Level 'WARN'
+        }
+    }
+}
+
+# ============================================================================
+# RECURSIVE CONTROL THEME UPDATER
+# ============================================================================
+
+function Update-ControlTheme {
+    <#
+    .SYNOPSIS
+        Recursively walks a control tree and applies current theme colors
+        to all controls based on their type and Tag property.
+    .PARAMETER Control
+        The root control to begin updating from. Typically the main form.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Windows.Forms.Control]$Control
+    )
+
+    # Update the control based on its type
+    switch ($Control.GetType().Name) {
+        'Form' {
+            $Control.BackColor = $script:Theme.Background
+            $Control.ForeColor = $script:Theme.Text
+        }
+
+        'Panel' {
+            # Determine panel type from Tag or current styling context
+            switch ($Control.Tag) {
+                'Card' {
+                    $Control.BackColor = $script:Theme.CardBackground
+                }
+                'Nav' {
+                    $Control.BackColor = $script:Theme.NavBackground
+                }
+                'NavSeparator' {
+                    $Control.BackColor = $script:Theme.Border
+                }
+                'Surface' {
+                    $Control.BackColor = $script:Theme.Surface
+                }
+                default {
+                    # Check if the panel is acting as a card (has CardBackground-like padding)
+                    # or a generic container; preserve transparent panels
+                    if ($Control.BackColor -ne [System.Drawing.Color]::Transparent) {
+                        $Control.BackColor = $script:Theme.Background
+                    }
+                }
+            }
+        }
+
+        'GroupBox' {
+            $Control.BackColor = $script:Theme.Surface
+            $Control.ForeColor = $script:Theme.Text
+        }
+
+        'Label' {
+            # Determine label color based on Tag
+            switch ($Control.Tag) {
+                'Muted' {
+                    $Control.ForeColor = $script:Theme.TextMuted
+                }
+                'Secondary' {
+                    $Control.ForeColor = $script:Theme.TextSecondary
+                }
+                'Primary' {
+                    $Control.ForeColor = $script:Theme.Primary
+                }
+                'Success' {
+                    $Control.ForeColor = [System.Drawing.Color]::White
+                    $Control.BackColor = $script:Theme.Success
+                }
+                'Warning' {
+                    $Control.ForeColor = [System.Drawing.Color]::White
+                    $Control.BackColor = $script:Theme.Warning
+                }
+                'Error' {
+                    $Control.ForeColor = [System.Drawing.Color]::White
+                    $Control.BackColor = $script:Theme.Error
+                }
+                'Info' {
+                    $Control.ForeColor = [System.Drawing.Color]::White
+                    $Control.BackColor = $script:Theme.Accent
+                }
+                default {
+                    $Control.ForeColor = $script:Theme.Text
+                }
+            }
+        }
+
+        'Button' {
+            # Determine button style from Tag (set by New-StyledButton)
+            switch ($Control.Tag) {
+                'Primary' {
+                    $Control.BackColor = $script:Theme.Primary
+                    $Control.ForeColor = [System.Drawing.Color]::White
+                }
+                'Destructive' {
+                    $Control.BackColor = $script:Theme.Error
+                    $Control.ForeColor = [System.Drawing.Color]::White
+                }
+                'NavButton' {
+                    # Nav buttons are handled separately by Set-ActiveView
+                    $Control.FlatAppearance.MouseOverBackColor = $script:Theme.NavHover
+                }
+                default {
+                    $Control.BackColor = $script:Theme.Surface
+                    $Control.ForeColor = $script:Theme.Text
+                }
+            }
+            # Update border color if the button has a flat border
+            if ($Control.FlatStyle -eq [System.Windows.Forms.FlatStyle]::Flat -and
+                $Control.FlatAppearance.BorderSize -gt 0) {
+                $Control.FlatAppearance.BorderColor = $script:Theme.Border
+            }
+        }
+
+        'TextBox' {
+            $Control.BackColor = $script:Theme.InputBackground
+            # If the textbox is showing placeholder text (ForeColor matches TextMuted),
+            # keep it muted; otherwise use normal text color
+            if ($Control.Tag -and $Control.Text -eq $Control.Tag) {
+                $Control.ForeColor = $script:Theme.TextMuted
+            } else {
+                $Control.ForeColor = $script:Theme.Text
+            }
+        }
+
+        'ComboBox' {
+            $Control.BackColor = $script:Theme.InputBackground
+            $Control.ForeColor = $script:Theme.Text
+        }
+
+        'CheckBox' {
+            $Control.ForeColor = $script:Theme.Text
+        }
+
+        'DataGridView' {
+            $dgv = $Control
+            $dgv.BackgroundColor = $script:Theme.Surface
+            $dgv.GridColor = $script:Theme.Border
+
+            # Default cell style
+            $dgv.DefaultCellStyle.BackColor = $script:Theme.Surface
+            $dgv.DefaultCellStyle.ForeColor = $script:Theme.Text
+            $dgv.DefaultCellStyle.SelectionBackColor = $script:Theme.Primary
+            $dgv.DefaultCellStyle.SelectionForeColor = [System.Drawing.Color]::White
+
+            # Column header style
+            $dgv.ColumnHeadersDefaultCellStyle.BackColor = $script:Theme.NavBackground
+            $dgv.ColumnHeadersDefaultCellStyle.ForeColor = $script:Theme.Text
+            $dgv.ColumnHeadersDefaultCellStyle.SelectionBackColor = $script:Theme.NavBackground
+            $dgv.ColumnHeadersDefaultCellStyle.SelectionForeColor = $script:Theme.Text
+
+            # Alternating row style
+            $dgv.AlternatingRowsDefaultCellStyle.BackColor = $script:Theme.CardBackground
+        }
+    }
+
+    # Recurse into child controls
+    foreach ($child in $Control.Controls) {
+        Update-ControlTheme -Control $child
+    }
 }
 
 function Write-AppLog {

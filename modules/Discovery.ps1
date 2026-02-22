@@ -45,6 +45,32 @@ function Find-DisguiseServers {
     )
 
     $discoveredServers = [System.Collections.ArrayList]::new()
+
+    # Validate subnet base format (must be three octets like "10.0.0")
+    if ($SubnetBase -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+        Write-AppLog -Message "Find-DisguiseServers: Invalid subnet base format '$SubnetBase'. Expected format: 'X.X.X' (e.g. '10.0.0')." -Level 'ERROR'
+        return @()
+    }
+    # Validate each octet is 0-255
+    $subnetOctets = $SubnetBase -split '\.'
+    foreach ($octet in $subnetOctets) {
+        $octetVal = [int]$octet
+        if ($octetVal -lt 0 -or $octetVal -gt 255) {
+            Write-AppLog -Message "Find-DisguiseServers: Subnet octet out of range (0-255) in '$SubnetBase'." -Level 'ERROR'
+            return @()
+        }
+    }
+
+    # Validate IP range
+    if ($StartIP -lt 0 -or $StartIP -gt 255 -or $EndIP -lt 0 -or $EndIP -gt 255) {
+        Write-AppLog -Message "Find-DisguiseServers: IP range values must be 0-255. Got StartIP=$StartIP, EndIP=$EndIP." -Level 'ERROR'
+        return @()
+    }
+    if ($StartIP -gt $EndIP) {
+        Write-AppLog -Message "Find-DisguiseServers: StartIP ($StartIP) must be less than or equal to EndIP ($EndIP)." -Level 'ERROR'
+        return @()
+    }
+
     $totalIPs = $EndIP - $StartIP + 1
     $processedCount = 0
 
@@ -56,7 +82,9 @@ function Find-DisguiseServers {
     # -----------------------------------------------------------------------
     $runspacePool = $null
     try {
-    $runspacePool = [System.Management.Automation.Runspaces.RunspacePool]::CreateRunspacePool(1, 50)
+    # Size the runspace pool to match the workload: no more threads than targets, capped at 50
+    $maxThreads = [Math]::Max(1, [Math]::Min(50, $totalIPs))
+    $runspacePool = [System.Management.Automation.Runspaces.RunspacePool]::CreateRunspacePool(1, $maxThreads)
     $runspacePool.Open()
 
     $runspaceJobs = [System.Collections.ArrayList]::new()
@@ -84,17 +112,24 @@ function Find-DisguiseServers {
 
         # --- TCP Port Scan (async connections) ---
         foreach ($port in $Ports) {
+            $tcpClient = $null
             try {
                 $tcpClient = New-Object System.Net.Sockets.TcpClient
+                # Set send/receive timeouts to prevent lingering connections
+                $tcpClient.SendTimeout = $Timeout
+                $tcpClient.ReceiveTimeout = $Timeout
                 $connectTask = $tcpClient.ConnectAsync($IPAddress, $port)
                 $completed = $connectTask.Wait($Timeout)
                 if ($completed -and $tcpClient.Connected) {
                     [void]$openPorts.Add($port)
                 }
-                $tcpClient.Close()
-                $tcpClient.Dispose()
             } catch {
                 # Connection failed or timed out - port is closed/filtered
+            } finally {
+                if ($tcpClient) {
+                    $tcpClient.Close()
+                    $tcpClient.Dispose()
+                }
             }
         }
 
@@ -102,6 +137,7 @@ function Find-DisguiseServers {
         $result.ResponseTimeMs = [int]$stopwatch.Elapsed.TotalMilliseconds
 
         # --- Ping Sweep ---
+        $ping = $null
         try {
             $ping = New-Object System.Net.NetworkInformation.Ping
             $pingReply = $ping.Send($IPAddress, $Timeout)
@@ -112,9 +148,10 @@ function Find-DisguiseServers {
                     $result.ResponseTimeMs = [Math]::Min($result.ResponseTimeMs, [int]$pingReply.RoundtripTime)
                 }
             }
-            $ping.Dispose()
         } catch {
             # Ping failed - host may still be reachable via TCP
+        } finally {
+            if ($ping) { $ping.Dispose() }
         }
 
         # --- Hostname Resolution ---
@@ -148,7 +185,7 @@ function Find-DisguiseServers {
                     }
                 }
             } catch {
-                # API not responding or not a disguise server
+                # API not responding or not a disguise server - expected for non-disguise hosts
             } finally {
                 if ($httpClient) { $httpClient.Dispose() }
             }
@@ -200,7 +237,7 @@ function Find-DisguiseServers {
             try {
                 $ProgressCallback.Invoke($job.IP, $percentComplete, "Scanning $($job.IP)...")
             } catch {
-                # Progress callback error - continue silently
+                Write-AppLog -Message "Find-DisguiseServers: Progress callback failed for $($job.IP) - $_" -Level 'DEBUG'
             }
         }
     }
@@ -263,6 +300,22 @@ function Test-DisguiseServer {
         [int]$TimeoutMs = 2000
     )
 
+    # Validate that IPAddress is a valid IPv4 address
+    $parsedAddr = $null
+    if (-not [System.Net.IPAddress]::TryParse($IPAddress, [ref]$parsedAddr) -or
+        $parsedAddr.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        Write-AppLog -Message "Test-DisguiseServer: Invalid IPv4 address '$IPAddress'" -Level 'ERROR'
+        return [PSCustomObject]@{
+            IPAddress       = $IPAddress
+            Hostname        = ''
+            IsDisguise      = $false
+            APIAvailable    = $false
+            SMCAvailable    = $false
+            Ports           = @()
+            DesignerVersion = $null
+        }
+    }
+
     $result = [PSCustomObject]@{
         IPAddress       = $IPAddress
         Hostname        = ''
@@ -278,17 +331,24 @@ function Test-DisguiseServer {
     # --- TCP Port Probes ---
     $knownPorts = @(80, 873, 9864)
     foreach ($port in $knownPorts) {
+        $tcpClient = $null
         try {
             $tcpClient = New-Object System.Net.Sockets.TcpClient
+            # Set send/receive timeouts to prevent lingering connections
+            $tcpClient.SendTimeout = $TimeoutMs
+            $tcpClient.ReceiveTimeout = $TimeoutMs
             $connectTask = $tcpClient.ConnectAsync($IPAddress, $port)
             $completed = $connectTask.Wait($TimeoutMs)
             if ($completed -and $tcpClient.Connected) {
                 [void]$openPorts.Add($port)
             }
-            $tcpClient.Close()
-            $tcpClient.Dispose()
         } catch {
-            # Port is closed or unreachable
+            Write-AppLog -Message "Test-DisguiseServer: TCP probe to ${IPAddress}:${port} failed - $_" -Level 'DEBUG'
+        } finally {
+            if ($tcpClient) {
+                $tcpClient.Close()
+                $tcpClient.Dispose()
+            }
         }
     }
 
@@ -331,7 +391,7 @@ function Test-DisguiseServer {
                 }
             }
         } catch {
-            # API not reachable or timed out
+            Write-AppLog -Message "Test-DisguiseServer: REST API probe to $IPAddress failed - $_" -Level 'DEBUG'
         } finally {
             if ($httpClient) { $httpClient.Dispose() }
         }
@@ -351,7 +411,7 @@ function Test-DisguiseServer {
             }
         }
     } catch {
-        # SMC API not available on this host
+        Write-AppLog -Message "Test-DisguiseServer: SMC API probe to $IPAddress failed - $_" -Level 'DEBUG'
     } finally {
         if ($httpClient) { $httpClient.Dispose() }
     }
@@ -510,6 +570,11 @@ function Push-ProfileToServer {
     # -----------------------------------------------------------------------
     # Step 2: Configure Network Adapters
     # -----------------------------------------------------------------------
+    # If Step 1 failed, log the partial failure but continue to attempt remaining steps
+    if (-not $hostnameStep.Success -and $hostnameStep.Message -notmatch '^Skipped') {
+        Write-AppLog -Message "Push-ProfileToServer: Step 1 (Hostname) failed for $ServerIP, continuing with remaining steps. Partial failure may require manual cleanup." -Level 'WARN'
+    }
+
     $networkStep = [PSCustomObject]@{
         StepName = 'Configure Network Adapters'
         Success  = $false
@@ -597,6 +662,11 @@ function Push-ProfileToServer {
     # -----------------------------------------------------------------------
     # Step 3: Configure SMB Shares
     # -----------------------------------------------------------------------
+    # If Step 2 failed, log the partial failure but continue to attempt remaining steps
+    if (-not $networkStep.Success -and $networkStep.Message -notmatch '^Skipped') {
+        Write-AppLog -Message "Push-ProfileToServer: Step 2 (Network) failed for $ServerIP, continuing with remaining steps. Previous network changes may have been partially applied." -Level 'WARN'
+    }
+
     $smbStep = [PSCustomObject]@{
         StepName = 'Configure SMB Shares'
         Success  = $false
@@ -677,8 +747,13 @@ function Push-ProfileToServer {
     # -----------------------------------------------------------------------
     $result.Success = ($result.Steps | Where-Object { -not $_.Success }).Count -eq 0
     if (-not $result.Success) {
-        $failedSteps = ($result.Steps | Where-Object { -not $_.Success } | ForEach-Object { $_.StepName }) -join ', '
-        $result.ErrorMessage = "Failed steps: $failedSteps"
+        $failedSteps = ($result.Steps | Where-Object { -not $_.Success } | ForEach-Object { "$($_.StepName): $($_.Message)" }) -join '; '
+        $succeededSteps = ($result.Steps | Where-Object { $_.Success } | ForEach-Object { $_.StepName }) -join ', '
+        $result.ErrorMessage = "Partial deployment failure. Failed: [$failedSteps]"
+        if ($succeededSteps) {
+            $result.ErrorMessage += " | Succeeded: [$succeededSteps]"
+        }
+        Write-AppLog -Message "Push-ProfileToServer: Partial failure on $ServerIP - $($result.ErrorMessage)" -Level 'WARN'
     }
 
     Write-AppLog -Message "Push-ProfileToServer: Deployment to $ServerIP completed. Success=$($result.Success)" -Level 'INFO'
@@ -734,7 +809,7 @@ function Push-ProfileToMultipleServers {
             try {
                 $ProgressCallback.Invoke($ip, $currentIndex, $totalServers, $pushResult)
             } catch {
-                # Progress callback error - continue with next server
+                Write-AppLog -Message "Push-ProfileToMultipleServers: Progress callback failed for $ip ($currentIndex/$totalServers) - $_" -Level 'DEBUG'
             }
         }
     }
@@ -769,12 +844,16 @@ function New-DeployView {
     # Clear any existing controls from the content panel
     $ContentPanel.Controls.Clear()
 
+    # Suspend layout to prevent flicker during UI construction
+    $ContentPanel.SuspendLayout()
+
     # Create a scrollable container for the entire view
     $scrollContainer = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
     $scrollContainer.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
                               [System.Windows.Forms.AnchorStyles]::Left -bor
                               [System.Windows.Forms.AnchorStyles]::Right -bor
                               [System.Windows.Forms.AnchorStyles]::Bottom
+    $scrollContainer.SuspendLayout()
 
     # ===================================================================
     # Section Header
@@ -1160,6 +1239,20 @@ function New-DeployView {
             $subnet = "10.0.0"
         }
 
+        # Validate subnet format before scanning
+        if ($subnet -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+            $lblScanStatus.Text = "Invalid subnet format. Use 'X.X.X' (e.g. '10.0.0')."
+            $lblScanStatus.ForeColor = $script:Theme.Error
+            return
+        }
+
+        # Validate IP range bounds
+        if ($startIP -lt 0 -or $startIP -gt 255 -or $endIP -lt 0 -or $endIP -gt 255 -or $startIP -gt $endIP) {
+            $lblScanStatus.Text = "Invalid IP range. Start and End must be 0-255, Start <= End."
+            $lblScanStatus.ForeColor = $script:Theme.Error
+            return
+        }
+
         # Disable button during scan
         $btnScanNetwork.Enabled = $false
         $btnQuickScan.Enabled = $false
@@ -1270,7 +1363,7 @@ function New-DeployView {
                         [void]$results.Add($serverObj)
                     }
                 } catch {
-                    Write-AppLog -Message "Scan: Could not test host $($testResult.IPAddress): $_" -Level 'DEBUG'
+                    Write-AppLog -Message "Quick scan: Could not test host ${ip}: $_" -Level 'DEBUG'
                 }
             }
 
@@ -1470,5 +1563,9 @@ function New-DeployView {
     # ===================================================================
     # Add the scroll container to the content panel
     # ===================================================================
+    $scrollContainer.ResumeLayout($true)
     $ContentPanel.Controls.Add($scrollContainer)
+
+    # Resume layout now that all controls have been added
+    $ContentPanel.ResumeLayout($true)
 }

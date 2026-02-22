@@ -308,9 +308,10 @@ $themeToggleBtn.Add_Click({
         Set-AppTheme -ThemeName 'Dark'
     }
 
-    # Refresh the entire UI with new theme colors
-    $mainForm.BackColor = $script:Theme.Background
-    $mainForm.ForeColor = $script:Theme.Text
+    # Recursively update all controls in the form with new theme colors
+    Update-ControlTheme -Control $mainForm
+
+    # Re-apply nav-specific colors that Update-ControlTheme can't infer from Tags
     $navPanel.BackColor = $script:Theme.NavBackground
     $logoPanel.BackColor = $script:Theme.NavBackground
     $appTitleLabel.ForeColor = $script:Theme.Primary
@@ -322,12 +323,11 @@ $themeToggleBtn.Add_Click({
     $themeToggleBtn.ForeColor = $script:Theme.TextMuted
     $themeToggleBtn.FlatAppearance.BorderColor = $script:Theme.Border
     $versionLabel.ForeColor = $script:Theme.TextMuted
-    $contentPanel.BackColor = $script:Theme.Background
 
-    # Re-render current view with new theme
+    # Re-render current view to rebuild all content with new theme
     Set-ActiveView -ViewName $script:AppState.CurrentView
 
-    Write-AppLog -Message "Theme toggled to: $(if ($script:Theme -eq $script:DarkTheme) { 'Dark' } else { 'Light' })" -Level 'INFO'
+    Write-AppLog -Message "Theme toggled to: $(Get-AppThemeName)" -Level 'INFO'
 })
 
 # ============================================================================
@@ -341,6 +341,33 @@ $mainForm.Controls.Add($navPanel)      # Left dock
 # ============================================================================
 # STARTUP
 # ============================================================================
+
+# Load saved theme preference (if any) before rendering the first view
+Load-ThemePreference
+
+# Apply loaded theme to all existing controls before the first view render
+$mainForm.BackColor = $script:Theme.Background
+$mainForm.ForeColor = $script:Theme.Text
+$navPanel.BackColor = $script:Theme.NavBackground
+$logoPanel.BackColor = $script:Theme.NavBackground
+$appTitleLabel.ForeColor = $script:Theme.Primary
+$appSubtitleLabel.ForeColor = $script:Theme.TextMuted
+$navSeparator.BackColor = $script:Theme.Border
+$navButtonsPanel.BackColor = $script:Theme.NavBackground
+$navBottomPanel.BackColor = $script:Theme.NavBackground
+$themeToggleBtn.BackColor = $script:Theme.NavBackground
+$themeToggleBtn.ForeColor = $script:Theme.TextMuted
+$themeToggleBtn.FlatAppearance.BorderColor = $script:Theme.Border
+$versionLabel.ForeColor = $script:Theme.TextMuted
+$contentPanel.BackColor = $script:Theme.Background
+
+# Update nav buttons with loaded theme
+foreach ($key in $script:NavButtons.Keys) {
+    $btn = $script:NavButtons[$key]
+    $btn.BackColor = $script:Theme.NavBackground
+    $btn.ForeColor = $script:Theme.TextSecondary
+    $btn.FlatAppearance.MouseOverBackColor = $script:Theme.NavHover
+}
 
 # Load default view
 Set-ActiveView -ViewName 'Dashboard'
