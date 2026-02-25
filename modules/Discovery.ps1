@@ -40,6 +40,7 @@ function Find-DisguiseServers {
         [string]$SubnetBase = "10.0.0",
         [int]$StartIP = 1,
         [int]$EndIP = 254,
+        [ValidateRange(50, 5000)]
         [int]$TimeoutMs = 200,
         [scriptblock]$ProgressCallback = $null
     )
@@ -593,17 +594,24 @@ function Push-ProfileToServer {
                 $results = @()
                 foreach ($adapter in $AdapterConfigs) {
                     try {
-                        # Skip unconfigured adapters
+                        # Skip disabled, unconfigured, or DHCP adapters
+                        if ($adapter.PSObject.Properties['Enabled'] -and $adapter.Enabled -eq $false) {
+                            $results += "INFO: $($adapter.AdapterName) - Disabled in profile, skipping"
+                            continue
+                        }
                         if ([string]::IsNullOrWhiteSpace($adapter.IPAddress)) { continue }
+                        if ($adapter.DHCP -eq $true) {
+                            $results += "INFO: $($adapter.Role) ($($adapter.AdapterName)) - DHCP enabled, skipping static config"
+                            continue
+                        }
 
-                        # Find the adapter by role name or interface alias
+                        # Find the adapter by AdapterName (matching profile schema)
                         $netAdapter = Get-NetAdapter | Where-Object {
-                            $_.Name -eq $adapter.InterfaceAlias -or
-                            $_.InterfaceDescription -match $adapter.Role
+                            $_.Name -eq $adapter.AdapterName
                         } | Select-Object -First 1
 
                         if (-not $netAdapter) {
-                            $results += "WARN: Adapter for role '$($adapter.Role)' not found"
+                            $results += "WARN: Adapter '$($adapter.AdapterName)' for role '$($adapter.Role)' not found"
                             continue
                         }
 
@@ -611,11 +619,26 @@ function Push-ProfileToServer {
                         $netAdapter | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
                         $netAdapter | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
 
+                        # Convert SubnetMask (dotted decimal) to CIDR prefix length
+                        $prefixLength = 24  # safe default
+                        if ($adapter.SubnetMask) {
+                            try {
+                                $maskBytes = [System.Net.IPAddress]::Parse($adapter.SubnetMask).GetAddressBytes()
+                                $prefixLength = 0
+                                foreach ($byte in $maskBytes) {
+                                    $bits = [Convert]::ToString($byte, 2).PadLeft(8, '0')
+                                    $prefixLength += ($bits.ToCharArray() | Where-Object { $_ -eq '1' }).Count
+                                }
+                            } catch {
+                                $results += "WARN: Invalid subnet mask '$($adapter.SubnetMask)' for $($adapter.AdapterName), using /24"
+                            }
+                        }
+
                         # Apply new IP configuration
                         $ipParams = @{
                             InterfaceIndex = $netAdapter.InterfaceIndex
                             IPAddress      = $adapter.IPAddress
-                            PrefixLength   = $adapter.SubnetPrefix
+                            PrefixLength   = $prefixLength
                             ErrorAction    = 'Stop'
                         }
                         if ($adapter.Gateway) {
@@ -623,18 +646,21 @@ function Push-ProfileToServer {
                         }
                         New-NetIPAddress @ipParams
 
-                        # Set DNS servers if specified
-                        if ($adapter.DNSServers -and $adapter.DNSServers.Count -gt 0) {
+                        # Build DNS server list from DNS1/DNS2 fields
+                        $dnsServers = @()
+                        if ($adapter.DNS1) { $dnsServers += $adapter.DNS1 }
+                        if ($adapter.DNS2) { $dnsServers += $adapter.DNS2 }
+                        if ($dnsServers.Count -gt 0) {
                             Set-DnsClientServerAddress -InterfaceIndex $netAdapter.InterfaceIndex `
-                                -ServerAddresses $adapter.DNSServers -ErrorAction Stop
+                                -ServerAddresses $dnsServers -ErrorAction Stop
                         }
 
-                        $results += "OK: $($adapter.Role) -> $($adapter.IPAddress)/$($adapter.SubnetPrefix)"
+                        $results += "OK: $($adapter.Role) ($($adapter.AdapterName)) -> $($adapter.IPAddress)/$prefixLength"
                     } catch {
-                        $results += "ERROR: $($adapter.Role) - $_"
+                        $results += "ERROR: $($adapter.Role) ($($adapter.AdapterName)) - $($_.Exception.Message)"
                     }
                 }
-                return @{ Success = ($results -notmatch '^ERROR:').Count -eq $results.Count; Message = ($results -join '; ') }
+                return @{ Success = ($results | Where-Object { $_ -match '^ERROR:' }).Count -eq 0; Message = ($results -join '; ') }
             }
 
             $invokeParams = @{
@@ -683,36 +709,77 @@ function Push-ProfileToServer {
                 param($SMBConfig)
                 $results = @()
                 try {
-                    # Configure SMB server settings
-                    if ($SMBConfig.EnableSMB1) {
-                        Set-SmbServerConfiguration -EnableSMB1Protocol $true -Force -ErrorAction Stop
-                        $results += "OK: SMB1 enabled"
-                    }
-                    if ($SMBConfig.EnableSMB2) {
-                        Set-SmbServerConfiguration -EnableSMB2Protocol $true -Force -ErrorAction Stop
-                        $results += "OK: SMB2 enabled"
-                    }
+                    # SMB1 enablement is blocked by security policy (EternalBlue/WannaCry risk)
+                    $results += "INFO: SMB protocol version management is handled separately by security policy"
 
-                    # Create or update shares
-                    if ($SMBConfig.Shares) {
-                        foreach ($share in $SMBConfig.Shares) {
-                            try {
-                                $existingShare = Get-SmbShare -Name $share.Name -ErrorAction SilentlyContinue
-                                if ($existingShare) {
-                                    Set-SmbShare -Name $share.Name -Path $share.Path -Force -ErrorAction Stop
-                                    $results += "OK: Updated share '$($share.Name)'"
-                                } else {
-                                    New-SmbShare -Name $share.Name -Path $share.Path `
-                                        -FullAccess $share.FullAccess -ErrorAction Stop
-                                    $results += "OK: Created share '$($share.Name)'"
-                                }
-                            } catch {
-                                $results += "ERROR: Share '$($share.Name)' - $_"
+                    # Create or update the d3 Projects share using actual profile schema fields
+                    if ($SMBConfig.ShareD3Projects -eq $true -and $SMBConfig.ShareName -and $SMBConfig.ProjectsPath) {
+                        try {
+                            # Validate ProjectsPath — block UNC and system paths
+                            if ($SMBConfig.ProjectsPath -match '^\\\\') {
+                                $results += "ERROR: UNC paths not allowed for ProjectsPath: $($SMBConfig.ProjectsPath)"
+                                return @{ Success = $false; Message = ($results -join '; ') }
                             }
+                            if ($SMBConfig.ProjectsPath -match '(?i)(system32|\\windows\\|program files)') {
+                                $results += "ERROR: System paths not allowed for ProjectsPath: $($SMBConfig.ProjectsPath)"
+                                return @{ Success = $false; Message = ($results -join '; ') }
+                            }
+
+                            # Ensure the projects directory exists
+                            if (-not (Test-Path $SMBConfig.ProjectsPath)) {
+                                New-Item -Path $SMBConfig.ProjectsPath -ItemType Directory -Force | Out-Null
+                            }
+
+                            # Parse permissions string (format: "Account:Level")
+                            # Parse permissions with null safety and case-insensitive comparison
+                            $permParts = if ($SMBConfig.SharePermissions) { $SMBConfig.SharePermissions -split ':' } else { @() }
+                            $permAccount = if ($permParts.Count -gt 0 -and $permParts[0]) { $permParts[0] } else { 'Administrators' }
+                            $permLevel = if ($permParts.Count -gt 1 -and $permParts[1]) { $permParts[1] } else { 'Full' }
+
+                            $existingShare = Get-SmbShare -Name $SMBConfig.ShareName -ErrorAction SilentlyContinue
+                            if ($existingShare) {
+                                # Path cannot be changed via Set-SmbShare — remove and recreate if path differs
+                                if ($existingShare.Path -ne $SMBConfig.ProjectsPath) {
+                                    Remove-SmbShare -Name $SMBConfig.ShareName -Force -ErrorAction Stop
+                                    $results += "INFO: Removed existing share (path mismatch: '$($existingShare.Path)' vs '$($SMBConfig.ProjectsPath)')"
+                                    # Fall through to New-SmbShare below
+                                    $existingShare = $null
+                                } else {
+                                    # Path matches — update permissions
+                                    if ($permLevel -ieq 'Full') {
+                                        Grant-SmbShareAccess -Name $SMBConfig.ShareName -AccountName $permAccount -AccessRight Full -Force -ErrorAction Stop | Out-Null
+                                    } elseif ($permLevel -ieq 'Change') {
+                                        Grant-SmbShareAccess -Name $SMBConfig.ShareName -AccountName $permAccount -AccessRight Change -Force -ErrorAction Stop | Out-Null
+                                    } else {
+                                        Grant-SmbShareAccess -Name $SMBConfig.ShareName -AccountName $permAccount -AccessRight Read -Force -ErrorAction Stop | Out-Null
+                                    }
+                                    $results += "OK: Updated share '$($SMBConfig.ShareName)' permissions ($permAccount`:$permLevel)"
+                                }
+                            }
+                            if (-not $existingShare) {
+                                $shareParams = @{
+                                    Name        = $SMBConfig.ShareName
+                                    Path        = $SMBConfig.ProjectsPath
+                                    ErrorAction = 'Stop'
+                                }
+                                if ($permLevel -ieq 'Full') {
+                                    $shareParams.FullAccess = $permAccount
+                                } elseif ($permLevel -ieq 'Change') {
+                                    $shareParams.ChangeAccess = $permAccount
+                                } else {
+                                    $shareParams.ReadAccess = $permAccount
+                                }
+                                New-SmbShare @shareParams
+                                $results += "OK: Created share '$($SMBConfig.ShareName)' at '$($SMBConfig.ProjectsPath)' with $permAccount`:$permLevel"
+                            }
+                        } catch {
+                            $results += "ERROR: Share '$($SMBConfig.ShareName)' - $($_.Exception.Message)"
                         }
+                    } else {
+                        $results += "INFO: d3 Projects sharing not enabled in profile"
                     }
                 } catch {
-                    $results += "ERROR: SMB configuration - $_"
+                    $results += "ERROR: SMB configuration - $($_.Exception.Message)"
                 }
                 return @{
                     Success = ($results | Where-Object { $_ -match '^ERROR:' }).Count -eq 0
@@ -899,14 +966,8 @@ function New-DeployView {
     $btnQuickScan = New-StyledButton -Text "Quick Scan" -X 170 -Y 90 `
         -Width 120 -Height 35
 
-    # Progress bar for scan progress
-    $scanProgressBar = New-Object System.Windows.Forms.ProgressBar
-    $scanProgressBar.Location = New-Object System.Drawing.Point(310, 95)
-    $scanProgressBar.Size = New-Object System.Drawing.Size(350, 22)
-    $scanProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
-    $scanProgressBar.Minimum = 0
-    $scanProgressBar.Maximum = 100
-    $scanProgressBar.Value = 0
+    # Progress bar for scan progress (styled)
+    $scanProgressBar = New-StyledProgressBar -X 310 -Y 95 -Width 350 -Height 22
 
     $lblScanStatus = New-StyledLabel -Text "Ready to scan" -X 15 -Y 140 -FontSize 9 -IsMuted
     $lblScanStatus.AutoSize = $false
@@ -1053,10 +1114,34 @@ function New-DeployView {
                     [System.Windows.Forms.MessageBoxIcon]::Question)
                 if ($confirmResult -eq [System.Windows.Forms.DialogResult]::Yes) {
                     $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting push to $ip...`r`n")
+                    try {
+                        $profileObj = Get-Profile -Name $cboProfiles.SelectedItem
+                        if (-not $profileObj) {
+                            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Could not load profile '$($cboProfiles.SelectedItem)'`r`n")
+                        } else {
+                            # Build credentials if provided
+                            $cred = $null
+                            if (-not $chkCurrentCreds.Checked -and $txtUsername.Text -and $txtPassword.Text) {
+                                $secPass = ConvertTo-SecureString $txtPassword.Text -AsPlainText -Force
+                                $cred = New-Object System.Management.Automation.PSCredential($txtUsername.Text, $secPass)
+                                $secPass = $null
+                            }
+                            $pushResult = Push-ProfileToServer -ServerIP $ip -Profile $profileObj -Credential $cred
+                            foreach ($step in $pushResult.Steps) {
+                                $status = if ($step.Success) { 'OK' } else { 'FAIL' }
+                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   [$status] $($step.StepName): $($step.Message)`r`n")
+                            }
+                            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Push to $ip completed.`r`n")
+                        }
+                    } catch {
+                        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Push failed - $($_.Exception.Message)`r`n")
+                    }
                 }
             } else {
-                [System.Windows.Forms.MessageBox]::Show("Please select a profile first.",
-                    "No Profile", [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Please select a profile first.",
+                    "No Profile",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
                     [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
             }
         }
@@ -1193,14 +1278,8 @@ function New-DeployView {
     $btnDeploy = New-StyledButton -Text "Deploy to Selected Servers" -X 15 -Y 120 `
         -Width 250 -Height 40 -IsPrimary
 
-    # Deployment progress bar
-    $deployProgressBar = New-Object System.Windows.Forms.ProgressBar
-    $deployProgressBar.Location = New-Object System.Drawing.Point(280, 125)
-    $deployProgressBar.Size = New-Object System.Drawing.Size(600, 22)
-    $deployProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
-    $deployProgressBar.Minimum = 0
-    $deployProgressBar.Maximum = 100
-    $deployProgressBar.Value = 0
+    # Deployment progress bar (styled)
+    $deployProgressBar = New-StyledProgressBar -X 280 -Y 125 -Width 580 -Height 22
 
     $deployCard.Controls.AddRange(@($btnDeploy, $deployProgressBar))
 
@@ -1213,7 +1292,7 @@ function New-DeployView {
     $txtDeployLog.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
     $txtDeployLog.BackColor = $script:Theme.InputBackground
     $txtDeployLog.ForeColor = $script:Theme.TextSecondary
-    $txtDeployLog.Font = New-Object System.Drawing.Font('Consolas', 9)
+    $txtDeployLog.Font = New-Object System.Drawing.Font('Consolas', 10)
     $txtDeployLog.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
     $txtDeployLog.Text = "[$(Get-Date -Format 'HH:mm:ss')] Deploy log initialized. Select a profile and target servers to begin.`r`n"
 
@@ -1234,6 +1313,9 @@ function New-DeployView {
         try { $startIP = [int]$txtStartIP.Text.Trim() } catch { $startIP = 1 }
         try { $endIP = [int]$txtEndIP.Text.Trim() } catch { $endIP = 254 }
         try { $timeout = [int]$txtTimeout.Text.Trim() } catch { $timeout = 200 }
+
+        # Clamp timeout to safe bounds (50ms - 5000ms)
+        $timeout = [Math]::Min([Math]::Max(50, $timeout), 5000)
 
         if ([string]::IsNullOrWhiteSpace($subnet)) {
             $subnet = "10.0.0"
@@ -1530,8 +1612,10 @@ function New-DeployView {
         $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Deployment complete: $successCount/$totalServers succeeded.`r`n")
         $txtDeployLog.AppendText("------------------------------------------------------------`r`n")
 
-        # Update app state with the last applied profile name
-        $script:AppState.LastAppliedProfile = $profileObj.Name
+        # Update app state only if at least one deployment succeeded
+        if ($successCount -gt 0) {
+            $script:AppState.LastAppliedProfile = $profileObj.Name
+        }
 
         $btnDeploy.Enabled = $true
     })

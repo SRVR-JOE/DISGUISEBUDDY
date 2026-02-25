@@ -1,5 +1,16 @@
 # Theme.ps1 - DISGUISE BUDDY Theme System
 
+# Centralized path resolution
+function Get-AppRootPath {
+    if ($script:AppRootPath) { return $script:AppRootPath }
+    $script:AppRootPath = if ($PSScriptRoot) {
+        $PSScriptRoot | Split-Path -Parent
+    } else {
+        $PWD.Path
+    }
+    return $script:AppRootPath
+}
+
 # Dark theme (default)
 $script:DarkTheme = @{
     Background        = [System.Drawing.ColorTranslator]::FromHtml('#1E1E2E')
@@ -127,7 +138,7 @@ function Save-ThemePreference {
         [string]$ThemeName
     )
 
-    $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot | Split-Path -Parent } else { $PWD.Path }
+    $scriptRoot = Get-AppRootPath
     $settingsDir = Join-Path -Path $scriptRoot -ChildPath 'settings'
     $settingsFile = Join-Path -Path $settingsDir -ChildPath 'theme.json'
 
@@ -150,7 +161,7 @@ function Load-ThemePreference {
         Loads the user's saved theme preference from settings/theme.json.
         If no saved preference exists, keeps the current (default) theme.
     #>
-    $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot | Split-Path -Parent } else { $PWD.Path }
+    $scriptRoot = Get-AppRootPath
     $settingsFile = Join-Path -Path $scriptRoot -ChildPath 'settings' | Join-Path -ChildPath 'theme.json'
 
     if (Test-Path -Path $settingsFile) {
@@ -355,7 +366,7 @@ function Write-AppLog {
 
     # Determine the script root directory
     # $PSScriptRoot is set when the script is dot-sourced; fall back to current directory
-    $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot | Split-Path -Parent } else { $PWD.Path }
+    $scriptRoot = Get-AppRootPath
 
     $logDir = Join-Path -Path $scriptRoot -ChildPath 'logs'
     $logFile = Join-Path -Path $logDir -ChildPath 'disguisebuddy.log'
@@ -363,6 +374,22 @@ function Write-AppLog {
     # Ensure the logs directory exists
     if (-not (Test-Path -Path $logDir)) {
         New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+    }
+
+    # Log rotation - rotate if over 10MB
+    if ((Test-Path $logFile) -and (Get-Item $logFile).Length -gt 10MB) {
+        try {
+            $archiveName = [System.IO.Path]::GetFileNameWithoutExtension($logFile)
+            $archivePath = Join-Path $logDir "$archiveName-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+            Move-Item -Path $logFile -Destination $archivePath -Force
+            # Keep only last 5 archives
+            Get-ChildItem $logDir -Filter "$archiveName-*.log" |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -Skip 5 |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+        } catch {
+            # If rotation fails, continue writing to current log
+        }
     }
 
     # Format the log entry with timestamp, level, and message

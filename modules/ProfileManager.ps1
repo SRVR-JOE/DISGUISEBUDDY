@@ -152,7 +152,7 @@ function New-DefaultProfile {
             ShareD3Projects  = $true
             ProjectsPath     = "D:\d3 Projects"
             ShareName        = "d3 Projects"
-            SharePermissions = "Everyone:Full"
+            SharePermissions = "Administrators:Full"
             AdditionalShares = @()
         }
         CustomSettings  = [PSCustomObject]@{}
@@ -195,6 +195,66 @@ function Get-AllProfiles {
 }
 
 
+function Test-ProfileSchema {
+    <#
+    .SYNOPSIS
+        Validates a profile object against the expected schema. Returns validation result.
+    #>
+    param([PSCustomObject]$Profile)
+    $errors = @()
+
+    # Validate required fields
+    if (-not $Profile.Name) { $errors += "Profile name is required" }
+    if (-not $Profile.NetworkAdapters) { $errors += "NetworkAdapters array is required" }
+    if ($Profile.NetworkAdapters -and $Profile.NetworkAdapters -isnot [array]) { $errors += "NetworkAdapters must be an array" }
+
+    # Block SMB1 enablement (security policy)
+    if ($Profile.PSObject.Properties['SMBSettings'] -and $Profile.SMBSettings.PSObject.Properties['EnableSMB1']) {
+        if ($Profile.SMBSettings.EnableSMB1 -eq $true) {
+            $errors += "SMB1 enablement is blocked by security policy"
+        }
+    }
+
+    # Validate adapter roles against allowlist
+    $validRoles = @('d3Net','Media','sACN','NDI','Control','Internet','100G','KVM','Backup','Management','')
+    if ($Profile.NetworkAdapters) {
+        foreach ($adapter in $Profile.NetworkAdapters) {
+            if ($adapter.Role -and $adapter.Role -notin $validRoles) {
+                $errors += "Unrecognized adapter role: '$($adapter.Role)'"
+            }
+        }
+    }
+
+    # Validate share paths if present (legacy Shares[] array form)
+    if ($Profile.SMBSettings -and $Profile.SMBSettings.PSObject.Properties['Shares']) {
+        foreach ($share in $Profile.SMBSettings.Shares) {
+            if ($share.Path -and $share.Path -match '^\\\\') {
+                $errors += "UNC paths not allowed in share configuration: $($share.Path)"
+            }
+            if ($share.Path -and $share.Path -match '(?i)(system32|[\\\/]windows([\\\/]|$)|program.files)') {
+                $errors += "System paths not allowed in share configuration: $($share.Path)"
+            }
+        }
+    }
+
+    # Validate ProjectsPath (the actual field used in profile schema)
+    if ($Profile.SMBSettings -and $Profile.SMBSettings.PSObject.Properties['ProjectsPath']) {
+        $pp = $Profile.SMBSettings.ProjectsPath
+        if ($pp -and $pp -match '^\\\\') {
+            $errors += "UNC path not allowed in SMBSettings.ProjectsPath: $pp"
+        }
+        if ($pp -and $pp -match '(?i)(system32|[\\\/]windows([\\\/]|$)|program.files)') {
+            $errors += "System path not allowed in SMBSettings.ProjectsPath: $pp"
+        }
+    }
+
+    return @{
+        IsValid = ($errors.Count -eq 0)
+        Errors  = $errors
+    }
+}
+
+
 function Get-Profile {
     <#
     .SYNOPSIS
@@ -210,7 +270,17 @@ function Get-Profile {
     )
 
     $profilesDir = Get-ProfilesDirectory
-    $filePath = Join-Path -Path $profilesDir -ChildPath "$Name.json"
+    # Sanitize name to prevent path traversal (matching Save-Profile behavior)
+    $safeName = $Name -replace '[\\/:*?"<>|]', '_'
+    $filePath = Join-Path -Path $profilesDir -ChildPath "$safeName.json"
+
+    # Verify resolved path stays within profiles directory
+    $resolvedPath = [System.IO.Path]::GetFullPath($filePath)
+    $resolvedDir = [System.IO.Path]::GetFullPath($profilesDir)
+    if (-not $resolvedPath.StartsWith($resolvedDir, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-AppLog "Path traversal attempt blocked for profile name '$Name'" -Level 'ERROR'
+        return $null
+    }
 
     if (-not (Test-Path -Path $filePath)) {
         Write-AppLog "Profile not found: '$Name'" -Level 'WARN'
@@ -223,7 +293,7 @@ function Get-Profile {
         return $profileObj
     }
     catch {
-        Write-AppLog "Failed to read profile '$Name': $_" -Level 'ERROR'
+        Write-AppLog "Failed to read profile '$Name': $($_.Exception.Message)" -Level 'ERROR'
         return $null
     }
 }
@@ -352,6 +422,14 @@ function Remove-Profile {
     $profilesDir = Get-ProfilesDirectory
     $safeName = $Name -replace '[\\/:*?"<>|]', '_'
     $filePath = Join-Path -Path $profilesDir -ChildPath "$safeName.json"
+
+    # Path boundary check — ensure resolved path stays inside profiles directory
+    $resolvedPath = [System.IO.Path]::GetFullPath($filePath)
+    $resolvedDir  = [System.IO.Path]::GetFullPath($profilesDir)
+    if (-not $resolvedPath.StartsWith($resolvedDir, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-AppLog "Remove-Profile: Path traversal blocked for '$Name' (resolved to '$resolvedPath')" -Level 'ERROR'
+        throw "Invalid profile name: path escapes the profiles directory"
+    }
 
     if (Test-Path -Path $filePath) {
         try {
@@ -501,6 +579,20 @@ function Import-ProfileFromFile {
         # If Yes, we fall through and overwrite
     }
 
+    # Validate schema before saving
+    $schemaResult = Test-ProfileSchema -Profile $importedProfile
+    if (-not $schemaResult.IsValid) {
+        $errorMsg = "Imported profile failed validation:`n`n" + ($schemaResult.Errors -join "`n")
+        Write-AppLog "Import blocked by schema validation: $($schemaResult.Errors -join '; ')" -Level 'WARN'
+        [System.Windows.Forms.MessageBox]::Show(
+            $errorMsg,
+            "Profile Validation Failed",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return $null
+    }
+
     # Update timestamps for the import
     $importedProfile.Modified = (Get-Date).ToString('o')
 
@@ -551,6 +643,20 @@ function Apply-FullProfile {
         [Parameter(Mandatory = $true)]
         [PSCustomObject]$Profile
     )
+
+    # Validate profile schema before proceeding
+    $schemaResult = Test-ProfileSchema -Profile $Profile
+    if (-not $schemaResult.IsValid) {
+        $errorMsg = "Profile '$($Profile.Name)' failed schema validation:`n`n" + ($schemaResult.Errors -join "`n")
+        Write-AppLog "Apply-FullProfile blocked by schema validation: $($schemaResult.Errors -join '; ')" -Level 'ERROR'
+        [System.Windows.Forms.MessageBox]::Show(
+            $errorMsg,
+            "Profile Validation Failed",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+        return $false
+    }
 
     # Build a summary of all changes that would be applied
     $changesList = [System.Text.StringBuilder]::new()
@@ -775,7 +881,7 @@ function Apply-FullProfile {
         if ($applySMB) {
             $smbShareName = if ($Profile.SMBSettings.PSObject.Properties['ShareName']) { $Profile.SMBSettings.ShareName } else { "d3 Projects" }
             $smbLocalPath = if ($Profile.SMBSettings.PSObject.Properties['ProjectsPath']) { $Profile.SMBSettings.ProjectsPath } else { "D:\d3 Projects" }
-            $smbPerms = if ($Profile.SMBSettings.PSObject.Properties['SharePermissions']) { $Profile.SMBSettings.SharePermissions } else { "Everyone:Full" }
+            $smbPerms = if ($Profile.SMBSettings.PSObject.Properties['SharePermissions']) { $Profile.SMBSettings.SharePermissions } else { "Administrators:Full" }
 
             Write-AppLog "Creating SMB share '$smbShareName' at '$smbLocalPath'" -Level 'INFO'
             $smbResult = New-D3ProjectShare `
@@ -807,10 +913,14 @@ function Apply-FullProfile {
     }
 
     # ================================================================
-    # Step 4: Update AppState
+    # Step 4: Update AppState (only on full success)
     # ================================================================
-    $script:AppState.LastAppliedProfile = $Profile.Name
-    Write-AppLog "Updated LastAppliedProfile to '$($Profile.Name)'" -Level 'INFO'
+    if ($failCount -eq 0) {
+        $script:AppState.LastAppliedProfile = $Profile.Name
+        Write-AppLog "Updated LastAppliedProfile to '$($Profile.Name)'" -Level 'INFO'
+    } else {
+        Write-AppLog "Profile '$($Profile.Name)' applied with $failCount failure(s). LastAppliedProfile NOT updated." -Level 'WARN'
+    }
 
     Write-AppLog "=== PROFILE APPLICATION END: '$($Profile.Name)' ===" -Level 'INFO'
 
@@ -990,7 +1100,7 @@ function Get-CurrentSystemProfile {
         ShareD3Projects  = $false
         ProjectsPath     = "D:\d3 Projects"
         ShareName        = "d3 Projects"
-        SharePermissions = "Everyone:Full"
+        SharePermissions = "Administrators:Full"
         AdditionalShares = @()
     }
 
@@ -1568,7 +1678,7 @@ function Show-EditFullProfileDialog {
                 ShareD3Projects  = $false
                 ProjectsPath     = "D:\d3 Projects"
                 ShareName        = "d3 Projects"
-                SharePermissions = "Everyone:Full"
+                SharePermissions = "Administrators:Full"
                 AdditionalShares = @()
             }
         }

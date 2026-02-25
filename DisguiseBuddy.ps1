@@ -5,6 +5,23 @@
 #Requires -Version 5.1
 
 # ============================================================================
+# PRIVILEGE CHECK
+# ============================================================================
+
+# Check for Administrator privileges before proceeding
+$currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show(
+        "DISGUISE BUDDY requires Administrator privileges.`n`nPlease right-click PowerShell and choose 'Run as Administrator', then relaunch the application.",
+        "Insufficient Privileges",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Error
+    ) | Out-Null
+    exit 1
+}
+
+# ============================================================================
 # INITIALIZATION
 # ============================================================================
 
@@ -178,12 +195,12 @@ $contentPanel.Padding = New-Object System.Windows.Forms.Padding(20)
 
 # Navigation item definitions: Name, DisplayText, Unicode symbol
 $navItems = @(
-    @{ Name = 'Dashboard';      Display = 'Dashboard';           Symbol = [char]0x25A0 }  # ■
-    @{ Name = 'Profiles';       Display = 'Profiles';            Symbol = [char]0x25C6 }  # ◆
-    @{ Name = 'Network';        Display = 'Network Adapters';    Symbol = [char]0x25CB }  # ○
-    @{ Name = 'SMB';            Display = 'SMB Sharing';         Symbol = [char]0x25A1 }  # □
-    @{ Name = 'ServerIdentity'; Display = 'Server Identity';     Symbol = [char]0x25B6 }  # ▶
-    @{ Name = 'Deploy';         Display = 'Network Deploy';      Symbol = [char]0x25C7 }  # ◇
+    @{ Name = 'Dashboard';      Display = 'Dashboard';           Symbol = [char]0x229E }  # ⊞ grid
+    @{ Name = 'Profiles';       Display = 'Profiles';            Symbol = [char]0x2261 }  # ≡ list
+    @{ Name = 'Network';        Display = 'Network Adapters';    Symbol = [char]0x2295 }  # ⊕ connection
+    @{ Name = 'SMB';            Display = 'SMB Sharing';         Symbol = [char]0x22A1 }  # ⊡ folder
+    @{ Name = 'ServerIdentity'; Display = 'Server Identity';     Symbol = [char]0x2299 }  # ⊙ server
+    @{ Name = 'Deploy';         Display = 'Network Deploy';      Symbol = [char]0x21E2 }  # ⇢ deploy
 )
 
 # Store nav buttons for state management

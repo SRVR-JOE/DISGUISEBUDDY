@@ -10,21 +10,7 @@
 # Helper Functions (private to this module)
 # ============================================================================
 
-function Get-CurrentHostname {
-    <#
-    .SYNOPSIS
-        Returns the current machine hostname, with cross-platform fallback.
-    #>
-    try {
-        if ($env:COMPUTERNAME) {
-            return $env:COMPUTERNAME
-        }
-        # Fallback for non-Windows (Linux/macOS)
-        return (hostname)
-    } catch {
-        return "N/A"
-    }
-}
+# Get-ServerHostname removed — use Get-ServerHostname from ServerIdentity.ps1 instead
 
 function Get-ActiveAdapterCount {
     <#
@@ -68,12 +54,12 @@ function Get-AdapterSummaryData {
 
     # Define the 6 standard disguise adapter roles
     $roles = @(
-        @{ Role = "Management"; Color = "Blue" },
-        @{ Role = "d3Net";      Color = "Purple" },
-        @{ Role = "Media";      Color = "Green" },
-        @{ Role = "NDI";        Color = "Cyan" },
-        @{ Role = "KVM";        Color = "Orange" },
-        @{ Role = "Backup";     Color = "Gray" }
+        @{ Role = "d3Net";    Color = "Purple" },
+        @{ Role = "sACN";     Color = "Orange" },
+        @{ Role = "Media";    Color = "Green" },
+        @{ Role = "NDI";      Color = "Cyan" },
+        @{ Role = "Control";  Color = "Blue" },
+        @{ Role = "100G";     Color = "Gray" }
     )
 
     $summaryData = [System.Collections.ArrayList]::new()
@@ -212,7 +198,7 @@ function New-DashboardView {
     $cardStartX = 20
 
     # --- Gather live data ---
-    $currentHostname = Get-CurrentHostname
+    $currentHostname = Get-ServerHostname
     $activeProfile = if ($script:AppState.LastAppliedProfile) { $script:AppState.LastAppliedProfile } else { "None" }
     $adapterCount = Get-ActiveAdapterCount
     $shareCount = Get-ActiveShareCount
@@ -248,8 +234,9 @@ function New-DashboardView {
     $card2Accent.BackColor = $script:Theme.Primary
     $card2.Controls.Add($card2Accent)
 
-    $profileBadgeType = if ($activeProfile -eq "None") { 'Warning' } else { 'Info' }
-    $profileStatusBadge = New-StatusBadge -Text $profileBadgeType.ToUpper() `
+    $profileBadgeType = if ($activeProfile -eq "None") { 'Info' } else { 'Success' }
+    $profileBadgeText  = if ($activeProfile -eq "None") { 'NONE' } else { 'ACTIVE' }
+    $profileStatusBadge = New-StatusBadge -Text $profileBadgeText `
         -X 150 -Y 15 -Type $profileBadgeType
     $card2.Controls.Add($profileStatusBadge)
 
@@ -271,7 +258,8 @@ function New-DashboardView {
     $card3.Controls.Add($card3Accent)
 
     $adapterBadgeType = if ($adapterCount -eq "N/A") { 'Warning' } else { 'Success' }
-    $adapterStatusBadge = New-StatusBadge -Text $adapterBadgeType.ToUpper() `
+    $adapterBadgeText  = if ($adapterCount -eq "N/A") { 'N/A' }    else { 'ACTIVE' }
+    $adapterStatusBadge = New-StatusBadge -Text $adapterBadgeText `
         -X 150 -Y 15 -Type $adapterBadgeType
     $card3.Controls.Add($adapterStatusBadge)
 
@@ -293,7 +281,8 @@ function New-DashboardView {
     $card4.Controls.Add($card4Accent)
 
     $shareBadgeType = if ($shareCount -eq "N/A") { 'Warning' } else { 'Info' }
-    $shareStatusBadge = New-StatusBadge -Text $shareBadgeType.ToUpper() `
+    $shareBadgeText  = if ($shareCount -eq "N/A") { 'N/A' }    else { 'ACTIVE' }
+    $shareStatusBadge = New-StatusBadge -Text $shareBadgeText `
         -X 150 -Y 15 -Type $shareBadgeType
     $card4.Controls.Add($shareStatusBadge)
 
@@ -453,7 +442,7 @@ function New-DashboardView {
                         # Apply-FullProfile shows its own confirmation dialog and results summary
                         $applyResult = Apply-FullProfile -Profile $profileToApply
                         if ($applyResult) {
-                            $script:AppState.LastAppliedProfile = $targetProfileName
+                            # LastAppliedProfile is already updated inside Apply-FullProfile on success
                             Write-AppLog -Message "Dashboard: Quick Apply - profile '$targetProfileName' applied successfully" -Level 'INFO'
                             # Refresh the dashboard to show updated status
                             Set-ActiveView -ViewName 'Dashboard'
@@ -536,7 +525,7 @@ function New-DashboardView {
     $btnActionCapture.Add_Click({
         try {
             $captureName = "Capture_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-            $newProfile = New-DefaultProfile -Name $captureName -Description "Auto-captured from $(Get-CurrentHostname)"
+            $newProfile = New-DefaultProfile -Name $captureName -Description "Auto-captured from $(Get-ServerHostname)"
 
             # Attempt to populate adapter data from the live system
             try {
@@ -558,7 +547,7 @@ function New-DashboardView {
                 Write-AppLog -Message "Dashboard: Adapter capture failed (expected on non-Windows) - $_" -Level 'DEBUG'
             }
 
-            $newProfile.ServerName = Get-CurrentHostname
+            $newProfile.ServerName = Get-ServerHostname
             Save-Profile -Profile $newProfile
 
             [System.Windows.Forms.MessageBox]::Show(

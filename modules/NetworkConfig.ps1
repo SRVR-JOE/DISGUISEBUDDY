@@ -24,6 +24,9 @@
 # Detected physical adapters cache (populated by Detect Adapters button)
 $script:DetectedAdapters = @()
 
+# Canonical adapter roles for disguise servers
+$script:StandardAdapterRoles = @('d3Net', 'sACN', 'Media', 'NDI', 'Control', '100G')
+
 # Adapter role definitions with display metadata
 $script:AdapterRoles = @(
     @{

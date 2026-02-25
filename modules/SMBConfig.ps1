@@ -78,7 +78,7 @@ function New-D3ProjectShare {
     .PARAMETER ShareName
         The name of the share (default: "d3 Projects").
     .PARAMETER Permissions
-        Permission string in the format "Account:Level" (default: "Everyone:Full").
+        Permission string in the format "Account:Level" (default: "Administrators:Full").
         Level can be Full, Change, or Read.
     .OUTPUTS
         PSCustomObject with Success (bool) and Message (string) properties.
@@ -89,7 +89,7 @@ function New-D3ProjectShare {
 
         [string]$ShareName = 'd3 Projects',
 
-        [string]$Permissions = 'Everyone:Full'
+        [string]$Permissions = 'Administrators:Full'
     )
 
     try {
@@ -111,7 +111,7 @@ function New-D3ProjectShare {
 
         # Parse permission string
         $parts = $Permissions -split ':'
-        $account = if ($parts.Count -ge 1) { $parts[0] } else { 'Everyone' }
+        $account = if ($parts.Count -ge 1) { $parts[0] } else { 'Administrators' }
         $level   = if ($parts.Count -ge 2) { $parts[1] } else { 'Full' }
 
         # Check if share already exists
@@ -499,7 +499,7 @@ function New-SMBView {
     $lblAccount = New-StyledLabel -Text "Account:" -X 15 -Y $yPos
     $card1.Controls.Add($lblAccount)
 
-    $cmbAccount = New-StyledComboBox -X 160 -Y $yPos -Width 200 -Items @('Everyone', 'Administrators', 'SYSTEM', 'Authenticated Users')
+    $cmbAccount = New-StyledComboBox -X 160 -Y $yPos -Width 200 -Items @('Administrators', 'Everyone', 'SYSTEM', 'Authenticated Users')
     $cmbAccount.Name = 'cmbAccount'
     $cmbAccount.SelectedIndex = 0
     $card1.Controls.Add($cmbAccount)
@@ -645,7 +645,7 @@ function New-SMBView {
         }
 
         # Build permissions string
-        if (-not $account) { $account = 'Everyone' }
+        if (-not $account) { $account = 'Administrators' }
         if (-not $access) { $access = 'Full' }
         $permString = "${account}:${access}"
 
@@ -814,7 +814,7 @@ function New-SMBView {
         # Account
         $lblDlgAccount = New-StyledLabel -Text "Account:" -X 15 -Y 110 -IsBold
         $dlg.Controls.Add($lblDlgAccount)
-        $cmbDlgAccount = New-StyledComboBox -X 140 -Y 110 -Width 200 -Items @('Everyone', 'Administrators', 'SYSTEM', 'Authenticated Users')
+        $cmbDlgAccount = New-StyledComboBox -X 140 -Y 110 -Width 200 -Items @('Administrators', 'Everyone', 'SYSTEM', 'Authenticated Users')
         $cmbDlgAccount.Name = 'cmbDlgAccount'
         $cmbDlgAccount.SelectedIndex = 0
         $dlg.Controls.Add($cmbDlgAccount)

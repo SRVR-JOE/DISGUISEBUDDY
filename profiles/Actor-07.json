@@ -94,7 +94,7 @@
         "ShareD3Projects": true,
         "ProjectsPath": "D:\\d3 Projects",
         "ShareName": "d3 Projects",
-        "SharePermissions": "Everyone:Full",
+        "SharePermissions": "Administrators:Full",
         "AdditionalShares": []
     },
     "CustomSettings": {}
