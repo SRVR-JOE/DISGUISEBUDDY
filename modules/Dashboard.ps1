@@ -111,6 +111,175 @@ function Get-AdapterSummaryData {
     return $summaryData.ToArray()
 }
 
+function Get-DisguiseServerDetails {
+    <#
+    .SYNOPSIS
+        Queries a discovered disguise server's REST API and returns a structured
+        summary of version, NIC status, GPU outputs, and project list.
+    .DESCRIPTION
+        Makes up to four sequential HTTP GET calls against the disguise REST API:
+          GET /api/service/system              -> version
+          GET /api/service/system/networkadapters -> NIC status
+          GET /api/service/system/gpuoutputs   -> GPU output count
+          GET /api/service/system/projects     -> project names/count
+
+        All calls use a 3-second timeout. On any failure the relevant field is
+        returned as "Unavailable" so callers never have to null-guard.
+    .PARAMETER IPAddress
+        The IPv4 address of the target disguise server.
+    .PARAMETER Port
+        The HTTP port on which the disguise REST API is listening. Defaults to 80.
+    .OUTPUTS
+        PSCustomObject with properties:
+          IPAddress, Version, NICEnabled, NICDisconnected, GPUOutputs,
+          ProjectCount, ProjectNames, APIReachable
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$IPAddress,
+
+        [int]$Port = 80
+    )
+
+    # Build the base URL once — use the discovered port, not a hardcoded 80
+    $baseUrl = if ($Port -eq 80) { "http://$IPAddress" } else { "http://$IPAddress`:$Port" }
+
+    $result = [PSCustomObject]@{
+        IPAddress      = $IPAddress
+        Version        = 'Unavailable'
+        NICEnabled     = 'Unavailable'
+        NICDisconnected = 'Unavailable'
+        GPUOutputs     = 'Unavailable'
+        ProjectCount   = 'Unavailable'
+        ProjectNames   = @()
+        APIReachable   = $false
+    }
+
+    $httpClient = $null
+    try {
+        $httpClient = New-Object System.Net.Http.HttpClient
+        $httpClient.Timeout = [TimeSpan]::FromSeconds(3)
+
+        # ----------------------------------------------------------------
+        # 1. System info — version
+        # ----------------------------------------------------------------
+        try {
+            $sysJson = $httpClient.GetStringAsync("$baseUrl/api/service/system").Result
+            $sysData = $sysJson | ConvertFrom-Json
+            # disguise API returns d3VersionString or version depending on release
+            $ver = if ($sysData.d3VersionString) {
+                $sysData.d3VersionString
+            } elseif ($sysData.version) {
+                $sysData.version
+            } else {
+                'Unknown'
+            }
+            $result.Version = $ver
+            $result.APIReachable = $true
+        } catch {
+            Write-AppLog -Message "Get-DisguiseServerDetails: /api/service/system failed for $IPAddress - $_" -Level 'DEBUG'
+        }
+
+        # ----------------------------------------------------------------
+        # 2. Network adapters — enabled count and disconnected list
+        # ----------------------------------------------------------------
+        try {
+            $nicJson = $httpClient.GetStringAsync("$baseUrl/api/service/system/networkadapters").Result
+            $nicData = $nicJson | ConvertFrom-Json
+
+            # The API may return a top-level array or an object with an adapters key
+            $adapters = if ($nicData -is [System.Array]) {
+                $nicData
+            } elseif ($nicData.adapters) {
+                $nicData.adapters
+            } elseif ($nicData.networkAdapters) {
+                $nicData.networkAdapters
+            } else {
+                @()
+            }
+
+            $enabledAdapters  = @($adapters | Where-Object { $_.enabled -eq $true -or $_.Enabled -eq $true })
+            # Disconnected = enabled but no link / status indicates no cable
+            $disconnected = @($adapters | Where-Object {
+                ($_.enabled -eq $true -or $_.Enabled -eq $true) -and
+                ($_.connected -eq $false -or $_.Connected -eq $false -or
+                 $_.linkStatus -eq 'Down' -or $_.LinkStatus -eq 'Down' -or
+                 $_.status -ieq 'Disconnected')
+            })
+
+            $result.NICEnabled     = $enabledAdapters.Count
+            $result.NICDisconnected = $disconnected.Count
+        } catch {
+            Write-AppLog -Message "Get-DisguiseServerDetails: /api/service/system/networkadapters failed for $IPAddress - $_" -Level 'DEBUG'
+        }
+
+        # ----------------------------------------------------------------
+        # 3. GPU outputs — count of active outputs
+        # ----------------------------------------------------------------
+        try {
+            $gpuJson = $httpClient.GetStringAsync("$baseUrl/api/service/system/gpuoutputs").Result
+            $gpuData = $gpuJson | ConvertFrom-Json
+
+            $outputs = if ($gpuData -is [System.Array]) {
+                $gpuData
+            } elseif ($gpuData.outputs) {
+                $gpuData.outputs
+            } elseif ($gpuData.gpuOutputs) {
+                $gpuData.gpuOutputs
+            } else {
+                @()
+            }
+
+            $activeOutputs = @($outputs | Where-Object {
+                $_.active -eq $true -or $_.Active -eq $true -or
+                $_.enabled -eq $true -or $_.Enabled -eq $true
+            })
+            $result.GPUOutputs = if ($activeOutputs.Count -gt 0) {
+                $activeOutputs.Count
+            } else {
+                # If no "active" property, treat total count as active
+                @($outputs).Count
+            }
+        } catch {
+            Write-AppLog -Message "Get-DisguiseServerDetails: /api/service/system/gpuoutputs failed for $IPAddress - $_" -Level 'DEBUG'
+        }
+
+        # ----------------------------------------------------------------
+        # 4. Projects — count and names
+        # ----------------------------------------------------------------
+        try {
+            $projJson = $httpClient.GetStringAsync("$baseUrl/api/service/system/projects").Result
+            $projData = $projJson | ConvertFrom-Json
+
+            $projects = if ($projData -is [System.Array]) {
+                $projData
+            } elseif ($projData.projects) {
+                $projData.projects
+            } else {
+                @()
+            }
+
+            $result.ProjectCount = @($projects).Count
+            $result.ProjectNames = @($projects | ForEach-Object {
+                if ($_.name) { $_.name }
+                elseif ($_.projectName) { $_.projectName }
+                elseif ($_ -is [string]) { $_ }
+                else { $_.ToString() }
+            })
+        } catch {
+            Write-AppLog -Message "Get-DisguiseServerDetails: /api/service/system/projects failed for $IPAddress - $_" -Level 'DEBUG'
+        }
+
+    } catch {
+        Write-AppLog -Message "Get-DisguiseServerDetails: HttpClient init failed for $IPAddress - $_" -Level 'WARN'
+    } finally {
+        if ($httpClient) { $httpClient.Dispose() }
+    }
+
+    return $result
+}
+
 function Get-RecentProfilesList {
     <#
     .SYNOPSIS
@@ -668,6 +837,282 @@ function New-DashboardView {
     $actionsCard.Controls.Add($btnActionOpenD3)
 
     $scrollContainer.Controls.Add($actionsCard)
+
+    # ===================================================================
+    # Row 4: Fleet Status
+    # Shows live data from discovered disguise servers' REST APIs.
+    # Only rendered when $script:AppState.LastScanResults contains servers
+    # with IsDisguise = $true.
+    # ===================================================================
+    $fleetHeaderY = $row3Y + 80 + 20   # below Quick Actions card (height 80)
+
+    $fleetSectionHeader = New-SectionHeader -Text "Fleet Status" -X 20 -Y $fleetHeaderY -Width 900
+    $scrollContainer.Controls.Add($fleetSectionHeader)
+
+    # Identify disguise servers from the last scan
+    $disguiseServers = @()
+    if ($script:AppState.LastScanResults) {
+        $disguiseServers = @($script:AppState.LastScanResults | Where-Object { $_.IsDisguise -eq $true })
+    }
+
+    $fleetContentY = $fleetHeaderY + 50  # below the section header
+
+    if ($disguiseServers.Count -eq 0) {
+        # No servers known — show a helpful prompt
+        $lblNoFleet = New-StyledLabel `
+            -Text "No disguise servers discovered yet. Run a Scan Network or Auto-Discover (DNS-SD) from the Network Deploy view." `
+            -X 20 -Y $fleetContentY -FontSize 9 -IsMuted -MaxWidth 880
+        $scrollContainer.Controls.Add($lblNoFleet)
+
+        # Scan Network shortcut button
+        $btnGoScan = New-StyledButton -Text "Go to Network Deploy" `
+            -X 20 -Y ($fleetContentY + 30) -Width 180 -Height 30
+        $btnGoScan.Add_Click({
+            try { Set-ActiveView -ViewName 'Deploy' } catch {
+                Write-AppLog -Message "Dashboard: Navigate to Deploy failed - $_" -Level 'WARN'
+            }
+        })
+        $scrollContainer.Controls.Add($btnGoScan)
+    } else {
+        # Status label shown while querying servers (updated by the Refresh logic)
+        $lblFleetStatus = New-StyledLabel -Text "Loading fleet data..." `
+            -X 20 -Y $fleetContentY -FontSize 9 -IsMuted
+        $scrollContainer.Controls.Add($lblFleetStatus)
+
+        # "Refresh Fleet" button — re-queries all known servers
+        $btnRefreshFleet = New-StyledButton -Text ([char]0x21BB + " Refresh Fleet") `
+            -X 820 -Y ($fleetHeaderY + 5) -Width 120 -Height 28
+        $scrollContainer.Controls.Add($btnRefreshFleet)
+
+        # Container panel for the server cards, laid out in a wrapping row
+        $fleetCardsY = $fleetContentY + 22
+        $fleetCardWidth  = 285
+        $fleetCardHeight = 165
+        $fleetCardSpacingX = 15
+        $fleetCardSpacingY = 15
+        $fleetCardsPerRow = 3
+        $fleetStartX = 20
+
+        # We keep a reference to each server card panel so we can rebuild them on refresh
+        $fleetCardPanels = [System.Collections.ArrayList]::new()
+
+        # Helper scriptblock: given a server descriptor, query its API and build/update the card
+        $buildFleetCard = {
+            param(
+                [PSCustomObject]$ServerScanResult,
+                [System.Windows.Forms.Panel]$CardPanel
+            )
+
+            # Determine which port to use — prefer discovered port 80, else fallback
+            $apiPort = 80
+            if ($ServerScanResult.Ports -and ($ServerScanResult.Ports -contains 80)) {
+                $apiPort = 80
+            } elseif ($ServerScanResult.Ports -and $ServerScanResult.Ports.Count -gt 0) {
+                $apiPort = $ServerScanResult.Ports[0]
+            }
+
+            $details = Get-DisguiseServerDetails -IPAddress $ServerScanResult.IPAddress -Port $apiPort
+
+            # Left accent border: green = API responsive, red = unreachable
+            $accentColor = if ($details.APIReachable) { $script:Theme.Success } else { $script:Theme.Error }
+            $existingAccent = $CardPanel.Controls | Where-Object { $_.Name -eq 'FleetAccent' }
+            if ($existingAccent) {
+                $existingAccent.BackColor = $accentColor
+            }
+
+            # Update all the stat labels — they are stored by Name on the card panel
+            $hostname = if ($ServerScanResult.Hostname -and $ServerScanResult.Hostname -ne '') {
+                $ServerScanResult.Hostname
+            } else {
+                $ServerScanResult.IPAddress
+            }
+
+            $CardPanel.Controls | Where-Object { $_.Name -eq 'FleetHostname' } |
+                ForEach-Object { $_.Text = $hostname }
+            $CardPanel.Controls | Where-Object { $_.Name -eq 'FleetIP' } |
+                ForEach-Object { $_.Text = $ServerScanResult.IPAddress }
+            $CardPanel.Controls | Where-Object { $_.Name -eq 'FleetVersion' } |
+                ForEach-Object { $_.Text = "Version: $($details.Version)" }
+
+            $nicText = if ($details.NICEnabled -eq 'Unavailable') {
+                "NICs: Unavailable"
+            } elseif ($details.NICDisconnected -gt 0) {
+                "NICs: $($details.NICEnabled) enabled ($($details.NICDisconnected) disconnected)"
+            } else {
+                "NICs: $($details.NICEnabled) enabled"
+            }
+            $CardPanel.Controls | Where-Object { $_.Name -eq 'FleetNIC' } |
+                ForEach-Object {
+                    $_.Text = $nicText
+                    $_.ForeColor = if ($details.NICDisconnected -gt 0 -and $details.NICDisconnected -ne 'Unavailable') {
+                        $script:Theme.Warning
+                    } else {
+                        $script:Theme.TextSecondary
+                    }
+                }
+
+            $gpuText = if ($details.GPUOutputs -eq 'Unavailable') {
+                "GPU Outputs: Unavailable"
+            } else {
+                "GPU Outputs: $($details.GPUOutputs) active"
+            }
+            $CardPanel.Controls | Where-Object { $_.Name -eq 'FleetGPU' } |
+                ForEach-Object { $_.Text = $gpuText }
+
+            $projText = if ($details.ProjectCount -eq 'Unavailable') {
+                "Projects: Unavailable"
+            } elseif ($details.ProjectCount -eq 0) {
+                "Projects: None"
+            } elseif ($details.ProjectNames.Count -gt 0) {
+                $namePreview = ($details.ProjectNames | Select-Object -First 2) -join ', '
+                if ($details.ProjectCount -gt 2) { $namePreview += "..." }
+                "Projects: $($details.ProjectCount) ($namePreview)"
+            } else {
+                "Projects: $($details.ProjectCount)"
+            }
+            $CardPanel.Controls | Where-Object { $_.Name -eq 'FleetProj' } |
+                ForEach-Object { $_.Text = $projText }
+
+            $CardPanel.Refresh()
+        }
+
+        # Build an empty card shell for each disguise server (populated below / on refresh)
+        $serverIndex = 0
+        foreach ($srv in $disguiseServers) {
+            $col = $serverIndex % $fleetCardsPerRow
+            $row = [Math]::Floor($serverIndex / $fleetCardsPerRow)
+
+            $cx = $fleetStartX + $col * ($fleetCardWidth + $fleetCardSpacingX)
+            $cy = $fleetCardsY + $row * ($fleetCardHeight + $fleetCardSpacingY)
+
+            # Use the raw Panel (not New-StyledCard) so we can paint our own accent border
+            $srvCard = New-Object System.Windows.Forms.Panel
+            $srvCard.Location = New-Object System.Drawing.Point($cx, $cy)
+            $srvCard.Size = New-Object System.Drawing.Size($fleetCardWidth, $fleetCardHeight)
+            $srvCard.BackColor = $script:Theme.CardBackground
+
+            # Rounded border paint handler (matches New-StyledCard style)
+            $srvCard.Add_Paint({
+                param($sender, $e)
+                $borderPen = New-Object System.Drawing.Pen($script:Theme.Border, 1)
+                $rect = New-Object System.Drawing.Rectangle(0, 0, ($sender.Width - 1), ($sender.Height - 1))
+                $e.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+                $radius = 6
+                $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+                $path.AddArc($rect.X, $rect.Y, $radius, $radius, 180, 90)
+                $path.AddArc(($rect.Right - $radius), $rect.Y, $radius, $radius, 270, 90)
+                $path.AddArc(($rect.Right - $radius), ($rect.Bottom - $radius), $radius, $radius, 0, 90)
+                $path.AddArc($rect.X, ($rect.Bottom - $radius), $radius, $radius, 90, 90)
+                $path.CloseFigure()
+                $e.Graphics.DrawPath($borderPen, $path)
+                $borderPen.Dispose()
+                $path.Dispose()
+            })
+
+            # Left accent stripe (4px, colored by API reachability after query)
+            $srvAccent = New-Object System.Windows.Forms.Panel
+            $srvAccent.Name = 'FleetAccent'
+            $srvAccent.Location = New-Object System.Drawing.Point(0, 0)
+            $srvAccent.Size = New-Object System.Drawing.Size(4, $fleetCardHeight)
+            $srvAccent.BackColor = $script:Theme.TextMuted  # neutral until queried
+            $srvCard.Controls.Add($srvAccent)
+
+            # Hostname label (bold, truncated)
+            $lblSrvHostname = New-StyledLabel -Text "..." -X 12 -Y 12 -FontSize 10 -IsBold -MaxWidth ($fleetCardWidth - 20)
+            $lblSrvHostname.Name = 'FleetHostname'
+            $srvCard.Controls.Add($lblSrvHostname)
+
+            # IP address subtitle
+            $lblSrvIP = New-StyledLabel -Text $srv.IPAddress -X 12 -Y 32 -FontSize 8.5 -IsMuted
+            $lblSrvIP.Name = 'FleetIP'
+            $srvCard.Controls.Add($lblSrvIP)
+
+            # Separator line
+            $srvSep = New-Object System.Windows.Forms.Panel
+            $srvSep.Location = New-Object System.Drawing.Point(12, 53)
+            $srvSep.Size = New-Object System.Drawing.Size(($fleetCardWidth - 24), 1)
+            $srvSep.BackColor = $script:Theme.Border
+            $srvCard.Controls.Add($srvSep)
+
+            # Version row
+            $lblSrvVer = New-StyledLabel -Text "Version: ..." -X 12 -Y 62 -FontSize 8.5 -IsSecondary -MaxWidth ($fleetCardWidth - 20)
+            $lblSrvVer.Name = 'FleetVersion'
+            $srvCard.Controls.Add($lblSrvVer)
+
+            # NIC row
+            $lblSrvNIC = New-StyledLabel -Text "NICs: ..." -X 12 -Y 82 -FontSize 8.5 -IsSecondary -MaxWidth ($fleetCardWidth - 20)
+            $lblSrvNIC.Name = 'FleetNIC'
+            $srvCard.Controls.Add($lblSrvNIC)
+
+            # GPU row
+            $lblSrvGPU = New-StyledLabel -Text "GPU Outputs: ..." -X 12 -Y 102 -FontSize 8.5 -IsSecondary -MaxWidth ($fleetCardWidth - 20)
+            $lblSrvGPU.Name = 'FleetGPU'
+            $srvCard.Controls.Add($lblSrvGPU)
+
+            # Projects row
+            $lblSrvProj = New-StyledLabel -Text "Projects: ..." -X 12 -Y 122 -FontSize 8.5 -IsSecondary -MaxWidth ($fleetCardWidth - 20)
+            $lblSrvProj.Name = 'FleetProj'
+            $srvCard.Controls.Add($lblSrvProj)
+
+            [void]$fleetCardPanels.Add([PSCustomObject]@{
+                Panel  = $srvCard
+                Server = $srv
+            })
+
+            $scrollContainer.Controls.Add($srvCard)
+            $serverIndex++
+        }
+
+        # ---------------------------------------------------------------
+        # Populate the cards — query servers sequentially with DoEvents()
+        # so the UI remains responsive.
+        # ---------------------------------------------------------------
+        $totalFleet = $fleetCardPanels.Count
+        $queryIndex = 0
+        foreach ($cardEntry in $fleetCardPanels) {
+            $queryIndex++
+            $lblFleetStatus.Text = "Querying server $queryIndex of $totalFleet ($($cardEntry.Server.IPAddress))..."
+            $lblFleetStatus.Refresh()
+            [System.Windows.Forms.Application]::DoEvents()
+
+            try {
+                & $buildFleetCard -ServerScanResult $cardEntry.Server -CardPanel $cardEntry.Panel
+            } catch {
+                Write-AppLog -Message "Dashboard Fleet: Query failed for $($cardEntry.Server.IPAddress) - $_" -Level 'WARN'
+            }
+
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+
+        $lblFleetStatus.Text = "Fleet status updated - $totalFleet server(s) queried"
+        $lblFleetStatus.ForeColor = $script:Theme.Success
+
+        # ---------------------------------------------------------------
+        # Refresh Fleet click handler — re-runs the query loop
+        # ---------------------------------------------------------------
+        $btnRefreshFleet.Add_Click({
+            $totalRefresh = $fleetCardPanels.Count
+            $refreshIndex = 0
+            foreach ($cardEntry in $fleetCardPanels) {
+                $refreshIndex++
+                $lblFleetStatus.Text = "Refreshing server $refreshIndex of $totalRefresh ($($cardEntry.Server.IPAddress))..."
+                $lblFleetStatus.ForeColor = $script:Theme.Accent
+                $lblFleetStatus.Refresh()
+                [System.Windows.Forms.Application]::DoEvents()
+
+                try {
+                    & $buildFleetCard -ServerScanResult $cardEntry.Server -CardPanel $cardEntry.Panel
+                } catch {
+                    Write-AppLog -Message "Dashboard Fleet Refresh: failed for $($cardEntry.Server.IPAddress) - $_" -Level 'WARN'
+                }
+
+                [System.Windows.Forms.Application]::DoEvents()
+            }
+
+            $lblFleetStatus.Text = "Fleet status refreshed - $totalRefresh server(s)"
+            $lblFleetStatus.ForeColor = $script:Theme.Success
+        })
+    }
 
     # ===================================================================
     # Add the scroll container to the content panel
