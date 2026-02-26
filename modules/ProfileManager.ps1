@@ -1351,10 +1351,10 @@ function Show-EditFullProfileDialog {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Edit Profile - $($Profile.Name)"
-    $form.Size = New-Object System.Drawing.Size(620, 700)
+    $form.Size = New-Object System.Drawing.Size(620, 860)
     $form.StartPosition = 'CenterParent'
     $form.FormBorderStyle = 'Sizable'
-    $form.MinimumSize = New-Object System.Drawing.Size(600, 500)
+    $form.MinimumSize = New-Object System.Drawing.Size(600, 600)
     $form.MaximizeBox = $true
     $form.MinimizeBox = $false
     $form.BackColor = $script:Theme.Background
@@ -1431,6 +1431,28 @@ function Show-EditFullProfileDialog {
         $adapters = @($Profile.NetworkAdapters)
     }
 
+    # Helper scriptblock: attach LostFocus IP validation to a TextBox.
+    # Tints background red on invalid input, resets on valid/empty.
+    $attachIPValidation = {
+        param($box)
+        $box.Add_LostFocus({
+            $tb = $this
+            $text = $tb.Text.Trim()
+            if ([string]::IsNullOrWhiteSpace($text)) {
+                $tb.BackColor = $script:Theme.InputBackground
+                return
+            }
+            $parsed = $null
+            $isValid = [System.Net.IPAddress]::TryParse($text, [ref]$parsed) -and
+                       $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork
+            if ($isValid) {
+                $tb.BackColor = $script:Theme.InputBackground
+            } else {
+                $tb.BackColor = [System.Drawing.Color]::FromArgb(40, 239, 68, 68)
+            }
+        })
+    }
+
     for ($i = 0; $i -lt 6; $i++) {
         $adapter = if ($i -lt $adapters.Count) { $adapters[$i] } else { $null }
 
@@ -1447,7 +1469,40 @@ function Show-EditFullProfileDialog {
         $scrollPanel.Controls.Add($adHeaderLabel)
         $currentY += 24
 
-        # IP Address
+        # ---- Adapter Name (physical interface name used by Push-ProfileToServer) ----
+        $adNameLbl = New-Object System.Windows.Forms.Label
+        $adNameLbl.Text = "Adapter Name:"
+        $adNameLbl.Location = New-Object System.Drawing.Point(30, ($currentY + 2))
+        $adNameLbl.Size = New-Object System.Drawing.Size(95, 20)
+        $adNameLbl.Font = $inputFont
+        $adNameLbl.ForeColor = $script:Theme.TextSecondary
+        $scrollPanel.Controls.Add($adNameLbl)
+
+        $adNameBox = New-Object System.Windows.Forms.TextBox
+        $adNameBox.Location = New-Object System.Drawing.Point(130, $currentY)
+        $adNameBox.Size = New-Object System.Drawing.Size(200, 22)
+        $adNameBox.Font = $inputFont
+        $adNameBox.BackColor = $script:Theme.InputBackground
+        $adNameBox.ForeColor = $script:Theme.Text
+        $adNameBox.Text = if ($null -ne $adapter -and $adapter.PSObject.Properties['AdapterName']) { $adapter.AdapterName } else { "" }
+        $adNameBox.Tag = "adapterName_$i"
+        $scrollPanel.Controls.Add($adNameBox)
+
+        # Warn via border color when AdapterName is left empty (non-blocking)
+        $adNameBox.Add_LostFocus({
+            $tb = $this
+            if ([string]::IsNullOrWhiteSpace($tb.Text)) {
+                $tb.BackColor = [System.Drawing.Color]::FromArgb(25, 245, 158, 11)
+            } else {
+                $tb.BackColor = $script:Theme.InputBackground
+            }
+        })
+        $adNameBox.Add_GotFocus({
+            $this.BackColor = $script:Theme.InputBackground
+        })
+        $currentY += 28
+
+        # ---- IP Address ----
         $ipLbl = New-Object System.Windows.Forms.Label
         $ipLbl.Text = "IP:"
         $ipLbl.Location = New-Object System.Drawing.Point(30, ($currentY + 2))
@@ -1464,6 +1519,7 @@ function Show-EditFullProfileDialog {
         $ipBox.ForeColor = $script:Theme.Text
         $ipBox.Text = if ($null -ne $adapter -and $adapter.PSObject.Properties['IPAddress']) { $adapter.IPAddress } else { "" }
         $scrollPanel.Controls.Add($ipBox)
+        & $attachIPValidation $ipBox
 
         # Subnet Mask
         $subLbl = New-Object System.Windows.Forms.Label
@@ -1482,6 +1538,7 @@ function Show-EditFullProfileDialog {
         $subBox.ForeColor = $script:Theme.Text
         $subBox.Text = if ($null -ne $adapter -and $adapter.PSObject.Properties['SubnetMask']) { $adapter.SubnetMask } else { "" }
         $scrollPanel.Controls.Add($subBox)
+        & $attachIPValidation $subBox
 
         # Gateway
         $gwLbl = New-Object System.Windows.Forms.Label
@@ -1500,9 +1557,48 @@ function Show-EditFullProfileDialog {
         $gwBox.ForeColor = $script:Theme.Text
         $gwBox.Text = if ($null -ne $adapter -and $adapter.PSObject.Properties['Gateway']) { $adapter.Gateway } else { "" }
         $scrollPanel.Controls.Add($gwBox)
+        & $attachIPValidation $gwBox
         $currentY += 26
 
-        # DHCP checkbox
+        # ---- DNS1 / DNS2 ----
+        $dns1Lbl = New-Object System.Windows.Forms.Label
+        $dns1Lbl.Text = "Primary DNS:"
+        $dns1Lbl.Location = New-Object System.Drawing.Point(30, ($currentY + 2))
+        $dns1Lbl.Size = New-Object System.Drawing.Size(85, 20)
+        $dns1Lbl.Font = $inputFont
+        $dns1Lbl.ForeColor = $script:Theme.TextSecondary
+        $scrollPanel.Controls.Add($dns1Lbl)
+
+        $dns1Box = New-Object System.Windows.Forms.TextBox
+        $dns1Box.Location = New-Object System.Drawing.Point(120, $currentY)
+        $dns1Box.Size = New-Object System.Drawing.Size(120, 22)
+        $dns1Box.Font = $inputFont
+        $dns1Box.BackColor = $script:Theme.InputBackground
+        $dns1Box.ForeColor = $script:Theme.Text
+        $dns1Box.Text = if ($null -ne $adapter -and $adapter.PSObject.Properties['DNS1']) { $adapter.DNS1 } else { "" }
+        $scrollPanel.Controls.Add($dns1Box)
+        & $attachIPValidation $dns1Box
+
+        $dns2Lbl = New-Object System.Windows.Forms.Label
+        $dns2Lbl.Text = "Secondary DNS:"
+        $dns2Lbl.Location = New-Object System.Drawing.Point(250, ($currentY + 2))
+        $dns2Lbl.Size = New-Object System.Drawing.Size(105, 20)
+        $dns2Lbl.Font = $inputFont
+        $dns2Lbl.ForeColor = $script:Theme.TextSecondary
+        $scrollPanel.Controls.Add($dns2Lbl)
+
+        $dns2Box = New-Object System.Windows.Forms.TextBox
+        $dns2Box.Location = New-Object System.Drawing.Point(360, $currentY)
+        $dns2Box.Size = New-Object System.Drawing.Size(120, 22)
+        $dns2Box.Font = $inputFont
+        $dns2Box.BackColor = $script:Theme.InputBackground
+        $dns2Box.ForeColor = $script:Theme.Text
+        $dns2Box.Text = if ($null -ne $adapter -and $adapter.PSObject.Properties['DNS2']) { $adapter.DNS2 } else { "" }
+        $scrollPanel.Controls.Add($dns2Box)
+        & $attachIPValidation $dns2Box
+        $currentY += 26
+
+        # ---- DHCP / Enabled checkboxes ----
         $dhcpCheck = New-Object System.Windows.Forms.CheckBox
         $dhcpCheck.Text = "DHCP"
         $dhcpCheck.Location = New-Object System.Drawing.Point(30, $currentY)
@@ -1512,7 +1608,6 @@ function Show-EditFullProfileDialog {
         $dhcpCheck.Checked = if ($null -ne $adapter -and $adapter.PSObject.Properties['DHCP']) { $adapter.DHCP } else { $false }
         $scrollPanel.Controls.Add($dhcpCheck)
 
-        # Enabled checkbox
         $enabledCheck = New-Object System.Windows.Forms.CheckBox
         $enabledCheck.Text = "Enabled"
         $enabledCheck.Location = New-Object System.Drawing.Point(100, $currentY)
@@ -1522,15 +1617,18 @@ function Show-EditFullProfileDialog {
         $enabledCheck.Checked = if ($null -ne $adapter -and $adapter.PSObject.Properties['Enabled']) { $adapter.Enabled } else { $true }
         $scrollPanel.Controls.Add($enabledCheck)
 
-        $currentY += 28
+        $currentY += 32
 
-        # Store references
+        # Store references for all new and existing fields
         $adapterControls += @{
-            Index     = $i
-            IPBox     = $ipBox
-            SubnetBox = $subBox
-            GatewayBox = $gwBox
-            DHCPCheck = $dhcpCheck
+            Index        = $i
+            AdapterNameBox = $adNameBox
+            IPBox        = $ipBox
+            SubnetBox    = $subBox
+            GatewayBox   = $gwBox
+            DNS1Box      = $dns1Box
+            DNS2Box      = $dns2Box
+            DHCPCheck    = $dhcpCheck
             EnabledCheck = $enabledCheck
         }
     }
@@ -1664,11 +1762,14 @@ function Show-EditFullProfileDialog {
                 $Profile.NetworkAdapters = @()
             }
             if ($idx -lt $Profile.NetworkAdapters.Count -and $null -ne $Profile.NetworkAdapters[$idx]) {
-                $Profile.NetworkAdapters[$idx].IPAddress = $ctrl.IPBox.Text.Trim()
-                $Profile.NetworkAdapters[$idx].SubnetMask = $ctrl.SubnetBox.Text.Trim()
-                $Profile.NetworkAdapters[$idx].Gateway = $ctrl.GatewayBox.Text.Trim()
-                $Profile.NetworkAdapters[$idx].DHCP = $ctrl.DHCPCheck.Checked
-                $Profile.NetworkAdapters[$idx].Enabled = $ctrl.EnabledCheck.Checked
+                $Profile.NetworkAdapters[$idx].AdapterName = $ctrl.AdapterNameBox.Text.Trim()
+                $Profile.NetworkAdapters[$idx].IPAddress   = $ctrl.IPBox.Text.Trim()
+                $Profile.NetworkAdapters[$idx].SubnetMask  = $ctrl.SubnetBox.Text.Trim()
+                $Profile.NetworkAdapters[$idx].Gateway     = $ctrl.GatewayBox.Text.Trim()
+                $Profile.NetworkAdapters[$idx].DNS1        = $ctrl.DNS1Box.Text.Trim()
+                $Profile.NetworkAdapters[$idx].DNS2        = $ctrl.DNS2Box.Text.Trim()
+                $Profile.NetworkAdapters[$idx].DHCP        = $ctrl.DHCPCheck.Checked
+                $Profile.NetworkAdapters[$idx].Enabled     = $ctrl.EnabledCheck.Checked
             }
         }
 
@@ -2295,13 +2396,28 @@ function Update-ProfileDetailPanel {
     $actionY = $currentY + 46
     $actionX = 15
 
-    $applyBtn = New-StyledButton -Text "Apply Profile" -X $actionX -Y $actionY `
-        -Width 120 -Height 36 -IsPrimary -OnClick {
+    # "Apply to This Machine" button — visually distinct from remote deploy buttons
+    $applyBtn = New-StyledButton -Text "Apply to This Machine" -X $actionX -Y $actionY `
+        -Width 160 -Height 36 -IsPrimary -OnClick {
         if ($null -eq $script:SelectedProfile) { return }
         Apply-FullProfile -Profile $script:SelectedProfile
     }
+    # Amber border to signal local-machine scope
+    $applyBtn.FlatAppearance.BorderColor = $script:Theme.Warning
+    $applyBtn.FlatAppearance.BorderSize  = 2
     $script:DetailPanel.Controls.Add($applyBtn)
-    $actionX += 130
+
+    # Warning label below the apply button explaining scope
+    $applyWarningLabel = New-Object System.Windows.Forms.Label
+    $applyWarningLabel.Text = "This will modify this computer's network, hostname, and shares."
+    $applyWarningLabel.Location = New-Object System.Drawing.Point($actionX, ($actionY + 40))
+    $applyWarningLabel.Size = New-Object System.Drawing.Size(($innerWidth - $actionX), 18)
+    $applyWarningLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $applyWarningLabel.ForeColor = $script:Theme.Warning
+    $applyWarningLabel.BackColor = [System.Drawing.Color]::Transparent
+    $script:DetailPanel.Controls.Add($applyWarningLabel)
+
+    $actionX += 170
 
     $editBtn = New-StyledButton -Text "Edit Full Profile" -X $actionX -Y $actionY `
         -Width 130 -Height 36 -OnClick {
