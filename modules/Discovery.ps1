@@ -1113,11 +1113,11 @@ function New-DeployView {
                     [System.Windows.Forms.MessageBoxButtons]::YesNo,
                     [System.Windows.Forms.MessageBoxIcon]::Question)
                 if ($confirmResult -eq [System.Windows.Forms.DialogResult]::Yes) {
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting push to $ip...`r`n")
+                    & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] Starting push to $ip...`r`n"
                     try {
                         $profileObj = Get-Profile -Name $cboProfiles.SelectedItem
                         if (-not $profileObj) {
-                            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Could not load profile '$($cboProfiles.SelectedItem)'`r`n")
+                            & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Could not load profile '$($cboProfiles.SelectedItem)'`r`n"
                         } else {
                             # Build credentials if provided
                             $cred = $null
@@ -1129,12 +1129,12 @@ function New-DeployView {
                             $pushResult = Push-ProfileToServer -ServerIP $ip -Profile $profileObj -Credential $cred
                             foreach ($step in $pushResult.Steps) {
                                 $status = if ($step.Success) { 'OK' } else { 'FAIL' }
-                                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   [$status] $($step.StepName): $($step.Message)`r`n")
+                                & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')]   [$status] $($step.StepName): $($step.Message)`r`n"
                             }
-                            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Push to $ip completed.`r`n")
+                            & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] Push to $ip completed.`r`n"
                         }
                     } catch {
-                        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Push failed - $($_.Exception.Message)`r`n")
+                        & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Push failed - $($_.Exception.Message)`r`n"
                     }
                 }
             } else {
@@ -1168,7 +1168,19 @@ function New-DeployView {
         $lblTargetSummary.Text = "0 servers selected"
     })
 
-    $btnRefreshServers = New-StyledButton -Text "Refresh" -X 245 -Y 235 -Width 100 -Height 30
+    # "Select Disguise Only" — checks only rows whose Status column equals "Disguise"
+    $btnSelectDisguiseOnly = New-StyledButton -Text "Select Disguise Only" -X 245 -Y 235 -Width 150 -Height 30
+    $btnSelectDisguiseOnly.Add_Click({
+        $count = 0
+        foreach ($row in $dgvServers.Rows) {
+            $isDisguise = $row.Cells["Status"].Value -eq "Disguise"
+            $row.Cells["Select"].Value = $isDisguise
+            if ($isDisguise) { $count++ }
+        }
+        $lblTargetSummary.Text = "$count server(s) selected"
+    })
+
+    $btnRefreshServers = New-StyledButton -Text "Refresh" -X 405 -Y 235 -Width 100 -Height 30
     $btnRefreshServers.Add_Click({
         # Re-trigger the last scan if results exist
         if ($script:AppState.LastScanResults.Count -gt 0) {
@@ -1189,7 +1201,7 @@ function New-DeployView {
         }
     })
 
-    $btnViewDetails = New-StyledButton -Text "View Details" -X 355 -Y 235 -Width 120 -Height 30
+    $btnViewDetails = New-StyledButton -Text "View Details" -X 515 -Y 235 -Width 120 -Height 30
     $btnViewDetails.Add_Click({
         # Trigger the same action as the context menu "View Details"
         $selectedRow = $dgvServers.CurrentRow
@@ -1222,14 +1234,14 @@ function New-DeployView {
     })
 
     $serversCard.Controls.AddRange(@($dgvServers, $btnSelectAll, $btnDeselectAll,
-                                      $btnRefreshServers, $btnViewDetails))
+                                      $btnSelectDisguiseOnly, $btnRefreshServers, $btnViewDetails))
 
     $scrollContainer.Controls.Add($serversCard)
 
     # ===================================================================
     # Card 3: Deploy Configuration
     # ===================================================================
-    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 560 -Width 900 -Height 250
+    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 560 -Width 900 -Height 295
 
     # --- Profile selector ---
     $lblProfile = New-StyledLabel -Text "Profile:" -X 15 -Y 48 -FontSize 9
@@ -1244,6 +1256,27 @@ function New-DeployView {
     if ($cboProfiles.Items.Count -gt 0) {
         $cboProfiles.SelectedIndex = 0
     }
+
+    # Auto-refresh the profile list whenever the dropdown is opened so that
+    # profiles created in another view are visible without navigating away.
+    $cboProfiles.Add_DropDown({
+        $previousSelection = $cboProfiles.SelectedItem
+        $cboProfiles.Items.Clear()
+        try {
+            $freshProfiles = Get-AllProfiles
+            foreach ($p in $freshProfiles) {
+                $cboProfiles.Items.Add($p.Name) | Out-Null
+            }
+        } catch {
+            Write-AppLog -Message "New-DeployView: Profile auto-refresh failed - $_" -Level 'WARN'
+        }
+        # Restore previous selection if it still exists, otherwise default to index 0
+        if ($previousSelection -and $cboProfiles.Items.Contains($previousSelection)) {
+            $cboProfiles.SelectedItem = $previousSelection
+        } elseif ($cboProfiles.Items.Count -gt 0) {
+            $cboProfiles.SelectedIndex = 0
+        }
+    })
 
     # --- Target summary label ---
     $lblTargetSummary = New-StyledLabel -Text "0 servers selected" -X 350 -Y 48 -FontSize 9 -IsSecondary
@@ -1283,20 +1316,50 @@ function New-DeployView {
 
     $deployCard.Controls.AddRange(@($btnDeploy, $deployProgressBar))
 
-    # --- Deployment log (read-only multi-line textbox) ---
-    $txtDeployLog = New-Object System.Windows.Forms.TextBox
+    # --- Deployment log (read-only RichTextBox with color-coded output) ---
+    $txtDeployLog = New-Object System.Windows.Forms.RichTextBox
     $txtDeployLog.Location = New-Object System.Drawing.Point(15, 160)
-    $txtDeployLog.Size = New-Object System.Drawing.Size(870, 75)
-    $txtDeployLog.Multiline = $true
+    $txtDeployLog.Size = New-Object System.Drawing.Size(870, 90)
     $txtDeployLog.ReadOnly = $true
-    $txtDeployLog.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+    $txtDeployLog.ScrollBars = [System.Windows.Forms.RichTextBoxScrollBars]::Vertical
     $txtDeployLog.BackColor = $script:Theme.InputBackground
     $txtDeployLog.ForeColor = $script:Theme.TextSecondary
     $txtDeployLog.Font = New-Object System.Drawing.Font('Consolas', 10)
     $txtDeployLog.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
-    $txtDeployLog.Text = "[$(Get-Date -Format 'HH:mm:ss')] Deploy log initialized. Select a profile and target servers to begin.`r`n"
+    $txtDeployLog.WordWrap = $false
 
-    $deployCard.Controls.Add($txtDeployLog)
+    # Helper: append a line to the log and color it based on content keywords.
+    # Returns nothing; modifies $txtDeployLog via closure.
+    $appendColoredLog = {
+        param([string]$Line)
+        $start = $txtDeployLog.TextLength
+        $txtDeployLog.AppendText($Line)
+        $txtDeployLog.Select($start, $txtDeployLog.TextLength - $start)
+        if ($Line -match 'FAIL|ERROR') {
+            $txtDeployLog.SelectionColor = $script:Theme.Error
+        } elseif ($Line -match 'OK|SUCCEEDED|succeeded') {
+            $txtDeployLog.SelectionColor = $script:Theme.Success
+        } elseif ($Line -match 'WARN') {
+            $txtDeployLog.SelectionColor = $script:Theme.Warning
+        } else {
+            $txtDeployLog.SelectionColor = $script:Theme.TextSecondary
+        }
+        # Move caret to end so scroll follows new output
+        $txtDeployLog.SelectionStart = $txtDeployLog.TextLength
+        $txtDeployLog.SelectionLength = 0
+        $txtDeployLog.ScrollToCaret()
+    }.GetNewClosure()
+
+    # Write the initialization line using the helper
+    & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] Deploy log initialized. Select a profile and target servers to begin.`r`n"
+
+    # --- Clear Log button ---
+    $btnClearLog = New-StyledButton -Text "Clear Log" -X 15 -Y 260 -Width 100 -Height 28
+    $btnClearLog.Add_Click({
+        $txtDeployLog.Clear()
+    })
+
+    $deployCard.Controls.AddRange(@($txtDeployLog, $btnClearLog))
 
     $scrollContainer.Controls.Add($deployCard)
 
@@ -1550,12 +1613,12 @@ function New-DeployView {
         try {
             $profileObj = Get-Profile -Name $cboProfiles.SelectedItem
         } catch {
-            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Could not load profile '$($cboProfiles.SelectedItem)': $_`r`n")
+            & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Could not load profile '$($cboProfiles.SelectedItem)': $_`r`n"
             return
         }
 
         if (-not $profileObj) {
-            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Profile '$($cboProfiles.SelectedItem)' not found.`r`n")
+            & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] ERROR: Profile '$($cboProfiles.SelectedItem)' not found.`r`n"
             return
         }
 
@@ -1563,7 +1626,7 @@ function New-DeployView {
         $btnDeploy.Enabled = $false
         $deployProgressBar.Value = 0
 
-        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting deployment of '$($profileObj.Name)' to $($selectedIPs.Count) server(s)...`r`n")
+        & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] Starting deployment of '$($profileObj.Name)' to $($selectedIPs.Count) server(s)...`r`n"
         $txtDeployLog.Refresh()
 
         $totalServers = $selectedIPs.Count
@@ -1572,7 +1635,7 @@ function New-DeployView {
 
         foreach ($serverIP in $selectedIPs) {
             $currentIdx++
-            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] [$currentIdx/$totalServers] Deploying to $serverIP...`r`n")
+            & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] [$currentIdx/$totalServers] Deploying to $serverIP...`r`n"
             $txtDeployLog.Refresh()
             $deployProgressBar.Value = [int](($currentIdx / $totalServers) * 100)
             $deployProgressBar.Refresh()
@@ -1591,17 +1654,17 @@ function New-DeployView {
 
                 foreach ($step in $pushResult.Steps) {
                     $stepStatus = if ($step.Success) { "OK" } else { "FAILED" }
-                    $txtDeployLog.AppendText("    $($step.StepName): $stepStatus - $($step.Message)`r`n")
+                    & $appendColoredLog "    $($step.StepName): $stepStatus - $($step.Message)`r`n"
                 }
 
                 if ($pushResult.Success) {
                     $successCount++
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment SUCCEEDED`r`n")
+                    & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment SUCCEEDED`r`n"
                 } else {
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment FAILED - $($pushResult.ErrorMessage)`r`n")
+                    & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment FAILED - $($pushResult.ErrorMessage)`r`n"
                 }
             } catch {
-                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: EXCEPTION - $_`r`n")
+                & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] $serverIP: EXCEPTION - $_`r`n"
             }
 
             $txtDeployLog.Refresh()
@@ -1609,8 +1672,8 @@ function New-DeployView {
         }
 
         $deployProgressBar.Value = 100
-        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Deployment complete: $successCount/$totalServers succeeded.`r`n")
-        $txtDeployLog.AppendText("------------------------------------------------------------`r`n")
+        & $appendColoredLog "[$(Get-Date -Format 'HH:mm:ss')] Deployment complete: $successCount/$totalServers succeeded.`r`n"
+        & $appendColoredLog "------------------------------------------------------------`r`n"
 
         # Update app state only if at least one deployment succeeded
         if ($successCount -gt 0) {
@@ -1643,6 +1706,41 @@ function New-DeployView {
             $dgvServers.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
         }
     })
+
+    # ===================================================================
+    # Restore cached scan results if available (survives navigation away/back)
+    # ===================================================================
+    if ($script:AppState.LastScanResults -and $script:AppState.LastScanResults.Count -gt 0) {
+        $cachedResults = $script:AppState.LastScanResults
+        $dgvServers.Rows.Clear()
+
+        foreach ($server in $cachedResults) {
+            $statusText = if ($server.IsDisguise) { "Disguise" }
+                          elseif ($server.Ports.Count -gt 0) { "Online" }
+                          else { "Unreachable" }
+            $apiText = if ($server.APIVersion) { $server.APIVersion } else { "N/A" }
+            $portsText = if ($server.Ports.Count -gt 0) { $server.Ports -join ", " } else { "None" }
+            $responseText = if ($server.ResponseTimeMs -ge 0) { "$($server.ResponseTimeMs) ms" } else { "N/A" }
+
+            [void]$dgvServers.Rows.Add($false, $server.IPAddress, $server.Hostname,
+                                        $statusText, $apiText, $portsText, $responseText)
+        }
+
+        # Re-apply status cell coloring
+        foreach ($row in $dgvServers.Rows) {
+            $statusVal = $row.Cells["Status"].Value
+            if ($statusVal -eq "Disguise") {
+                $row.Cells["Status"].Style.ForeColor = $script:Theme.Success
+                $row.Cells["Status"].Style.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
+            } elseif ($statusVal -eq "Online") {
+                $row.Cells["Status"].Style.ForeColor = $script:Theme.Warning
+            }
+        }
+
+        $disguiseCached = ($cachedResults | Where-Object { $_.IsDisguise }).Count
+        $lblScanStatus.Text = "Showing $($cachedResults.Count) cached result(s) from last scan ($disguiseCached disguise server(s))"
+        $lblScanStatus.ForeColor = $script:Theme.TextMuted
+    }
 
     # ===================================================================
     # Add the scroll container to the content panel
