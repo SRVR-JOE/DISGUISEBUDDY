@@ -1696,6 +1696,680 @@ function Show-EditFullProfileDialog {
 
 
 # ============================================================================
+# BATCH PROFILE GENERATION & RIG BUNDLE IMPORT/EXPORT
+# ============================================================================
+
+function Show-BatchProfileWizard {
+    <#
+    .SYNOPSIS
+        Opens a wizard dialog for generating a complete rig's worth of profiles.
+    .DESCRIPTION
+        Presents a form with fields for show prefix, machine counts, base subnet,
+        and starting IP offset. Generates Director, Actor, and Understudy profiles
+        with properly sequenced network adapter IPs and standard SMB settings.
+    .OUTPUTS
+        [int] - Number of profiles generated, or 0 if cancelled/failed.
+    #>
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Batch Profile Generator - Rig Setup"
+    $form.Size = New-Object System.Drawing.Size(500, 480)
+    $form.StartPosition = 'CenterParent'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.BackColor = $script:Theme.Background
+    $form.ForeColor = $script:Theme.Text
+
+    $labelFont = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+    $inputFont = New-Object System.Drawing.Font("Segoe UI", 10)
+    $sectionFont = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+    $currentY = 15
+    $labelX = 15
+    $inputX = 250
+    $inputWidth = 210
+
+    # ---- Section: General ----
+    $sectionLabel = New-Object System.Windows.Forms.Label
+    $sectionLabel.Text = "Rig Configuration"
+    $sectionLabel.Location = New-Object System.Drawing.Point($labelX, $currentY)
+    $sectionLabel.Size = New-Object System.Drawing.Size(450, 25)
+    $sectionLabel.Font = $sectionFont
+    $sectionLabel.ForeColor = $script:Theme.Primary
+    $form.Controls.Add($sectionLabel)
+    $currentY += 35
+
+    # Show Prefix
+    $prefixLabel = New-Object System.Windows.Forms.Label
+    $prefixLabel.Text = "Show Prefix:"
+    $prefixLabel.Location = New-Object System.Drawing.Point($labelX, ($currentY + 3))
+    $prefixLabel.Size = New-Object System.Drawing.Size(220, 22)
+    $prefixLabel.Font = $labelFont
+    $prefixLabel.ForeColor = $script:Theme.Text
+    $form.Controls.Add($prefixLabel)
+
+    $prefixBox = New-Object System.Windows.Forms.TextBox
+    $prefixBox.Location = New-Object System.Drawing.Point($inputX, $currentY)
+    $prefixBox.Size = New-Object System.Drawing.Size($inputWidth, 28)
+    $prefixBox.Font = $inputFont
+    $prefixBox.Text = "SHOW"
+    $prefixBox.BackColor = $script:Theme.InputBackground
+    $prefixBox.ForeColor = $script:Theme.Text
+    $prefixBox.MaxLength = 10
+    $form.Controls.Add($prefixBox)
+    $currentY += 38
+
+    # Director Count
+    $dirLabel = New-Object System.Windows.Forms.Label
+    $dirLabel.Text = "Director Count:"
+    $dirLabel.Location = New-Object System.Drawing.Point($labelX, ($currentY + 3))
+    $dirLabel.Size = New-Object System.Drawing.Size(220, 22)
+    $dirLabel.Font = $labelFont
+    $dirLabel.ForeColor = $script:Theme.Text
+    $form.Controls.Add($dirLabel)
+
+    $dirCountUpDown = New-Object System.Windows.Forms.NumericUpDown
+    $dirCountUpDown.Location = New-Object System.Drawing.Point($inputX, $currentY)
+    $dirCountUpDown.Size = New-Object System.Drawing.Size(80, 28)
+    $dirCountUpDown.Font = $inputFont
+    $dirCountUpDown.Minimum = 0
+    $dirCountUpDown.Maximum = 2
+    $dirCountUpDown.Value = 1
+    $dirCountUpDown.BackColor = $script:Theme.InputBackground
+    $dirCountUpDown.ForeColor = $script:Theme.Text
+    $form.Controls.Add($dirCountUpDown)
+    $currentY += 38
+
+    # Actor Count
+    $actLabel = New-Object System.Windows.Forms.Label
+    $actLabel.Text = "Actor Count:"
+    $actLabel.Location = New-Object System.Drawing.Point($labelX, ($currentY + 3))
+    $actLabel.Size = New-Object System.Drawing.Size(220, 22)
+    $actLabel.Font = $labelFont
+    $actLabel.ForeColor = $script:Theme.Text
+    $form.Controls.Add($actLabel)
+
+    $actCountUpDown = New-Object System.Windows.Forms.NumericUpDown
+    $actCountUpDown.Location = New-Object System.Drawing.Point($inputX, $currentY)
+    $actCountUpDown.Size = New-Object System.Drawing.Size(80, 28)
+    $actCountUpDown.Font = $inputFont
+    $actCountUpDown.Minimum = 1
+    $actCountUpDown.Maximum = 16
+    $actCountUpDown.Value = 4
+    $actCountUpDown.BackColor = $script:Theme.InputBackground
+    $actCountUpDown.ForeColor = $script:Theme.Text
+    $form.Controls.Add($actCountUpDown)
+    $currentY += 38
+
+    # Understudy Count
+    $undLabel = New-Object System.Windows.Forms.Label
+    $undLabel.Text = "Understudy Count:"
+    $undLabel.Location = New-Object System.Drawing.Point($labelX, ($currentY + 3))
+    $undLabel.Size = New-Object System.Drawing.Size(220, 22)
+    $undLabel.Font = $labelFont
+    $undLabel.ForeColor = $script:Theme.Text
+    $form.Controls.Add($undLabel)
+
+    $undCountUpDown = New-Object System.Windows.Forms.NumericUpDown
+    $undCountUpDown.Location = New-Object System.Drawing.Point($inputX, $currentY)
+    $undCountUpDown.Size = New-Object System.Drawing.Size(80, 28)
+    $undCountUpDown.Font = $inputFont
+    $undCountUpDown.Minimum = 0
+    $undCountUpDown.Maximum = 8
+    $undCountUpDown.Value = 0
+    $undCountUpDown.BackColor = $script:Theme.InputBackground
+    $undCountUpDown.ForeColor = $script:Theme.Text
+    $form.Controls.Add($undCountUpDown)
+    $currentY += 45
+
+    # ---- Section: Network ----
+    $netSectionLabel = New-Object System.Windows.Forms.Label
+    $netSectionLabel.Text = "Network Settings"
+    $netSectionLabel.Location = New-Object System.Drawing.Point($labelX, $currentY)
+    $netSectionLabel.Size = New-Object System.Drawing.Size(450, 25)
+    $netSectionLabel.Font = $sectionFont
+    $netSectionLabel.ForeColor = $script:Theme.Primary
+    $form.Controls.Add($netSectionLabel)
+    $currentY += 35
+
+    # Base Subnet
+    $subnetLabel = New-Object System.Windows.Forms.Label
+    $subnetLabel.Text = "Base Subnet (first 2 octets):"
+    $subnetLabel.Location = New-Object System.Drawing.Point($labelX, ($currentY + 3))
+    $subnetLabel.Size = New-Object System.Drawing.Size(220, 22)
+    $subnetLabel.Font = $labelFont
+    $subnetLabel.ForeColor = $script:Theme.Text
+    $form.Controls.Add($subnetLabel)
+
+    $subnetBox = New-Object System.Windows.Forms.TextBox
+    $subnetBox.Location = New-Object System.Drawing.Point($inputX, $currentY)
+    $subnetBox.Size = New-Object System.Drawing.Size($inputWidth, 28)
+    $subnetBox.Font = $inputFont
+    $subnetBox.Text = "192.168"
+    $subnetBox.BackColor = $script:Theme.InputBackground
+    $subnetBox.ForeColor = $script:Theme.Text
+    $form.Controls.Add($subnetBox)
+    $currentY += 38
+
+    # Starting IP Offset
+    $offsetLabel = New-Object System.Windows.Forms.Label
+    $offsetLabel.Text = "Starting IP Offset (4th octet):"
+    $offsetLabel.Location = New-Object System.Drawing.Point($labelX, ($currentY + 3))
+    $offsetLabel.Size = New-Object System.Drawing.Size(220, 22)
+    $offsetLabel.Font = $labelFont
+    $offsetLabel.ForeColor = $script:Theme.Text
+    $form.Controls.Add($offsetLabel)
+
+    $offsetUpDown = New-Object System.Windows.Forms.NumericUpDown
+    $offsetUpDown.Location = New-Object System.Drawing.Point($inputX, $currentY)
+    $offsetUpDown.Size = New-Object System.Drawing.Size(80, 28)
+    $offsetUpDown.Font = $inputFont
+    $offsetUpDown.Minimum = 1
+    $offsetUpDown.Maximum = 250
+    $offsetUpDown.Value = 10
+    $offsetUpDown.BackColor = $script:Theme.InputBackground
+    $offsetUpDown.ForeColor = $script:Theme.Text
+    $form.Controls.Add($offsetUpDown)
+    $currentY += 50
+
+    # ---- Buttons ----
+    $generateBtn = New-Object System.Windows.Forms.Button
+    $generateBtn.Text = "Generate"
+    $generateBtn.Location = New-Object System.Drawing.Point(270, $currentY)
+    $generateBtn.Size = New-Object System.Drawing.Size(100, 38)
+    $generateBtn.FlatStyle = 'Flat'
+    $generateBtn.FlatAppearance.BorderSize = 0
+    $generateBtn.BackColor = $script:Theme.Primary
+    $generateBtn.ForeColor = [System.Drawing.Color]::White
+    $generateBtn.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+    $generateBtn.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $form.Controls.Add($generateBtn)
+
+    $cancelBtn = New-Object System.Windows.Forms.Button
+    $cancelBtn.Text = "Cancel"
+    $cancelBtn.Location = New-Object System.Drawing.Point(380, $currentY)
+    $cancelBtn.Size = New-Object System.Drawing.Size(85, 38)
+    $cancelBtn.FlatStyle = 'Flat'
+    $cancelBtn.FlatAppearance.BorderSize = 0
+    $cancelBtn.BackColor = $script:Theme.Surface
+    $cancelBtn.ForeColor = $script:Theme.Text
+    $cancelBtn.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    $cancelBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.Controls.Add($cancelBtn)
+
+    $form.AcceptButton = $generateBtn
+    $form.CancelButton = $cancelBtn
+
+    $dialogResult = $form.ShowDialog()
+
+    if ($dialogResult -ne [System.Windows.Forms.DialogResult]::OK) {
+        $form.Dispose()
+        return 0
+    }
+
+    # ---- Capture field values before disposing the form ----
+    $prefix = $prefixBox.Text.Trim().ToUpper()
+    $dirCount = [int]$dirCountUpDown.Value
+    $actCount = [int]$actCountUpDown.Value
+    $undCount = [int]$undCountUpDown.Value
+    $baseSubnet = $subnetBox.Text.Trim()
+    $startOffset = [int]$offsetUpDown.Value
+    $form.Dispose()
+
+    # ---- Validate inputs ----
+    if ([string]::IsNullOrWhiteSpace($prefix)) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Show Prefix cannot be empty.",
+            "Validation Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return 0
+    }
+
+    # Validate prefix contains only NetBIOS-safe characters (alphanumeric and hyphens)
+    if ($prefix -match '[^A-Z0-9\-]') {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Show Prefix contains invalid characters. Use only letters, digits, and hyphens.",
+            "Validation Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return 0
+    }
+
+    # Validate base subnet format (two octets like "192.168")
+    if ($baseSubnet -notmatch '^\d{1,3}\.\d{1,3}$') {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Base Subnet must be two octets separated by a dot (e.g. '192.168').",
+            "Validation Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return 0
+    }
+
+    # Validate each octet of the base subnet is within 0-255
+    $subnetOctets = $baseSubnet -split '\.'
+    foreach ($octet in $subnetOctets) {
+        $octetVal = [int]$octet
+        if ($octetVal -lt 0 -or $octetVal -gt 255) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Base Subnet octets must be between 0 and 255.",
+                "Validation Error",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+            return 0
+        }
+    }
+
+    # Validate total machine count will not overflow the 4th octet
+    $totalMachines = $dirCount + $actCount + $undCount
+    if ($totalMachines -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Total machine count must be at least 1.",
+            "Validation Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return 0
+    }
+
+    $maxOffset = $startOffset + $totalMachines - 1
+    if ($maxOffset -gt 254) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "IP offset overflow: $totalMachines machines starting at offset $startOffset would exceed .254.`nReduce machine count or lower the starting offset.",
+            "Validation Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return 0
+    }
+
+    # ---- Build machine list ----
+    $machines = @()
+
+    for ($i = 1; $i -le $dirCount; $i++) {
+        $suffix = if ($dirCount -eq 1) { "DIR" } else { "DIR{0:D2}" -f $i }
+        $hostname = "$prefix-$suffix"
+        $machines += @{
+            Hostname    = $hostname
+            ProfileName = "$prefix-$suffix"
+            Type        = "Director"
+            Description = "Director $i - sequences the show, sends start commands to Actors"
+        }
+    }
+
+    for ($i = 1; $i -le $actCount; $i++) {
+        $suffix = "ACT{0:D2}" -f $i
+        $hostname = "$prefix-$suffix"
+        $machines += @{
+            Hostname    = $hostname
+            ProfileName = "$prefix-$suffix"
+            Type        = "Actor"
+            Description = "Actor $i - outputs video according to assigned Feed scenes"
+        }
+    }
+
+    for ($i = 1; $i -le $undCount; $i++) {
+        $suffix = "UND{0:D2}" -f $i
+        $hostname = "$prefix-$suffix"
+        $machines += @{
+            Hostname    = $hostname
+            ProfileName = "$prefix-$suffix"
+            Type        = "Understudy"
+            Description = "Understudy $i - standby replacement for failover"
+        }
+    }
+
+    # ---- Validate all hostnames are within 15-char NetBIOS limit ----
+    foreach ($machine in $machines) {
+        if ($machine.Hostname.Length -gt 15) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Hostname '$($machine.Hostname)' exceeds the 15-character NetBIOS limit.`nShorten the Show Prefix.",
+                "Validation Error",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+            return 0
+        }
+    }
+
+    # ---- Generate profiles ----
+    $generatedNames = @()
+    $currentOffset = $startOffset
+    $errors = @()
+
+    foreach ($machine in $machines) {
+        try {
+            $profile = New-DefaultProfile -Name $machine.ProfileName -Description $machine.Description
+            $profile.ServerName = $machine.Hostname
+
+            # Configure network adapter IPs based on the current offset
+            # Adapter 0 - d3Net:   {base}.10.{offset}
+            # Adapter 1 - Media:   {base}.20.{offset}
+            # Adapter 2 - sACN:    2.0.0.{offset} (sACN standard)
+            # Adapter 3 - NDI:     {base}.30.{offset}
+            # Adapter 4 - Control: {base}.40.{offset}
+            # Adapter 5 - Internet: DHCP (no changes needed, already default)
+
+            if ($profile.NetworkAdapters.Count -ge 6) {
+                $profile.NetworkAdapters[0].IPAddress  = "$baseSubnet.10.$currentOffset"
+                $profile.NetworkAdapters[0].SubnetMask = "255.255.255.0"
+
+                $profile.NetworkAdapters[1].IPAddress  = "$baseSubnet.20.$currentOffset"
+                $profile.NetworkAdapters[1].SubnetMask = "255.255.255.0"
+
+                $profile.NetworkAdapters[2].IPAddress  = "2.0.0.$currentOffset"
+                $profile.NetworkAdapters[2].SubnetMask = "255.0.0.0"
+
+                $profile.NetworkAdapters[3].IPAddress  = "$baseSubnet.30.$currentOffset"
+                $profile.NetworkAdapters[3].SubnetMask = "255.255.255.0"
+
+                $profile.NetworkAdapters[4].IPAddress  = "$baseSubnet.40.$currentOffset"
+                $profile.NetworkAdapters[4].SubnetMask = "255.255.255.0"
+
+                # Adapter 5 (Internet) stays DHCP - already set by New-DefaultProfile
+            }
+
+            # Configure SMB settings
+            $profile.SMBSettings.ShareD3Projects  = $true
+            $profile.SMBSettings.ShareName        = "d3 Projects"
+            $profile.SMBSettings.ProjectsPath     = "D:\d3 Projects"
+            $profile.SMBSettings.SharePermissions  = "Administrators:Full"
+
+            Save-Profile -Profile $profile
+            $generatedNames += $machine.ProfileName
+            $currentOffset++
+        }
+        catch {
+            $errors += "Failed to create '$($machine.ProfileName)': $_"
+            Write-AppLog "Batch generation error for '$($machine.ProfileName)': $_" -Level 'ERROR'
+        }
+    }
+
+    # ---- Show summary ----
+    $generatedCount = $generatedNames.Count
+    if ($generatedCount -gt 0) {
+        $nameList = $generatedNames -join "`n  "
+        $summaryMsg = "Generated $generatedCount profile$(if ($generatedCount -ne 1) { 's' }):`n`n  $nameList"
+        if ($errors.Count -gt 0) {
+            $summaryMsg += "`n`nErrors ($($errors.Count)):`n" + ($errors -join "`n")
+        }
+        [System.Windows.Forms.MessageBox]::Show(
+            $summaryMsg,
+            "Batch Generation Complete",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+        Write-AppLog "Batch generated $generatedCount profiles: $($generatedNames -join ', ')" -Level 'INFO'
+    }
+    else {
+        $errorMsg = "No profiles were generated."
+        if ($errors.Count -gt 0) {
+            $errorMsg += "`n`nErrors:`n" + ($errors -join "`n")
+        }
+        [System.Windows.Forms.MessageBox]::Show(
+            $errorMsg,
+            "Batch Generation Failed",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+        Write-AppLog "Batch generation failed: $($errors -join '; ')" -Level 'ERROR'
+    }
+
+    return $generatedCount
+}
+
+
+function Export-RigBundle {
+    <#
+    .SYNOPSIS
+        Exports all saved profiles as a ZIP archive (rig bundle).
+    .DESCRIPTION
+        Collects all .json profile files from the profiles directory, copies them
+        to a temporary directory, and creates a ZIP archive at a user-chosen location.
+    .OUTPUTS
+        [PSCustomObject] - @{ Success = [bool]; Message = [string] }
+    #>
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+
+    $profilesDir = Get-ProfilesDirectory
+    $jsonFiles = @(Get-ChildItem -Path $profilesDir -Filter '*.json' -File -ErrorAction SilentlyContinue)
+
+    if ($jsonFiles.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "No profiles found to export. Create some profiles first.",
+            "No Profiles",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return [PSCustomObject]@{ Success = $false; Message = "No profiles to export" }
+    }
+
+    $saveDialog = New-Object System.Windows.Forms.SaveFileDialog
+    $saveDialog.Title = "Export Rig Bundle"
+    $saveDialog.Filter = "Rig Bundle (*.zip)|*.zip"
+    $saveDialog.DefaultExt = "zip"
+    $saveDialog.FileName = "RigBundle_$(Get-Date -Format 'yyyyMMdd_HHmm').zip"
+    $saveDialog.OverwritePrompt = $true
+
+    if ($saveDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        return [PSCustomObject]@{ Success = $false; Message = "Export cancelled" }
+    }
+
+    $zipPath = $saveDialog.FileName
+    $tempDir = $null
+
+    try {
+        # Create a temp directory and copy profile files into it
+        $tempDir = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath "DisguiseBuddy_RigExport_$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+
+        foreach ($file in $jsonFiles) {
+            Copy-Item -Path $file.FullName -Destination $tempDir -Force
+        }
+
+        # Remove the target ZIP if it already exists (CreateFromDirectory fails on existing file)
+        if (Test-Path -Path $zipPath) {
+            Remove-Item -Path $zipPath -Force
+        }
+
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, $zipPath)
+
+        $successMsg = "Exported $($jsonFiles.Count) profile$(if ($jsonFiles.Count -ne 1) { 's' }) to:`n$zipPath"
+        [System.Windows.Forms.MessageBox]::Show(
+            $successMsg,
+            "Export Successful",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+        Write-AppLog "Exported rig bundle with $($jsonFiles.Count) profiles to '$zipPath'" -Level 'INFO'
+        return [PSCustomObject]@{ Success = $true; Message = "Exported $($jsonFiles.Count) profiles" }
+    }
+    catch {
+        Write-AppLog "Failed to export rig bundle: $_" -Level 'ERROR'
+        [System.Windows.Forms.MessageBox]::Show(
+            "Failed to create rig bundle:`n$_",
+            "Export Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+        return [PSCustomObject]@{ Success = $false; Message = "Export failed: $_" }
+    }
+    finally {
+        # Clean up temp directory
+        if ($tempDir -and (Test-Path -Path $tempDir)) {
+            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+
+function Import-RigBundle {
+    <#
+    .SYNOPSIS
+        Imports profiles from a ZIP archive (rig bundle).
+    .DESCRIPTION
+        Opens a ZIP file, extracts .json profile files to a temp directory, validates
+        each with Test-ProfileSchema, handles name conflicts (overwrite/skip/rename),
+        and copies valid profiles to the profiles directory.
+    .OUTPUTS
+        [PSCustomObject] - @{ Success = [bool]; Message = [string]; ImportedCount = [int]; SkippedCount = [int] }
+    #>
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+
+    $openDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $openDialog.Title = "Import Rig Bundle"
+    $openDialog.Filter = "Rig Bundle (*.zip)|*.zip"
+    $openDialog.Multiselect = $false
+
+    if ($openDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        return [PSCustomObject]@{ Success = $false; Message = "Import cancelled"; ImportedCount = 0; SkippedCount = 0 }
+    }
+
+    $zipPath = $openDialog.FileName
+    $profilesDir = Get-ProfilesDirectory
+    $tempDir = $null
+    $importedCount = 0
+    $skippedCount = 0
+    $errors = @()
+
+    try {
+        # Extract to a temp directory
+        $tempDir = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath "DisguiseBuddy_RigImport_$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $tempDir)
+
+        # Find all .json files in the extracted content (including subdirectories)
+        $extractedFiles = @(Get-ChildItem -Path $tempDir -Filter '*.json' -File -Recurse -ErrorAction SilentlyContinue)
+
+        if ($extractedFiles.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "The selected ZIP file does not contain any .json profile files.",
+                "No Profiles Found",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+            return [PSCustomObject]@{ Success = $false; Message = "No profiles in archive"; ImportedCount = 0; SkippedCount = 0 }
+        }
+
+        foreach ($file in $extractedFiles) {
+            try {
+                $content = Get-Content -Path $file.FullName -Raw -Encoding UTF8
+                $importedProfile = $content | ConvertFrom-Json
+            }
+            catch {
+                $errors += "Failed to parse '$($file.Name)': $_"
+                $skippedCount++
+                continue
+            }
+
+            # Basic field validation
+            if (-not $importedProfile.Name) {
+                $errors += "Skipped '$($file.Name)': missing 'Name' field"
+                $skippedCount++
+                continue
+            }
+
+            if (-not $importedProfile.NetworkAdapters) {
+                $errors += "Skipped '$($file.Name)': missing 'NetworkAdapters' field"
+                $skippedCount++
+                continue
+            }
+
+            # Schema validation
+            $schemaResult = Test-ProfileSchema -Profile $importedProfile
+            if (-not $schemaResult.IsValid) {
+                $errors += "Skipped '$($importedProfile.Name)': $($schemaResult.Errors -join '; ')"
+                $skippedCount++
+                continue
+            }
+
+            # Check for name conflict
+            $existingProfile = Get-Profile -Name $importedProfile.Name
+            if ($null -ne $existingProfile) {
+                $conflictResult = [System.Windows.Forms.MessageBox]::Show(
+                    "A profile named '$($importedProfile.Name)' already exists.`n`nOverwrite it?`n`nYes = Overwrite  |  No = Skip  |  Cancel = Stop Import",
+                    "Profile Conflict - $($importedProfile.Name)",
+                    [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+                    [System.Windows.Forms.MessageBoxIcon]::Question
+                )
+
+                if ($conflictResult -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                    # Stop the entire import
+                    Write-AppLog "Rig bundle import cancelled by user at conflict for '$($importedProfile.Name)'" -Level 'INFO'
+                    break
+                }
+                elseif ($conflictResult -eq [System.Windows.Forms.DialogResult]::No) {
+                    $skippedCount++
+                    continue
+                }
+                # If Yes, fall through and overwrite
+            }
+
+            # Save the profile
+            try {
+                $importedProfile.Modified = (Get-Date).ToString('o')
+                Save-Profile -Profile $importedProfile
+                $importedCount++
+                Write-AppLog "Imported profile '$($importedProfile.Name)' from rig bundle" -Level 'INFO'
+            }
+            catch {
+                $errors += "Failed to save '$($importedProfile.Name)': $_"
+                $skippedCount++
+            }
+        }
+
+        # Show summary
+        $summaryMsg = "Imported $importedCount profile$(if ($importedCount -ne 1) { 's' }), skipped $skippedCount."
+        if ($errors.Count -gt 0) {
+            $summaryMsg += "`n`nDetails:`n" + ($errors -join "`n")
+        }
+
+        $summaryIcon = if ($errors.Count -gt 0) {
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        } else {
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        }
+
+        [System.Windows.Forms.MessageBox]::Show(
+            $summaryMsg,
+            "Rig Bundle Import Complete",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            $summaryIcon
+        ) | Out-Null
+
+        Write-AppLog "Rig bundle import: $importedCount imported, $skippedCount skipped from '$zipPath'" -Level 'INFO'
+        return [PSCustomObject]@{
+            Success       = ($importedCount -gt 0)
+            Message       = "Imported $importedCount, skipped $skippedCount"
+            ImportedCount = $importedCount
+            SkippedCount  = $skippedCount
+        }
+    }
+    catch {
+        Write-AppLog "Failed to import rig bundle: $_" -Level 'ERROR'
+        [System.Windows.Forms.MessageBox]::Show(
+            "Failed to import rig bundle:`n$_",
+            "Import Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+        return [PSCustomObject]@{ Success = $false; Message = "Import failed: $_"; ImportedCount = $importedCount; SkippedCount = $skippedCount }
+    }
+    finally {
+        # Clean up temp directory
+        if ($tempDir -and (Test-Path -Path $tempDir)) {
+            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+
+# ============================================================================
 # UI VIEW FUNCTION - Main Profiles Management View
 # ============================================================================
 
@@ -1748,7 +2422,7 @@ function New-ProfilesView {
     $leftColumnWidth = 350
 
     $leftPanel = New-StyledPanel -X $leftColumnX -Y $leftColumnY `
-        -Width $leftColumnWidth -Height 500 -IsCard
+        -Width $leftColumnWidth -Height 545 -IsCard
     $leftPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
         [System.Windows.Forms.AnchorStyles]::Left -bor
         [System.Windows.Forms.AnchorStyles]::Bottom
@@ -1927,6 +2601,41 @@ function New-ProfilesView {
         [System.Windows.Forms.AnchorStyles]::Left
     $leftPanel.Controls.Add($captureBtn)
 
+    # ---- Second row of buttons: Generate Rig, Export/Import Rig Bundle ----
+    $buttonY2 = $buttonY + 42
+
+    $generateRigBtn = New-StyledButton -Text "Generate Rig" -X 12 -Y $buttonY2 `
+        -Width $buttonWidth -Height 34 -IsPrimary -OnClick {
+        $generatedCount = Show-BatchProfileWizard
+        if ($generatedCount -gt 0) {
+            Refresh-ProfileList
+        }
+    }
+    $generateRigBtn.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor
+        [System.Windows.Forms.AnchorStyles]::Left
+    $leftPanel.Controls.Add($generateRigBtn)
+
+    $exportBundleBtn = New-StyledButton -Text "Export Bundle" `
+        -X (12 + $buttonWidth + $buttonSpacing) `
+        -Y $buttonY2 -Width 100 -Height 34 -OnClick {
+        Export-RigBundle
+    }
+    $exportBundleBtn.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor
+        [System.Windows.Forms.AnchorStyles]::Left
+    $leftPanel.Controls.Add($exportBundleBtn)
+
+    $importBundleBtn = New-StyledButton -Text "Import Bundle" `
+        -X (12 + $buttonWidth + $buttonSpacing + 100 + $buttonSpacing) `
+        -Y $buttonY2 -Width 100 -Height 34 -OnClick {
+        $importResult = Import-RigBundle
+        if ($importResult.ImportedCount -gt 0) {
+            Refresh-ProfileList
+        }
+    }
+    $importBundleBtn.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor
+        [System.Windows.Forms.AnchorStyles]::Left
+    $leftPanel.Controls.Add($importBundleBtn)
+
     $scrollPanel.Controls.Add($leftPanel)
 
     # ========================================================================
@@ -1937,7 +2646,7 @@ function New-ProfilesView {
     $rightColumnWidth = 550
 
     $detailPanel = New-StyledPanel -X $rightColumnX -Y $rightColumnY `
-        -Width $rightColumnWidth -Height 500 -IsCard
+        -Width $rightColumnWidth -Height 545 -IsCard
     $detailPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
         [System.Windows.Forms.AnchorStyles]::Left -bor
         [System.Windows.Forms.AnchorStyles]::Right -bor
