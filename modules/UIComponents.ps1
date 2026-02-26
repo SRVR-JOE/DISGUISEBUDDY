@@ -521,15 +521,15 @@ function New-StatusBadge {
 
     # Determine status-specific colors
     $badgeBackColor = switch ($Type) {
-        'Success' { [System.Drawing.Color]::FromArgb(16, 185, 129) }   # Green #10B981
-        'Warning' { [System.Drawing.Color]::FromArgb(245, 158, 11) }   # Amber #F59E0B
-        'Error'   { [System.Drawing.Color]::FromArgb(239, 68, 68) }    # Red   #EF4444
-        'Info'    { [System.Drawing.Color]::FromArgb(6, 182, 212) }    # Blue  #06B6D4
+        'Success' { $script:Theme.Success }
+        'Warning' { $script:Theme.Warning }
+        'Error'   { $script:Theme.Error }
+        'Info'    { $script:Theme.Accent }
     }
     $badgeForeColor = [System.Drawing.Color]::White
     # Warning badges use dark text for contrast against amber background
     if ($Type -eq 'Warning') {
-        $badgeForeColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+        $badgeForeColor = $script:Theme.CardBackground
     }
 
     $badgeFont = New-Object System.Drawing.Font('Segoe UI', 8, [System.Drawing.FontStyle]::Bold)

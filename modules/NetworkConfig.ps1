@@ -92,7 +92,7 @@ $script:AdapterRoles = @(
     @{
         Index      = 5
         RoleName   = 'Internet / Mgmt'
-        ShortName  = 'Internet'
+        ShortName  = '100G'
         Color      = '#64748B'   # Gray
         DefaultIP  = ''
         DefaultSub = ''
@@ -324,10 +324,10 @@ function Get-SystemNetworkAdapters {
             }
         }
 
-        Write-AppLog -Message "Detected $($adapters.Count) physical network adapter(s)." -Level INFO
+        Write-AppLog -Message "Detected $($adapters.Count) physical network adapter(s)." -Level 'INFO'
     }
     catch {
-        Write-AppLog -Message "Failed to enumerate network adapters: $($_.Exception.Message)" -Level ERROR
+        Write-AppLog -Message "Failed to enumerate network adapters: $($_.Exception.Message)" -Level 'ERROR'
         Write-Warning "Could not detect network adapters. Ensure you are running on Windows with administrator privileges."
     }
 
@@ -394,10 +394,10 @@ function Get-AdapterIPConfiguration {
             $result.DHCPEnabled = ($dhcpInfo.Dhcp -eq 'Enabled')
         }
 
-        Write-AppLog -Message "Retrieved IP config for adapter '$AdapterName': $($result.IPAddress)/$($result.SubnetPrefix)" -Level INFO
+        Write-AppLog -Message "Retrieved IP config for adapter '$AdapterName': $($result.IPAddress)/$($result.SubnetPrefix)" -Level 'INFO'
     }
     catch {
-        Write-AppLog -Message "Failed to get IP config for '$AdapterName': $($_.Exception.Message)" -Level ERROR
+        Write-AppLog -Message "Failed to get IP config for '$AdapterName': $($_.Exception.Message)" -Level 'ERROR'
     }
 
     return $result
@@ -508,12 +508,12 @@ function Set-AdapterStaticIP {
 
         $msg = "Successfully set $AdapterName to $IPAddress/$prefix"
         if ($Gateway) { $msg += " gw $Gateway" }
-        Write-AppLog -Message $msg -Level INFO
+        Write-AppLog -Message $msg -Level 'INFO'
         return [PSCustomObject]@{ Success = $true; Message = $msg }
     }
     catch {
         $errMsg = "Failed to set static IP on '$AdapterName': $($_.Exception.Message)"
-        Write-AppLog -Message $errMsg -Level ERROR
+        Write-AppLog -Message $errMsg -Level 'ERROR'
         return [PSCustomObject]@{ Success = $false; Message = $errMsg }
     }
 }
@@ -553,12 +553,12 @@ function Set-AdapterDHCP {
                                    -ResetServerAddresses -ErrorAction SilentlyContinue
 
         $msg = "Successfully set '$AdapterName' to DHCP."
-        Write-AppLog -Message $msg -Level INFO
+        Write-AppLog -Message $msg -Level 'INFO'
         return [PSCustomObject]@{ Success = $true; Message = $msg }
     }
     catch {
         $errMsg = "Failed to enable DHCP on '$AdapterName': $($_.Exception.Message)"
-        Write-AppLog -Message $errMsg -Level ERROR
+        Write-AppLog -Message $errMsg -Level 'ERROR'
         return [PSCustomObject]@{ Success = $false; Message = $errMsg }
     }
 }
@@ -589,12 +589,12 @@ function Rename-NetworkAdapter {
     try {
         Rename-NetAdapter -Name $CurrentName -NewName $NewName -ErrorAction Stop
         $msg = "Renamed adapter '$CurrentName' to '$NewName'."
-        Write-AppLog -Message $msg -Level INFO
+        Write-AppLog -Message $msg -Level 'INFO'
         return [PSCustomObject]@{ Success = $true; Message = $msg }
     }
     catch {
         $errMsg = "Failed to rename '$CurrentName' to '$NewName': $($_.Exception.Message)"
-        Write-AppLog -Message $errMsg -Level ERROR
+        Write-AppLog -Message $errMsg -Level 'ERROR'
         return [PSCustomObject]@{ Success = $false; Message = $errMsg }
     }
 }
@@ -868,7 +868,7 @@ function New-NetworkView {
                 }
                 catch {
                     # Silently continue if we can't read adapter config
-                    Write-AppLog -Message "Could not read IP config for '$selectedAdapter': $($_.Exception.Message)" -Level WARN
+                    Write-AppLog -Message "Could not read IP config for '$selectedAdapter': $($_.Exception.Message)" -Level 'WARN'
                 }
             }
         }

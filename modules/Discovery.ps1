@@ -1566,54 +1566,59 @@ function New-DeployView {
         $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting deployment of '$($profileObj.Name)' to $($selectedIPs.Count) server(s)...`r`n")
         $txtDeployLog.Refresh()
 
-        $totalServers = $selectedIPs.Count
-        $currentIdx = 0
-        $successCount = 0
+        # Use a single-element array to allow mutation from inside the scriptblock closure
+        $successCounter = @(0)
 
-        foreach ($serverIP in $selectedIPs) {
-            $currentIdx++
-            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] [$currentIdx/$totalServers] Deploying to $serverIP...`r`n")
-            $txtDeployLog.Refresh()
-            $deployProgressBar.Value = [int](($currentIdx / $totalServers) * 100)
+        # Progress callback: invoked by Push-ProfileToMultipleServers after each server
+        $deployCallback = {
+            param($serverIP, $index, $total, $pushResult)
+
+            # Update progress bar
+            $deployProgressBar.Value = [int](($index / $total) * 100)
             $deployProgressBar.Refresh()
-            [System.Windows.Forms.Application]::DoEvents()
 
-            try {
-                $pushParams = @{
-                    ServerIP = $serverIP
-                    Profile  = $profileObj
-                }
-                if ($credential) {
-                    $pushParams.Credential = $credential
-                }
+            # Log per-server start marker (with index context)
+            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] [$index/$total] Deploying to $serverIP...`r`n")
 
-                $pushResult = Push-ProfileToServer @pushParams
+            # Log each deployment step result
+            foreach ($step in $pushResult.Steps) {
+                $stepStatus = if ($step.Success) { 'OK' } else { 'FAILED' }
+                $txtDeployLog.AppendText("    $($step.StepName): $stepStatus - $($step.Message)`r`n")
+            }
 
-                foreach ($step in $pushResult.Steps) {
-                    $stepStatus = if ($step.Success) { "OK" } else { "FAILED" }
-                    $txtDeployLog.AppendText("    $($step.StepName): $stepStatus - $($step.Message)`r`n")
-                }
-
-                if ($pushResult.Success) {
-                    $successCount++
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment SUCCEEDED`r`n")
-                } else {
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment FAILED - $($pushResult.ErrorMessage)`r`n")
-                }
-            } catch {
-                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: EXCEPTION - $_`r`n")
+            # Log overall per-server outcome
+            if ($pushResult.Success) {
+                $successCounter[0]++
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment SUCCEEDED`r`n")
+            } else {
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment FAILED - $($pushResult.ErrorMessage)`r`n")
             }
 
             $txtDeployLog.Refresh()
             [System.Windows.Forms.Application]::DoEvents()
+        }.GetNewClosure()
+
+        try {
+            $deployParams = @{
+                ServerIPs        = $selectedIPs.ToArray()
+                Profile          = $profileObj
+                ProgressCallback = $deployCallback
+            }
+            if ($credential) {
+                $deployParams.Credential = $credential
+            }
+
+            Push-ProfileToMultipleServers @deployParams | Out-Null
+        } catch {
+            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] EXCEPTION during batch deployment: $_`r`n")
         }
 
         $deployProgressBar.Value = 100
-        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Deployment complete: $successCount/$totalServers succeeded.`r`n")
+        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Deployment complete: $($successCounter[0])/$($selectedIPs.Count) succeeded.`r`n")
         $txtDeployLog.AppendText("------------------------------------------------------------`r`n")
 
         # Update app state only if at least one deployment succeeded
-        if ($successCount -gt 0) {
+        if ($successCounter[0] -gt 0) {
             $script:AppState.LastAppliedProfile = $profileObj.Name
         }
 
@@ -1649,6 +1654,13 @@ function New-DeployView {
     # ===================================================================
     $scrollContainer.ResumeLayout($true)
     $ContentPanel.Controls.Add($scrollContainer)
+
+    # Expose key action buttons for global keyboard shortcut handling.
+    # Set-ActiveView clears these before switching away from this view.
+    $script:DeployViewActions = @{
+        ScanButton   = $btnScanNetwork
+        DeployButton = $btnDeploy
+    }
 
     # Resume layout now that all controls have been added
     $ContentPanel.ResumeLayout($true)

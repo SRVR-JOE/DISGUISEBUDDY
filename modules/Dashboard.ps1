@@ -345,7 +345,7 @@ function New-DashboardView {
             "Blue"   { $script:Theme.Accent }
             "Purple" { $script:Theme.Primary }
             "Green"  { $script:Theme.Success }
-            "Cyan"   { [System.Drawing.ColorTranslator]::FromHtml('#06B6D4') }
+            "Cyan"   { $script:Theme.Accent }
             "Orange" { $script:Theme.Warning }
             "Gray"   { $script:Theme.TextMuted }
             default  { $script:Theme.TextSecondary }

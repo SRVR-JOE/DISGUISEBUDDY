@@ -20,11 +20,11 @@ function Get-ServerHostname {
         if (-not $hostname) {
             $hostname = [System.Net.Dns]::GetHostName()
         }
-        Write-AppLog -Message "Retrieved server hostname: $hostname" -Level DEBUG
+        Write-AppLog -Message "Retrieved server hostname: $hostname" -Level 'DEBUG'
         return $hostname
     }
     catch {
-        Write-AppLog -Message "Failed to retrieve hostname: $_" -Level ERROR
+        Write-AppLog -Message "Failed to retrieve hostname: $_" -Level 'ERROR'
         return 'UNKNOWN'
     }
 }
@@ -50,7 +50,7 @@ function Set-ServerHostname {
     # Validate the hostname first
     $validation = Test-ServerHostname -Name $NewName
     if (-not $validation.IsValid) {
-        Write-AppLog -Message "Hostname validation failed for '$NewName': $($validation.ErrorMessage)" -Level WARN
+        Write-AppLog -Message "Hostname validation failed for '$NewName': $($validation.ErrorMessage)" -Level 'WARN'
         return [PSCustomObject]@{
             Success         = $false
             Message         = "Invalid hostname: $($validation.ErrorMessage)"
@@ -60,7 +60,7 @@ function Set-ServerHostname {
 
     try {
         Rename-Computer -NewName $NewName -Force -ErrorAction Stop
-        Write-AppLog -Message "Hostname change to '$NewName' applied successfully. Restart required." -Level INFO
+        Write-AppLog -Message "Hostname change to '$NewName' applied successfully. Restart required." -Level 'INFO'
         return [PSCustomObject]@{
             Success         = $true
             Message         = "Hostname will change to '$NewName' after the next restart."
@@ -68,7 +68,7 @@ function Set-ServerHostname {
         }
     }
     catch {
-        Write-AppLog -Message "Failed to change hostname to '$NewName': $_" -Level ERROR
+        Write-AppLog -Message "Failed to change hostname to '$NewName': $_" -Level 'ERROR'
         return [PSCustomObject]@{
             Success         = $false
             Message         = "Failed to change hostname: $_"
@@ -183,11 +183,11 @@ function Get-ServerSystemInfo {
             Model        = "$($cs.Manufacturer) $($cs.Model)"
         }
 
-        Write-AppLog -Message "Retrieved system info for '$($cs.Name)'." -Level DEBUG
+        Write-AppLog -Message "Retrieved system info for '$($cs.Name)'." -Level 'DEBUG'
         return $info
     }
     catch {
-        Write-AppLog -Message "Failed to retrieve system info: $_" -Level ERROR
+        Write-AppLog -Message "Failed to retrieve system info: $_" -Level 'ERROR'
 
         # Return partial info using fallback methods
         $hostname = $env:COMPUTERNAME

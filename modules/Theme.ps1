@@ -70,23 +70,6 @@ $script:LightTheme = @{
 # Current active theme
 $script:Theme = $script:DarkTheme
 
-# Theme change callback registry
-$script:ThemeChangeCallbacks = [System.Collections.ArrayList]::new()
-
-function Register-ThemeChangeCallback {
-    <#
-    .SYNOPSIS
-        Registers a callback scriptblock to be invoked when the theme changes.
-    .PARAMETER Callback
-        A scriptblock that will be called after Set-AppTheme applies a new theme.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [scriptblock]$Callback
-    )
-    $script:ThemeChangeCallbacks.Add($Callback) | Out-Null
-}
-
 function Set-AppTheme {
     param([string]$ThemeName)
     if ($ThemeName -eq 'Light') {
@@ -97,19 +80,6 @@ function Set-AppTheme {
 
     # Persist theme preference
     Save-ThemePreference -ThemeName $ThemeName
-
-    # Notify registered callbacks
-    foreach ($cb in $script:ThemeChangeCallbacks) {
-        try {
-            & $cb
-        } catch {
-            Write-AppLog -Message "Theme change callback error: $_" -Level 'WARN'
-        }
-    }
-}
-
-function Get-AppTheme {
-    return $script:Theme
 }
 
 function Get-AppThemeName {

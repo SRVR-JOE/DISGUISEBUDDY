@@ -58,6 +58,10 @@ $script:AppState = @{
     CurrentView        = 'Dashboard'
 }
 
+# Holds references to action buttons exposed by the active view for keyboard shortcuts.
+# New-DeployView populates this; Set-ActiveView clears it on view change.
+$script:DeployViewActions = $null
+
 # ============================================================================
 # DOT-SOURCE MODULES (order matters: Theme -> UIComponents -> everything else)
 # ============================================================================
@@ -194,13 +198,15 @@ $contentPanel.Padding = New-Object System.Windows.Forms.Padding(20)
 # ============================================================================
 
 # Navigation item definitions: Name, DisplayText, Unicode symbol
+# The & prefix enables Alt+letter WinForms access keys.
+# Chosen accelerators (all unique): D, P, N, M, S, E
 $navItems = @(
-    @{ Name = 'Dashboard';      Display = 'Dashboard';           Symbol = [char]0x229E }  # ⊞ grid
-    @{ Name = 'Profiles';       Display = 'Profiles';            Symbol = [char]0x2261 }  # ≡ list
-    @{ Name = 'Network';        Display = 'Network Adapters';    Symbol = [char]0x2295 }  # ⊕ connection
-    @{ Name = 'SMB';            Display = 'SMB Sharing';         Symbol = [char]0x22A1 }  # ⊡ folder
-    @{ Name = 'ServerIdentity'; Display = 'Server Identity';     Symbol = [char]0x2299 }  # ⊙ server
-    @{ Name = 'Deploy';         Display = 'Network Deploy';      Symbol = [char]0x21E2 }  # ⇢ deploy
+    @{ Name = 'Dashboard';      Display = '&Dashboard';          Symbol = [char]0x229E }  # ⊞ grid       | Alt+D
+    @{ Name = 'Profiles';       Display = '&Profiles';           Symbol = [char]0x2261 }  # ≡ list       | Alt+P
+    @{ Name = 'Network';        Display = '&Network Adapters';   Symbol = [char]0x2295 }  # ⊕ connection | Alt+N
+    @{ Name = 'SMB';            Display = 'S&MB Sharing';        Symbol = [char]0x22A1 }  # ⊡ folder     | Alt+M
+    @{ Name = 'ServerIdentity'; Display = '&Server Identity';    Symbol = [char]0x2299 }  # ⊙ server     | Alt+S
+    @{ Name = 'Deploy';         Display = 'D&eploy';             Symbol = [char]0x21E2 }  # ⇢ deploy     | Alt+E
 )
 
 # Store nav buttons for state management
@@ -261,6 +267,9 @@ foreach ($item in $navItems) {
 
 function Set-ActiveView {
     param([string]$ViewName)
+
+    # Clear any view-specific action references before loading a new view
+    $script:DeployViewActions = $null
 
     # Update visual state of nav buttons
     foreach ($key in $script:NavButtons.Keys) {
@@ -354,6 +363,98 @@ $themeToggleBtn.Add_Click({
 # Add panels to form (order matters for docking)
 $mainForm.Controls.Add($contentPanel)  # Fill - must be added first
 $mainForm.Controls.Add($navPanel)      # Left dock
+
+# ============================================================================
+# KEYBOARD SHORTCUTS
+# ============================================================================
+
+# Enable the form to intercept key events before child controls handle them
+$mainForm.KeyPreview = $true
+
+# Global key handler
+# Ctrl+1..6  : navigate to views in order
+# F5         : refresh/scan (scan if on Deploy view, otherwise reload current view)
+# Ctrl+Enter : trigger deploy (Deploy view only)
+# Escape     : close any open modal dialog
+$mainForm.Add_KeyDown({
+    param($sender, $e)
+
+    $view = $script:AppState.CurrentView
+
+    switch ($e.KeyCode) {
+
+        # --- Ctrl+1 through Ctrl+6 : navigate to views ---
+        ([System.Windows.Forms.Keys]::D1) {
+            if ($e.Control) {
+                Set-ActiveView -ViewName 'Dashboard'
+                $e.Handled = $true
+                $e.SuppressKeyPress = $true
+            }
+        }
+        ([System.Windows.Forms.Keys]::D2) {
+            if ($e.Control) {
+                Set-ActiveView -ViewName 'Profiles'
+                $e.Handled = $true
+                $e.SuppressKeyPress = $true
+            }
+        }
+        ([System.Windows.Forms.Keys]::D3) {
+            if ($e.Control) {
+                Set-ActiveView -ViewName 'Network'
+                $e.Handled = $true
+                $e.SuppressKeyPress = $true
+            }
+        }
+        ([System.Windows.Forms.Keys]::D4) {
+            if ($e.Control) {
+                Set-ActiveView -ViewName 'SMB'
+                $e.Handled = $true
+                $e.SuppressKeyPress = $true
+            }
+        }
+        ([System.Windows.Forms.Keys]::D5) {
+            if ($e.Control) {
+                Set-ActiveView -ViewName 'ServerIdentity'
+                $e.Handled = $true
+                $e.SuppressKeyPress = $true
+            }
+        }
+        ([System.Windows.Forms.Keys]::D6) {
+            if ($e.Control) {
+                Set-ActiveView -ViewName 'Deploy'
+                $e.Handled = $true
+                $e.SuppressKeyPress = $true
+            }
+        }
+
+        # --- F5 : scan (Deploy view) or refresh current view ---
+        ([System.Windows.Forms.Keys]::F5) {
+            if ($view -eq 'Deploy' -and $script:DeployViewActions -and $script:DeployViewActions.ScanButton -and $script:DeployViewActions.ScanButton.Enabled) {
+                $script:DeployViewActions.ScanButton.PerformClick()
+            } else {
+                Set-ActiveView -ViewName $view
+            }
+            $e.Handled = $true
+            $e.SuppressKeyPress = $true
+        }
+
+        # --- Ctrl+Enter : trigger deploy (Deploy view only) ---
+        ([System.Windows.Forms.Keys]::Return) {
+            if ($e.Control -and $view -eq 'Deploy' -and $script:DeployViewActions -and $script:DeployViewActions.DeployButton -and $script:DeployViewActions.DeployButton.Enabled) {
+                $script:DeployViewActions.DeployButton.PerformClick()
+                $e.Handled = $true
+                $e.SuppressKeyPress = $true
+            }
+        }
+
+        # --- Escape : close any open modal (SendKeys approach) ---
+        ([System.Windows.Forms.Keys]::Escape) {
+            # Let Escape propagate naturally — WinForms modal dialogs handle it
+            # via their CancelButton or DialogResult. Nothing to do here unless
+            # a non-standard popup is open.
+        }
+    }
+})
 
 # ============================================================================
 # STARTUP

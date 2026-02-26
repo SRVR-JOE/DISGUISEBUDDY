@@ -26,11 +26,11 @@ function Get-D3ProjectShares {
                 IsD3Share   = ($_.Name -eq 'd3 Projects')
             }
         }
-        Write-AppLog -Message "Retrieved $($shares.Count) SMB shares from system." -Level INFO
+        Write-AppLog -Message "Retrieved $($shares.Count) SMB shares from system." -Level 'INFO'
         return $shares
     }
     catch {
-        Write-AppLog -Message "Failed to retrieve SMB shares: $_" -Level ERROR
+        Write-AppLog -Message "Failed to retrieve SMB shares: $_" -Level 'ERROR'
         return @()
     }
 }
@@ -57,11 +57,11 @@ function Get-SharePermissions {
                 AccessRight       = $_.AccessRight
             }
         }
-        Write-AppLog -Message "Retrieved permissions for share '$ShareName': $($access.Count) entries." -Level INFO
+        Write-AppLog -Message "Retrieved permissions for share '$ShareName': $($access.Count) entries." -Level 'INFO'
         return $access
     }
     catch {
-        Write-AppLog -Message "Failed to retrieve permissions for share '$ShareName': $_" -Level ERROR
+        Write-AppLog -Message "Failed to retrieve permissions for share '$ShareName': $_" -Level 'ERROR'
         return @()
     }
 }
@@ -96,7 +96,7 @@ function New-D3ProjectShare {
         # Validate path format before any filesystem operations
         $pathValidation = Test-SharePathFormat -Path $LocalPath
         if (-not $pathValidation.IsValid) {
-            Write-AppLog -Message "Share path validation failed for '$LocalPath': $($pathValidation.ErrorMessage)" -Level WARN
+            Write-AppLog -Message "Share path validation failed for '$LocalPath': $($pathValidation.ErrorMessage)" -Level 'WARN'
             return [PSCustomObject]@{
                 Success = $false
                 Message = "Invalid share path: $($pathValidation.ErrorMessage)"
@@ -105,7 +105,7 @@ function New-D3ProjectShare {
 
         # Validate and create path if needed
         if (-not (Test-Path -Path $LocalPath)) {
-            Write-AppLog -Message "Path '$LocalPath' does not exist. Creating directory." -Level INFO
+            Write-AppLog -Message "Path '$LocalPath' does not exist. Creating directory." -Level 'INFO'
             New-Item -Path $LocalPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
         }
 
@@ -124,7 +124,7 @@ function New-D3ProjectShare {
         }
 
         if ($existingShare) {
-            Write-AppLog -Message "Share '$ShareName' already exists. Remove it first to recreate." -Level WARN
+            Write-AppLog -Message "Share '$ShareName' already exists. Remove it first to recreate." -Level 'WARN'
             return [PSCustomObject]@{
                 Success = $false
                 Message = "Share '$ShareName' already exists. Remove it first or update its settings."
@@ -148,14 +148,14 @@ function New-D3ProjectShare {
 
         New-SmbShare @shareParams | Out-Null
 
-        Write-AppLog -Message "Successfully created share '$ShareName' at '$LocalPath' with $level access for $account." -Level INFO
+        Write-AppLog -Message "Successfully created share '$ShareName' at '$LocalPath' with $level access for $account." -Level 'INFO'
         return [PSCustomObject]@{
             Success = $true
             Message = "Share '$ShareName' created successfully at '$LocalPath'."
         }
     }
     catch {
-        Write-AppLog -Message "Failed to create share '$ShareName': $_" -Level ERROR
+        Write-AppLog -Message "Failed to create share '$ShareName': $_" -Level 'ERROR'
         return [PSCustomObject]@{
             Success = $false
             Message = "Failed to create share: $_"
@@ -179,14 +179,14 @@ function Remove-D3Share {
 
     try {
         Remove-SmbShare -Name $ShareName -Force -ErrorAction Stop
-        Write-AppLog -Message "Successfully removed share '$ShareName'." -Level INFO
+        Write-AppLog -Message "Successfully removed share '$ShareName'." -Level 'INFO'
         return [PSCustomObject]@{
             Success = $true
             Message = "Share '$ShareName' has been removed."
         }
     }
     catch {
-        Write-AppLog -Message "Failed to remove share '$ShareName': $_" -Level ERROR
+        Write-AppLog -Message "Failed to remove share '$ShareName': $_" -Level 'ERROR'
         return [PSCustomObject]@{
             Success = $false
             Message = "Failed to remove share '$ShareName': $_"
@@ -226,24 +226,24 @@ function Set-D3SharePermissions {
         # Revoke existing access for the account (ignore errors if no existing access)
         try {
             Revoke-SmbShareAccess -Name $ShareName -AccountName $AccountName -Force -ErrorAction Stop
-            Write-AppLog -Message "Revoked existing access for '$AccountName' on '$ShareName'." -Level INFO
+            Write-AppLog -Message "Revoked existing access for '$AccountName' on '$ShareName'." -Level 'INFO'
         }
         catch {
             # No existing access to revoke; this is acceptable
-            Write-AppLog -Message "No existing access to revoke for '$AccountName' on '$ShareName'." -Level DEBUG
+            Write-AppLog -Message "No existing access to revoke for '$AccountName' on '$ShareName'." -Level 'DEBUG'
         }
 
         # Grant new access
         Grant-SmbShareAccess -Name $ShareName -AccountName $AccountName -AccessRight $AccessRight -Force -ErrorAction Stop | Out-Null
 
-        Write-AppLog -Message "Granted $AccessRight access to '$AccountName' on share '$ShareName'." -Level INFO
+        Write-AppLog -Message "Granted $AccessRight access to '$AccountName' on share '$ShareName'." -Level 'INFO'
         return [PSCustomObject]@{
             Success = $true
             Message = "Granted $AccessRight access to '$AccountName' on '$ShareName'."
         }
     }
     catch {
-        Write-AppLog -Message "Failed to set permissions on '$ShareName': $_" -Level ERROR
+        Write-AppLog -Message "Failed to set permissions on '$ShareName': $_" -Level 'ERROR'
         return [PSCustomObject]@{
             Success = $false
             Message = "Failed to set permissions: $_"
@@ -331,11 +331,11 @@ function Test-D3ProjectsPath {
 
     try {
         $exists = Test-Path -Path $Path -ErrorAction Stop
-        Write-AppLog -Message "Path test for '$Path': $exists" -Level DEBUG
+        Write-AppLog -Message "Path test for '$Path': $exists" -Level 'DEBUG'
         return $exists
     }
     catch {
-        Write-AppLog -Message "Error testing path '$Path': $_" -Level ERROR
+        Write-AppLog -Message "Error testing path '$Path': $_" -Level 'ERROR'
         return $false
     }
 }
@@ -748,7 +748,7 @@ function New-SMBView {
         }
     }
     catch {
-        Write-AppLog -Message "Could not populate share grid: $_" -Level WARN
+        Write-AppLog -Message "Could not populate share grid: $_" -Level 'WARN'
     }
 
     $card2.Controls.Add($dgv)

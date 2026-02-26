@@ -135,7 +135,7 @@ function New-DefaultProfile {
             },
             [PSCustomObject]@{
                 Index       = 5
-                Role        = "Internet"
+                Role        = "100G"
                 DisplayName = "Internet / Management"
                 AdapterName = ""
                 IPAddress   = ""
@@ -1010,7 +1010,7 @@ function Get-CurrentSystemProfile {
         @{ Index = 2; Role = "sACN";     DisplayName = "Lighting (sACN/Art-Net)" },
         @{ Index = 3; Role = "NDI";      DisplayName = "NDI Video" },
         @{ Index = 4; Role = "Control";  DisplayName = "Control (OSC/Automation)" },
-        @{ Index = 5; Role = "Internet"; DisplayName = "Internet / Management" }
+        @{ Index = 5; Role = "100G"; DisplayName = "Internet / Management" }
     )
 
     # Try to read physical network adapters from the system
