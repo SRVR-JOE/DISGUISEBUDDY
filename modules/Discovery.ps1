@@ -1106,6 +1106,468 @@ function Find-DisguiseServersDNSSD {
     return $results
 }
 
+function Test-NICConsistency {
+    <#
+    .SYNOPSIS
+        Validates that network adapter names are identical across all profiles for each role.
+    .DESCRIPTION
+        disguise requires adapter names to be IDENTICAL across all servers for sACN/Art-Net
+        multicast to work correctly. A mismatch silently breaks DMX output.
+
+        This function groups adapters by Role across all provided profiles, then compares
+        the AdapterName values within each role group. Any role where adapter names differ
+        between profiles is flagged as a warning.
+
+        If RemoteAdapters is provided (from /api/service/system/networkadapters), the function
+        also compares profile expectations against actual remote adapter names.
+    .PARAMETER Profiles
+        Array of profile objects to compare (each containing a NetworkAdapters array).
+    .PARAMETER RemoteAdapters
+        Optional array of hashtables with keys: IP (server IP), Adapters (array of adapter
+        objects with Name property). Typically sourced from the d3 REST API.
+    .OUTPUTS
+        Hashtable with keys:
+          IsConsistent - [bool] True if all roles have matching adapter names across profiles
+          Warnings     - Array of warning hashtables, each with Role, Servers, Names, Message
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$Profiles,
+
+        [Parameter(Mandatory = $false)]
+        [array]$RemoteAdapters = @()
+    )
+
+    $result = @{
+        IsConsistent = $true
+        Warnings     = @()
+    }
+
+    if ($Profiles.Count -lt 2) {
+        Write-AppLog -Message "Test-NICConsistency: Need at least 2 profiles to compare. Got $($Profiles.Count)." -Level 'INFO'
+        return $result
+    }
+
+    # -----------------------------------------------------------------------
+    # Step 1: Group adapters by Role across all profiles
+    # -----------------------------------------------------------------------
+    # Build a hashtable: Role -> array of @{ ServerName; AdapterName }
+    $roleMap = @{}
+
+    foreach ($profile in $Profiles) {
+        $serverName = if ($profile.ServerName) { $profile.ServerName } else { $profile.Name }
+        $adapters = $profile.NetworkAdapters
+
+        if (-not $adapters) { continue }
+
+        foreach ($adapter in $adapters) {
+            $role = $adapter.Role
+            if ([string]::IsNullOrWhiteSpace($role)) { continue }
+            # Skip adapters that are disabled or have no name configured
+            if ($adapter.PSObject.Properties['Enabled'] -and $adapter.Enabled -eq $false) { continue }
+            if ([string]::IsNullOrWhiteSpace($adapter.AdapterName)) { continue }
+
+            if (-not $roleMap.ContainsKey($role)) {
+                $roleMap[$role] = [System.Collections.ArrayList]::new()
+            }
+
+            [void]$roleMap[$role].Add(@{
+                ServerName  = $serverName
+                AdapterName = $adapter.AdapterName
+            })
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Step 2: Compare AdapterName values within each role group
+    # -----------------------------------------------------------------------
+    foreach ($role in $roleMap.Keys) {
+        $entries = $roleMap[$role]
+        if ($entries.Count -lt 2) { continue }
+
+        $uniqueNames = $entries | ForEach-Object { $_.AdapterName } | Sort-Object -Unique
+        if ($uniqueNames.Count -gt 1) {
+            $result.IsConsistent = $false
+
+            $serverNames = ($entries | ForEach-Object { $_.ServerName }) -join ', '
+            $nameList = ($uniqueNames) -join "', '"
+
+            $warning = @{
+                Role    = $role
+                Servers = @($entries | ForEach-Object { $_.ServerName })
+                Names   = @($uniqueNames)
+                Message = "Role '$role' has inconsistent adapter names across servers ($serverNames): '$nameList'"
+            }
+            $result.Warnings += $warning
+
+            Write-AppLog -Message "Test-NICConsistency: $($warning.Message)" -Level 'WARN'
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Step 3: Compare profile expectations against remote adapter names
+    # -----------------------------------------------------------------------
+    if ($RemoteAdapters -and $RemoteAdapters.Count -gt 0) {
+        foreach ($remote in $RemoteAdapters) {
+            $remoteIP = $remote.IP
+            $remoteAdapterNames = @()
+            if ($remote.Adapters) {
+                $remoteAdapterNames = $remote.Adapters | ForEach-Object {
+                    if ($_.Name) { $_.Name } elseif ($_.name) { $_.name }
+                } | Where-Object { $_ }
+            }
+
+            if ($remoteAdapterNames.Count -eq 0) { continue }
+
+            # Find profiles that might correspond to this server (match by IP in adapter configs)
+            foreach ($profile in $Profiles) {
+                $serverName = if ($profile.ServerName) { $profile.ServerName } else { $profile.Name }
+                $profileAdapterNames = @()
+
+                if ($profile.NetworkAdapters) {
+                    $profileAdapterNames = $profile.NetworkAdapters |
+                        Where-Object { -not [string]::IsNullOrWhiteSpace($_.AdapterName) } |
+                        ForEach-Object { $_.AdapterName } |
+                        Sort-Object -Unique
+                }
+
+                foreach ($expectedName in $profileAdapterNames) {
+                    if ($remoteAdapterNames -notcontains $expectedName) {
+                        $result.IsConsistent = $false
+                        $warning = @{
+                            Role    = 'RemoteMismatch'
+                            Servers = @($serverName, $remoteIP)
+                            Names   = @($expectedName)
+                            Message = "Profile '$serverName' expects adapter '$expectedName' but it was not found on remote server $remoteIP. Available: $($remoteAdapterNames -join ', ')"
+                        }
+                        $result.Warnings += $warning
+                        Write-AppLog -Message "Test-NICConsistency: $($warning.Message)" -Level 'WARN'
+                    }
+                }
+            }
+        }
+    }
+
+    if ($result.IsConsistent) {
+        Write-AppLog -Message "Test-NICConsistency: All adapter names are consistent across $($Profiles.Count) profile(s)." -Level 'INFO'
+    } else {
+        Write-AppLog -Message "Test-NICConsistency: Found $($result.Warnings.Count) inconsistency warning(s) across $($Profiles.Count) profile(s)." -Level 'WARN'
+    }
+
+    return $result
+}
+
+function Invoke-PreFlightCheck {
+    <#
+    .SYNOPSIS
+        Runs a comprehensive pre-show network health check against one or more disguise servers.
+    .DESCRIPTION
+        For each server IP, performs the following checks:
+          1. Ping test (ICMP reachability)
+          2. d3 REST API reachable (HTTP GET /api/service/system with 3s timeout)
+          3. d3Service running (inferred from API response)
+          4. WinRM reachable (Test-WSMan)
+          5. SMB share accessible (Test-Path \\server\d3 Projects)
+          6. d3Net ports open (TCP 7542, 7543 session sync; 80 API)
+          7. Designer version match (compare version strings across all servers)
+
+        Returns structured results with per-server, per-check details. Supports a progress
+        callback for UI updates during long-running checks.
+    .PARAMETER Servers
+        Array of server IP addresses to check.
+    .PARAMETER Credential
+        Optional PSCredential for WinRM/SMB authentication.
+    .PARAMETER ProgressCallback
+        Optional scriptblock invoked with (serverIP, checkIndex, totalChecks, checkName) for
+        progress reporting. Allows the UI to show per-check progress.
+    .OUTPUTS
+        Hashtable with keys:
+          AllPassed - [bool] True if every check on every server passed
+          Results   - Array of per-server result hashtables, each containing Server and Checks
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$Servers,
+
+        [Parameter(Mandatory = $false)]
+        [PSCredential]$Credential = $null,
+
+        [Parameter(Mandatory = $false)]
+        [scriptblock]$ProgressCallback = $null
+    )
+
+    $allResults = @{
+        AllPassed = $true
+        Results   = @()
+    }
+
+    # Collect version strings to compare at the end
+    $versionMap = @{}
+
+    $totalServers = $Servers.Count
+    $serverIdx = 0
+
+    foreach ($ip in $Servers) {
+        $serverIdx++
+        $serverResult = @{
+            Server = $ip
+            Checks = @()
+        }
+
+        $checkNames = @('Ping', 'API', 'd3Service', 'WinRM', 'SMB Share', 'd3Net Ports', 'Designer Version')
+        $totalChecks = $checkNames.Count
+        $checkIdx = 0
+
+        # -------------------------------------------------------------------
+        # Check 1: Ping
+        # -------------------------------------------------------------------
+        $checkIdx++
+        if ($ProgressCallback) {
+            try { $ProgressCallback.Invoke($ip, $checkIdx, $totalChecks, 'Ping') } catch {}
+        }
+
+        $pingCheck = @{ Name = 'Ping'; Passed = $false; Message = '' }
+        try {
+            $pingResult = New-Object System.Net.NetworkInformation.Ping
+            $reply = $pingResult.Send($ip, 2000)
+            if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
+                $pingCheck.Passed = $true
+                $pingCheck.Message = "OK ($($reply.RoundtripTime)ms)"
+            } else {
+                $pingCheck.Message = "Failed: $($reply.Status)"
+            }
+            $pingResult.Dispose()
+        } catch {
+            $pingCheck.Message = "Error: $($_.Exception.Message)"
+        }
+        $serverResult.Checks += $pingCheck
+
+        # -------------------------------------------------------------------
+        # Check 2: d3 REST API reachable
+        # -------------------------------------------------------------------
+        $checkIdx++
+        if ($ProgressCallback) {
+            try { $ProgressCallback.Invoke($ip, $checkIdx, $totalChecks, 'API') } catch {}
+        }
+
+        $apiCheck = @{ Name = 'API'; Passed = $false; Message = '' }
+        $apiResponseObj = $null
+        $httpClient = $null
+        try {
+            $httpClient = New-Object System.Net.Http.HttpClient
+            $httpClient.Timeout = [TimeSpan]::FromSeconds(3)
+            $apiResponseStr = $httpClient.GetStringAsync("http://$ip/api/service/system").Result
+
+            if ($apiResponseStr) {
+                $apiResponseObj = $apiResponseStr | ConvertFrom-Json
+                $version = $null
+                if ($apiResponseObj.d3VersionString) {
+                    $version = $apiResponseObj.d3VersionString
+                } elseif ($apiResponseObj.version) {
+                    $version = $apiResponseObj.version
+                }
+
+                if ($version) {
+                    $apiCheck.Passed = $true
+                    $apiCheck.Message = "v$version"
+                    $versionMap[$ip] = $version
+                } else {
+                    $apiCheck.Passed = $true
+                    $apiCheck.Message = "Responded (version unknown)"
+                }
+            } else {
+                $apiCheck.Message = "Empty response"
+            }
+        } catch {
+            $errMsg = $_.Exception.Message
+            # Unwrap AggregateException for cleaner messages
+            if ($_.Exception.InnerException) {
+                $errMsg = $_.Exception.InnerException.Message
+            }
+            $apiCheck.Message = "Unreachable: $errMsg"
+        } finally {
+            if ($httpClient) { $httpClient.Dispose() }
+        }
+        $serverResult.Checks += $apiCheck
+
+        # -------------------------------------------------------------------
+        # Check 3: d3Service running (inferred from API response)
+        # -------------------------------------------------------------------
+        $checkIdx++
+        if ($ProgressCallback) {
+            try { $ProgressCallback.Invoke($ip, $checkIdx, $totalChecks, 'd3Service') } catch {}
+        }
+
+        $serviceCheck = @{ Name = 'd3Service'; Passed = $false; Message = '' }
+        if ($apiCheck.Passed) {
+            # If the API responded, the d3 service is running
+            $serviceCheck.Passed = $true
+            $serviceCheck.Message = "Running (API responsive)"
+        } else {
+            $serviceCheck.Message = "Unknown (API not reachable)"
+        }
+        $serverResult.Checks += $serviceCheck
+
+        # -------------------------------------------------------------------
+        # Check 4: WinRM reachable
+        # -------------------------------------------------------------------
+        $checkIdx++
+        if ($ProgressCallback) {
+            try { $ProgressCallback.Invoke($ip, $checkIdx, $totalChecks, 'WinRM') } catch {}
+        }
+
+        $winrmCheck = @{ Name = 'WinRM'; Passed = $false; Message = '' }
+        try {
+            $wsmanParams = @{
+                ComputerName = $ip
+                ErrorAction  = 'Stop'
+            }
+            if ($Credential) {
+                $wsmanParams.Credential = $Credential
+            }
+            $wsmanResult = Test-WSMan @wsmanParams
+            if ($wsmanResult) {
+                $winrmCheck.Passed = $true
+                $winrmCheck.Message = "OK"
+            } else {
+                $winrmCheck.Message = "No response"
+            }
+        } catch {
+            $winrmCheck.Message = "Failed: $($_.Exception.Message)"
+        }
+        $serverResult.Checks += $winrmCheck
+
+        # -------------------------------------------------------------------
+        # Check 5: SMB share accessible
+        # -------------------------------------------------------------------
+        $checkIdx++
+        if ($ProgressCallback) {
+            try { $ProgressCallback.Invoke($ip, $checkIdx, $totalChecks, 'SMB Share') } catch {}
+        }
+
+        $smbCheck = @{ Name = 'SMB Share'; Passed = $false; Message = '' }
+        try {
+            $sharePath = "\\$ip\d3 Projects"
+            if (Test-Path -Path $sharePath -ErrorAction Stop) {
+                $smbCheck.Passed = $true
+                $smbCheck.Message = "OK ($sharePath accessible)"
+            } else {
+                $smbCheck.Message = "Share not found: $sharePath"
+            }
+        } catch {
+            $smbCheck.Message = "Failed: $($_.Exception.Message)"
+        }
+        $serverResult.Checks += $smbCheck
+
+        # -------------------------------------------------------------------
+        # Check 6: d3Net ports open (7542, 7543 session sync; 80 API)
+        # -------------------------------------------------------------------
+        $checkIdx++
+        if ($ProgressCallback) {
+            try { $ProgressCallback.Invoke($ip, $checkIdx, $totalChecks, 'd3Net Ports') } catch {}
+        }
+
+        $portsCheck = @{ Name = 'd3Net Ports'; Passed = $false; Message = '' }
+        $portsToTest = @(80, 7542, 7543)
+        $openPorts = [System.Collections.ArrayList]::new()
+        $closedPorts = [System.Collections.ArrayList]::new()
+
+        foreach ($port in $portsToTest) {
+            $tcpClient = $null
+            try {
+                $tcpClient = New-Object System.Net.Sockets.TcpClient
+                $tcpClient.SendTimeout = 2000
+                $tcpClient.ReceiveTimeout = 2000
+                $connectTask = $tcpClient.ConnectAsync($ip, $port)
+                $completed = $connectTask.Wait(2000)
+                if ($completed -and $tcpClient.Connected) {
+                    [void]$openPorts.Add($port)
+                } else {
+                    [void]$closedPorts.Add($port)
+                }
+            } catch {
+                [void]$closedPorts.Add($port)
+            } finally {
+                if ($tcpClient) {
+                    $tcpClient.Close()
+                    $tcpClient.Dispose()
+                }
+            }
+        }
+
+        if ($closedPorts.Count -eq 0) {
+            $portsCheck.Passed = $true
+            $portsCheck.Message = "All ports open ($($openPorts -join ', '))"
+        } elseif ($openPorts.Count -gt 0) {
+            # Partial pass: some ports open, some closed
+            $portsCheck.Passed = $false
+            $portsCheck.Message = "Open: $($openPorts -join ', '); Closed: $($closedPorts -join ', ')"
+        } else {
+            $portsCheck.Message = "All ports closed ($($portsToTest -join ', '))"
+        }
+        $serverResult.Checks += $portsCheck
+
+        # -------------------------------------------------------------------
+        # Check 7: Designer version (placeholder - compared after all servers)
+        # -------------------------------------------------------------------
+        $checkIdx++
+        if ($ProgressCallback) {
+            try { $ProgressCallback.Invoke($ip, $checkIdx, $totalChecks, 'Designer Version') } catch {}
+        }
+
+        $versionCheck = @{ Name = 'Designer Version'; Passed = $false; Message = '' }
+        if ($versionMap.ContainsKey($ip)) {
+            $versionCheck.Passed = $true
+            $versionCheck.Message = "v$($versionMap[$ip])"
+        } else {
+            $versionCheck.Message = "Could not determine version (API unavailable)"
+        }
+        $serverResult.Checks += $versionCheck
+
+        $allResults.Results += $serverResult
+    }
+
+    # -----------------------------------------------------------------------
+    # Post-processing: Compare designer versions across all servers
+    # -----------------------------------------------------------------------
+    if ($versionMap.Count -ge 2) {
+        $uniqueVersions = $versionMap.Values | Sort-Object -Unique
+        if ($uniqueVersions.Count -gt 1) {
+            # Version mismatch detected - update the version check for each server
+            $versionWarning = "VERSION MISMATCH across servers: $($uniqueVersions -join ' vs ')"
+            Write-AppLog -Message "Invoke-PreFlightCheck: $versionWarning" -Level 'WARN'
+
+            foreach ($serverResult in $allResults.Results) {
+                $vCheck = $serverResult.Checks | Where-Object { $_.Name -eq 'Designer Version' }
+                if ($vCheck -and $versionMap.ContainsKey($serverResult.Server)) {
+                    $vCheck.Passed = $false
+                    $vCheck.Message = "v$($versionMap[$serverResult.Server]) - MISMATCH ($versionWarning)"
+                }
+            }
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Compute overall pass/fail
+    # -----------------------------------------------------------------------
+    $allResults.AllPassed = $true
+    foreach ($serverResult in $allResults.Results) {
+        $failedChecks = $serverResult.Checks | Where-Object { -not $_.Passed }
+        if ($failedChecks) {
+            $allResults.AllPassed = $false
+        }
+    }
+
+    $passedCount = ($allResults.Results | Where-Object {
+        ($_.Checks | Where-Object { -not $_.Passed }).Count -eq 0
+    }).Count
+    Write-AppLog -Message "Invoke-PreFlightCheck: Complete. $passedCount/$totalServers server(s) passed all checks." -Level 'INFO'
+
+    return $allResults
+}
+
 # ============================================================================
 # UI View Function - Network Deploy
 # ============================================================================
@@ -1488,9 +1950,28 @@ function New-DeployView {
     $scrollContainer.Controls.Add($serversCard)
 
     # ===================================================================
-    # Card 3: Deploy Configuration
+    # Card 3: Validation Tools (NIC Consistency & Pre-Flight Check)
     # ===================================================================
-    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 560 -Width 900 -Height 250
+    $validationCard = New-StyledCard -Title "Validation Tools" -X 20 -Y 560 -Width 900 -Height 105
+
+    $btnValidateNIC = New-StyledButton -Text "Validate NIC Names" -X 15 -Y 45 `
+        -Width 180 -Height 35 -IsPrimary
+
+    $btnPreFlight = New-StyledButton -Text "Pre-Flight Check" -X 210 -Y 45 `
+        -Width 170 -Height 35
+
+    $lblValidationStatus = New-StyledLabel -Text "Run validation checks before deployment" `
+        -X 400 -Y 52 -FontSize 9 -IsMuted
+    $lblValidationStatus.AutoSize = $false
+    $lblValidationStatus.Width = 480
+
+    $validationCard.Controls.AddRange(@($btnValidateNIC, $btnPreFlight, $lblValidationStatus))
+    $scrollContainer.Controls.Add($validationCard)
+
+    # ===================================================================
+    # Card 4: Deploy Configuration
+    # ===================================================================
+    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 675 -Width 900 -Height 250
 
     # --- "Set All To:" bulk profile setter (Task 1)
     # Selecting a profile here propagates it to every row's Profile cell in one shot.
@@ -1567,6 +2048,233 @@ function New-DeployView {
     # ===================================================================
     # Helper: populate the server grid from a results array
     # Used by both scan completion paths.
+    # (defined early so validation handlers can reference $populateGrid)
+
+    # ===================================================================
+    # Event Handlers - Validate NIC Names Button
+    # ===================================================================
+    $btnValidateNIC.Add_Click({
+        $btnValidateNIC.Enabled = $false
+        $lblValidationStatus.Text = "Loading profiles..."
+        $lblValidationStatus.ForeColor = $script:Theme.Accent
+        $lblValidationStatus.Refresh()
+        [System.Windows.Forms.Application]::DoEvents()
+
+        try {
+            $profiles = Get-AllProfiles
+            if (-not $profiles -or $profiles.Count -lt 2) {
+                $lblValidationStatus.Text = "Need at least 2 profiles to compare NIC names. Found $(@($profiles).Count)."
+                $lblValidationStatus.ForeColor = $script:Theme.Warning
+                $btnValidateNIC.Enabled = $true
+                return
+            }
+
+            $lblValidationStatus.Text = "Comparing adapter names across $($profiles.Count) profiles..."
+            $lblValidationStatus.Refresh()
+            [System.Windows.Forms.Application]::DoEvents()
+
+            $nicResult = Test-NICConsistency -Profiles $profiles
+
+            # Build a results message and display in the deploy log
+            $timestamp = Get-Date -Format 'HH:mm:ss'
+            $txtDeployLog.AppendText("`r`n[$timestamp] === NIC Name Consistency Check ===`r`n")
+            $txtDeployLog.AppendText("[$timestamp] Compared $($profiles.Count) profile(s)`r`n")
+
+            if ($nicResult.IsConsistent) {
+                $txtDeployLog.AppendText("[$timestamp] PASSED: All adapter names are consistent across profiles.`r`n")
+                $lblValidationStatus.Text = "NIC check PASSED: All adapter names consistent across $($profiles.Count) profiles."
+                $lblValidationStatus.ForeColor = $script:Theme.Success
+            } else {
+                $warningCount = $nicResult.Warnings.Count
+                $txtDeployLog.AppendText("[$timestamp] WARNING: Found $warningCount inconsistency issue(s):`r`n")
+                foreach ($warning in $nicResult.Warnings) {
+                    $txtDeployLog.AppendText("[$timestamp]   Role: $($warning.Role)`r`n")
+                    $txtDeployLog.AppendText("[$timestamp]     Servers: $($warning.Servers -join ', ')`r`n")
+                    $txtDeployLog.AppendText("[$timestamp]     Names: $($warning.Names -join ', ')`r`n")
+                    $txtDeployLog.AppendText("[$timestamp]     $($warning.Message)`r`n")
+                }
+                $lblValidationStatus.Text = "NIC check: $warningCount warning(s) found. See deploy log for details."
+                $lblValidationStatus.ForeColor = $script:Theme.Warning
+
+                # Also show a summary MessageBox for immediate visibility
+                $summaryLines = @("NIC Name Consistency Check: $warningCount issue(s) found.", "")
+                foreach ($warning in $nicResult.Warnings) {
+                    $summaryLines += "Role: $($warning.Role)"
+                    $summaryLines += "  Servers: $($warning.Servers -join ', ')"
+                    $summaryLines += "  Names: $($warning.Names -join ', ')"
+                    $summaryLines += ""
+                }
+                $summaryLines += "Mismatched adapter names will break sACN/Art-Net multicast."
+                $summaryLines += "Ensure all servers use identical adapter names for each role."
+                [System.Windows.Forms.MessageBox]::Show(
+                    ($summaryLines -join "`n"),
+                    "NIC Name Inconsistencies Detected",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+            }
+            $txtDeployLog.AppendText("[$timestamp] === End NIC Check ===`r`n")
+
+        } catch {
+            $lblValidationStatus.Text = "NIC validation error: $($_.Exception.Message)"
+            $lblValidationStatus.ForeColor = $script:Theme.Error
+            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: NIC validation failed - $($_.Exception.Message)`r`n")
+            Write-AppLog -Message "Validate NIC Names: Error - $_" -Level 'ERROR'
+        } finally {
+            $btnValidateNIC.Enabled = $true
+            $txtDeployLog.ScrollToCaret()
+        }
+    })
+
+    # ===================================================================
+    # Event Handlers - Pre-Flight Check Button
+    # ===================================================================
+    $btnPreFlight.Add_Click({
+        # Collect server IPs from the grid (selected servers, or all if none selected)
+        $targetIPs = [System.Collections.ArrayList]::new()
+        foreach ($row in $dgvServers.Rows) {
+            if ($row.Cells["Select"].Value -eq $true) {
+                [void]$targetIPs.Add($row.Cells["IPAddress"].Value)
+            }
+        }
+
+        # If no servers are selected, use all servers in the grid
+        if ($targetIPs.Count -eq 0) {
+            foreach ($row in $dgvServers.Rows) {
+                $ipVal = $row.Cells["IPAddress"].Value
+                if ($ipVal) {
+                    [void]$targetIPs.Add($ipVal)
+                }
+            }
+        }
+
+        if ($targetIPs.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "No servers available. Run a network scan first to discover servers.",
+                "No Servers",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+            return
+        }
+
+        $btnPreFlight.Enabled = $false
+        $btnValidateNIC.Enabled = $false
+        $lblValidationStatus.Text = "Running pre-flight checks on $($targetIPs.Count) server(s)..."
+        $lblValidationStatus.ForeColor = $script:Theme.Accent
+        $lblValidationStatus.Refresh()
+
+        # Build credential if provided
+        $credential = $null
+        if (-not $chkCurrentCreds.Checked) {
+            $username = $txtUsername.Text.Trim()
+            $password = $txtPassword.Text
+            if (-not [string]::IsNullOrWhiteSpace($username) -and -not [string]::IsNullOrWhiteSpace($password)) {
+                $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+                $credential = New-Object System.Management.Automation.PSCredential($username, $securePassword)
+            }
+            $password = $null
+        }
+
+        $timestamp = Get-Date -Format 'HH:mm:ss'
+        $txtDeployLog.AppendText("`r`n[$timestamp] === Pre-Flight Network Health Check ===`r`n")
+        $txtDeployLog.AppendText("[$timestamp] Checking $($targetIPs.Count) server(s)...`r`n")
+        $txtDeployLog.Refresh()
+        [System.Windows.Forms.Application]::DoEvents()
+
+        try {
+            $progressAction = {
+                param($serverIP, $checkIdx, $totalChecks, $checkName)
+                $lblValidationStatus.Text = "Pre-flight: $serverIP - $checkName ($checkIdx/$totalChecks)"
+                $lblValidationStatus.Refresh()
+                [System.Windows.Forms.Application]::DoEvents()
+            }
+
+            $preFlightResult = Invoke-PreFlightCheck -Servers $targetIPs.ToArray() `
+                -Credential $credential -ProgressCallback $progressAction
+
+            # Display results in the deploy log with status indicators
+            $totalPassed = 0
+            $totalFailed = 0
+            $serversWithIssues = 0
+
+            foreach ($serverResult in $preFlightResult.Results) {
+                $serverIP = $serverResult.Server
+                $failedChecks = @($serverResult.Checks | Where-Object { -not $_.Passed })
+                $passedChecks = @($serverResult.Checks | Where-Object { $_.Passed })
+
+                $serverStatus = if ($failedChecks.Count -eq 0) { "ALL PASSED" } else { "$($failedChecks.Count) FAILED" }
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Server: $serverIP [$serverStatus]`r`n")
+
+                foreach ($check in $serverResult.Checks) {
+                    $icon = if ($check.Passed) { "[OK]  " } else { "[FAIL]" }
+                    $txtDeployLog.AppendText("    $icon $($check.Name): $($check.Message)`r`n")
+
+                    if ($check.Passed) { $totalPassed++ } else { $totalFailed++ }
+                }
+
+                if ($failedChecks.Count -gt 0) { $serversWithIssues++ }
+
+                $txtDeployLog.Refresh()
+                [System.Windows.Forms.Application]::DoEvents()
+            }
+
+            # Summary line
+            $totalChecks = $totalPassed + $totalFailed
+            $passedServers = $preFlightResult.Results.Count - $serversWithIssues
+            $summaryMsg = "Pre-flight: $passedServers/$($preFlightResult.Results.Count) servers passed all checks."
+            if ($serversWithIssues -gt 0) {
+                $summaryMsg += " $serversWithIssues server(s) have issues."
+            }
+
+            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $summaryMsg`r`n")
+            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] === End Pre-Flight Check ===`r`n")
+
+            if ($preFlightResult.AllPassed) {
+                $lblValidationStatus.Text = $summaryMsg
+                $lblValidationStatus.ForeColor = $script:Theme.Success
+            } else {
+                $lblValidationStatus.Text = $summaryMsg
+                $lblValidationStatus.ForeColor = $script:Theme.Warning
+            }
+
+            # Show a summary dialog with the check matrix
+            $dialogLines = @($summaryMsg, "")
+            foreach ($serverResult in $preFlightResult.Results) {
+                $failedChecks = @($serverResult.Checks | Where-Object { -not $_.Passed })
+                $status = if ($failedChecks.Count -eq 0) { "PASS" } else { "ISSUES ($($failedChecks.Count))" }
+                $dialogLines += "$($serverResult.Server): $status"
+                foreach ($check in $serverResult.Checks) {
+                    $mark = if ($check.Passed) { "[OK]" } else { "[!!]" }
+                    $dialogLines += "  $mark $($check.Name): $($check.Message)"
+                }
+                $dialogLines += ""
+            }
+
+            $dialogIcon = if ($preFlightResult.AllPassed) {
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            } else {
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            }
+
+            [System.Windows.Forms.MessageBox]::Show(
+                ($dialogLines -join "`n"),
+                "Pre-Flight Check Results",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                $dialogIcon) | Out-Null
+
+        } catch {
+            $lblValidationStatus.Text = "Pre-flight error: $($_.Exception.Message)"
+            $lblValidationStatus.ForeColor = $script:Theme.Error
+            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Pre-flight check failed - $($_.Exception.Message)`r`n")
+            Write-AppLog -Message "Pre-Flight Check: Error - $_" -Level 'ERROR'
+        } finally {
+            $btnPreFlight.Enabled = $true
+            $btnValidateNIC.Enabled = $true
+            $txtDeployLog.ScrollToCaret()
+        }
+    })
+
+    # ===================================================================
+    # Event Handlers - Scan Network Button
     # ===================================================================
     $populateGrid = {
         param([array]$ScanResults)
