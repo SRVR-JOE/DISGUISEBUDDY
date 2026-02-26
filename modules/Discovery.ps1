@@ -439,6 +439,14 @@ function Get-RemoteServerInfo {
         [string]$IPAddress
     )
 
+    # Validate IPv4 format before constructing HTTP URL
+    $parsedIP = $null
+    if (-not ([System.Net.IPAddress]::TryParse($IPAddress, [ref]$parsedIP)) -or
+        $parsedIP.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        Write-AppLog -Message "Get-RemoteServerInfo: Rejected non-IPv4 input '$IPAddress'" -Level 'WARN'
+        return $null
+    }
+
     $httpClient = $null
     try {
         $httpClient = New-Object System.Net.Http.HttpClient
@@ -927,7 +935,9 @@ function Find-DisguiseServersDNSSD {
         try {
             $addresses = [System.Net.Dns]::GetHostAddresses($Hostname) |
                 Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork }
-            return ($addresses | Select-Object -First 1)?.IPAddressToString
+            $first = $addresses | Select-Object -First 1
+            if ($first) { return $first.IPAddressToString }
+            return $null
         } catch {
             return $null
         }
@@ -1311,6 +1321,20 @@ function Invoke-PreFlightCheck {
 
     foreach ($ip in $Servers) {
         $serverIdx++
+
+        # Validate IPv4 format before any network operations
+        $parsedPF = $null
+        if (-not ([System.Net.IPAddress]::TryParse($ip, [ref]$parsedPF)) -or
+            $parsedPF.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+            Write-AppLog -Message "Invoke-PreFlightCheck: Skipping non-IPv4 input '$ip'" -Level 'WARN'
+            $allResults.Results += @{
+                Server = $ip
+                Checks = @(@{ Name = 'Validation'; Passed = $false; Message = "Invalid IPv4 format: $ip" })
+            }
+            $allResults.AllPassed = $false
+            continue
+        }
+
         $serverResult = @{
             Server = $ip
             Checks = @()
@@ -1847,6 +1871,7 @@ function New-DeployView {
                                 $secPass = ConvertTo-SecureString $txtPassword.Text -AsPlainText -Force
                                 $cred = New-Object System.Management.Automation.PSCredential($txtUsername.Text, $secPass)
                                 $secPass = $null
+                                $txtPassword.Text = ''
                             }
                             $pushResult = Push-ProfileToServer -ServerIP $ip -Profile $profileObj -Credential $cred
                             foreach ($step in $pushResult.Steps) {
@@ -1893,7 +1918,7 @@ function New-DeployView {
     $btnRefreshServers = New-StyledButton -Text "Refresh" -X 245 -Y 235 -Width 100 -Height 30
     $btnRefreshServers.Add_Click({
         # Re-populate the grid from the last cached scan results
-        if ($script:AppState.LastScanResults.Count -gt 0) {
+        if ($script:AppState.LastScanResults -and $script:AppState.LastScanResults.Count -gt 0) {
             $dgvServers.Rows.Clear()
             foreach ($server in $script:AppState.LastScanResults) {
                 $statusText = if ($server.IsDisguise) { "Disguise" }
@@ -2172,6 +2197,7 @@ function New-DeployView {
                 $credential = New-Object System.Management.Automation.PSCredential($username, $securePassword)
             }
             $password = $null
+            $txtPassword.Text = ''
         }
 
         $timestamp = Get-Date -Format 'HH:mm:ss'
@@ -2311,7 +2337,7 @@ function New-DeployView {
     # Arguments passed via RunWorkerAsync are available in $e.Argument.
     $scanWorker.Add_DoWork({
         param($sender, $e)
-        $args       = $e.Argument           # hashtable: SubnetBase, StartIP, EndIP, TimeoutMs
+        $scanArgs   = $e.Argument             # hashtable: SubnetBase, StartIP, EndIP, TimeoutMs
         $worker     = $sender               # reference to the BackgroundWorker itself
 
         $progressCb = {
@@ -2324,16 +2350,16 @@ function New-DeployView {
 
         try {
             $results = Find-DisguiseServers `
-                -SubnetBase  $args.SubnetBase  `
-                -StartIP     $args.StartIP     `
-                -EndIP       $args.EndIP       `
-                -TimeoutMs   $args.TimeoutMs   `
+                -SubnetBase  $scanArgs.SubnetBase  `
+                -StartIP     $scanArgs.StartIP     `
+                -EndIP       $scanArgs.EndIP       `
+                -TimeoutMs   $scanArgs.TimeoutMs   `
                 -ProgressCallback $progressCb
 
             if ($worker.CancellationPending) {
                 $e.Cancel = $true
-                # Return whatever partial results Find-DisguiseServers stored in AppState
-                $e.Result = $script:AppState.LastScanResults
+                # Return the local partial results (not shared state — avoids cross-thread race)
+                $e.Result = $results
             } else {
                 $e.Result = $results
             }
@@ -2361,6 +2387,7 @@ function New-DeployView {
         # Re-enable scan controls
         $btnScanNetwork.Enabled = $true
         $btnQuickScan.Enabled   = $true
+        $btnDNSSD.Enabled       = $true
         $btnCancelScan.Enabled  = $false
 
         if ($e.Cancelled) {
@@ -2432,6 +2459,7 @@ function New-DeployView {
         # Update UI state for scanning
         $btnScanNetwork.Enabled  = $false
         $btnQuickScan.Enabled    = $false
+        $btnDNSSD.Enabled        = $false
         $btnCancelScan.Enabled   = $true
         $lblScanStatus.Text      = "Scanning $subnet.$startIP - $subnet.$endIP ..."
         $lblScanStatus.ForeColor = $script:Theme.Accent
@@ -2469,8 +2497,16 @@ function New-DeployView {
         $subnet = $txtSubnet.Text.Trim()
         if ([string]::IsNullOrWhiteSpace($subnet)) { $subnet = "10.0.0" }
 
+        # Validate subnet format (same check as full scan)
+        if ($subnet -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+            $lblScanStatus.Text      = "Invalid subnet format. Use 'X.X.X' (e.g. '10.0.0')."
+            $lblScanStatus.ForeColor = $script:Theme.Error
+            return
+        }
+
         $btnScanNetwork.Enabled  = $false
         $btnQuickScan.Enabled    = $false
+        $btnDNSSD.Enabled        = $false
         $btnCancelScan.Enabled   = $false   # quick scan is not cancellable
         $lblScanStatus.Text      = "Quick scan on common IPs..."
         $lblScanStatus.ForeColor = $script:Theme.Accent
@@ -2529,6 +2565,7 @@ function New-DeployView {
         } finally {
             $btnScanNetwork.Enabled = $true
             $btnQuickScan.Enabled   = $true
+            $btnDNSSD.Enabled       = $true
         }
     })
 
@@ -2594,6 +2631,7 @@ function New-DeployView {
             $btnScanNetwork.Enabled = $true
             $btnQuickScan.Enabled   = $true
             $btnDNSSD.Enabled       = $true
+            $btnCancelScan.Enabled  = $false   # DNS-SD is not cancellable
         }
     })
 
@@ -2668,77 +2706,79 @@ function New-DeployView {
         $successCount  = 0
         $lastSuccessProfile = $null
 
-        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting deployment to $totalServers server(s)...`r`n")
-        $txtDeployLog.Refresh()
-
-        foreach ($target in $selectedTargets) {
-            $currentIdx++
-            $serverIP    = $target.IP
-            $profileName = $target.ProfileName
-
-            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] [$currentIdx/$totalServers] $serverIP <- '$profileName'...`r`n")
+        try {
+            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting deployment to $totalServers server(s)...`r`n")
             $txtDeployLog.Refresh()
-            $deployProgressBar.Value = [int](($currentIdx / $totalServers) * 100)
-            $deployProgressBar.Refresh()
-            [System.Windows.Forms.Application]::DoEvents()
 
-            # Load this target's specific profile
-            $profileObj = $null
-            try {
-                $profileObj = Get-Profile -Name $profileName
-            } catch {
-                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   ERROR: Could not load profile '$profileName': $_`r`n")
+            foreach ($target in $selectedTargets) {
+                $currentIdx++
+                $serverIP    = $target.IP
+                $profileName = $target.ProfileName
+
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] [$currentIdx/$totalServers] $serverIP <- '$profileName'...`r`n")
                 $txtDeployLog.Refresh()
-                continue
-            }
+                $deployProgressBar.Value = [int](($currentIdx / $totalServers) * 100)
+                $deployProgressBar.Refresh()
+                [System.Windows.Forms.Application]::DoEvents()
 
-            if (-not $profileObj) {
-                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   ERROR: Profile '$profileName' not found.`r`n")
+                # Load this target's specific profile
+                $profileObj = $null
+                try {
+                    $profileObj = Get-Profile -Name $profileName
+                } catch {
+                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   ERROR: Could not load profile '$profileName': $_`r`n")
+                    $txtDeployLog.Refresh()
+                    continue
+                }
+
+                if (-not $profileObj) {
+                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   ERROR: Profile '$profileName' not found.`r`n")
+                    $txtDeployLog.Refresh()
+                    continue
+                }
+
+                try {
+                    $pushParams = @{
+                        ServerIP = $serverIP
+                        Profile  = $profileObj
+                    }
+                    if ($credential) {
+                        $pushParams.Credential = $credential
+                    }
+
+                    $pushResult = Push-ProfileToServer @pushParams
+
+                    foreach ($step in $pushResult.Steps) {
+                        $stepStatus = if ($step.Success) { "OK" } else { "FAILED" }
+                        $txtDeployLog.AppendText("    $($step.StepName): $stepStatus - $($step.Message)`r`n")
+                    }
+
+                    if ($pushResult.Success) {
+                        $successCount++
+                        $lastSuccessProfile = $profileObj.Name
+                        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   $serverIP: Deployment SUCCEEDED`r`n")
+                    } else {
+                        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   $serverIP: Deployment FAILED - $($pushResult.ErrorMessage)`r`n")
+                    }
+                } catch {
+                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   $serverIP: EXCEPTION - $_`r`n")
+                }
+
                 $txtDeployLog.Refresh()
-                continue
+                [System.Windows.Forms.Application]::DoEvents()
             }
 
-            try {
-                $pushParams = @{
-                    ServerIP = $serverIP
-                    Profile  = $profileObj
-                }
-                if ($credential) {
-                    $pushParams.Credential = $credential
-                }
+            $deployProgressBar.Value = 100
+            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Deployment complete: $successCount/$totalServers succeeded.`r`n")
+            $txtDeployLog.AppendText("------------------------------------------------------------`r`n")
 
-                $pushResult = Push-ProfileToServer @pushParams
-
-                foreach ($step in $pushResult.Steps) {
-                    $stepStatus = if ($step.Success) { "OK" } else { "FAILED" }
-                    $txtDeployLog.AppendText("    $($step.StepName): $stepStatus - $($step.Message)`r`n")
-                }
-
-                if ($pushResult.Success) {
-                    $successCount++
-                    $lastSuccessProfile = $profileObj.Name
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   $serverIP: Deployment SUCCEEDED`r`n")
-                } else {
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   $serverIP: Deployment FAILED - $($pushResult.ErrorMessage)`r`n")
-                }
-            } catch {
-                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   $serverIP: EXCEPTION - $_`r`n")
+            # Track the last successfully deployed profile in app state
+            if ($lastSuccessProfile) {
+                $script:AppState.LastAppliedProfile = $lastSuccessProfile
             }
-
-            $txtDeployLog.Refresh()
-            [System.Windows.Forms.Application]::DoEvents()
+        } finally {
+            $btnDeploy.Enabled = $true
         }
-
-        $deployProgressBar.Value = 100
-        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Deployment complete: $successCount/$totalServers succeeded.`r`n")
-        $txtDeployLog.AppendText("------------------------------------------------------------`r`n")
-
-        # Track the last successfully deployed profile in app state
-        if ($lastSuccessProfile) {
-            $script:AppState.LastAppliedProfile = $lastSuccessProfile
-        }
-
-        $btnDeploy.Enabled = $true
     })
 
     # ===================================================================
@@ -2782,6 +2822,12 @@ function New-DeployView {
     # ===================================================================
     $scrollContainer.ResumeLayout($true)
     $ContentPanel.Controls.Add($scrollContainer)
+
+    # Expose key controls for keyboard shortcut support (F5, Ctrl+Enter)
+    $script:DeployViewActions = @{
+        ScanButton   = $btnScanNetwork
+        DeployButton = $btnDeploy
+    }
 
     # Resume layout now that all controls have been added
     $ContentPanel.ResumeLayout($true)

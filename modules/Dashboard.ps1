@@ -142,6 +142,23 @@ function Get-DisguiseServerDetails {
         [int]$Port = 80
     )
 
+    # Validate IPv4 format and octet bounds to prevent SSRF via crafted hostnames/URLs
+    $parsedIP = $null
+    if (-not ([System.Net.IPAddress]::TryParse($IPAddress, [ref]$parsedIP)) -or
+        $parsedIP.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        Write-AppLog -Message "Get-DisguiseServerDetails: Rejected non-IPv4 input '$IPAddress'" -Level 'WARN'
+        return [PSCustomObject]@{
+            IPAddress       = $IPAddress
+            Version         = 'Invalid IP'
+            NICEnabled      = 'N/A'
+            NICDisconnected = 'N/A'
+            GPUOutputs      = 'N/A'
+            ProjectCount    = 'N/A'
+            ProjectNames    = @()
+            APIReachable    = $false
+        }
+    }
+
     # Build the base URL once — use the discovered port, not a hardcoded 80
     $baseUrl = if ($Port -eq 80) { "http://$IPAddress" } else { "http://$IPAddress`:$Port" }
 

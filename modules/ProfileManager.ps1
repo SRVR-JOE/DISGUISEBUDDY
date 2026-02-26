@@ -395,6 +395,14 @@ function Save-Profile {
     $safeName = $Profile.Name -replace '[\\/:*?"<>|]', '_'
     $filePath = Join-Path -Path $profilesDir -ChildPath "$safeName.json"
 
+    # Path boundary check — ensure resolved path stays inside profiles directory
+    $resolvedPath = [System.IO.Path]::GetFullPath($filePath)
+    $resolvedDir  = [System.IO.Path]::GetFullPath($profilesDir)
+    if (-not $resolvedPath.StartsWith($resolvedDir, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-AppLog "Save-Profile: Path traversal blocked for '$($Profile.Name)' (resolved to '$resolvedPath')" -Level 'ERROR'
+        throw "Invalid profile name — path traversal detected."
+    }
+
     try {
         $json = $Profile | ConvertTo-Json -Depth 10
         Set-Content -Path $filePath -Value $json -Encoding UTF8 -Force
@@ -2342,7 +2350,24 @@ function Import-RigBundle {
         $tempDir = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath "DisguiseBuddy_RigImport_$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
         New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
 
-        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $tempDir)
+        # Per-entry extraction with Zip Slip protection (validate before writing)
+        $resolvedTempDir = [System.IO.Path]::GetFullPath($tempDir)
+        $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+        try {
+            foreach ($entry in $zipArchive.Entries) {
+                if ([string]::IsNullOrWhiteSpace($entry.Name)) { continue }  # skip directory entries
+                $destPath = [System.IO.Path]::GetFullPath((Join-Path $tempDir $entry.FullName))
+                if (-not $destPath.StartsWith($resolvedTempDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    Write-AppLog "Import-RigBundle: Zip Slip blocked — '$($entry.FullName)' escapes temp dir. Aborting." -Level 'ERROR'
+                    return [PSCustomObject]@{ Success = $false; Message = "Archive contains unsafe path: $($entry.FullName)"; ImportedCount = 0; SkippedCount = 0 }
+                }
+                $destDir = [System.IO.Path]::GetDirectoryName($destPath)
+                if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destPath, $true)
+            }
+        } finally {
+            $zipArchive.Dispose()
+        }
 
         # Find all .json files in the extracted content (including subdirectories)
         $extractedFiles = @(Get-ChildItem -Path $tempDir -Filter '*.json' -File -Recurse -ErrorAction SilentlyContinue)
