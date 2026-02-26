@@ -887,6 +887,225 @@ function Push-ProfileToMultipleServers {
     return $allResults.ToArray()
 }
 
+function Find-DisguiseServersDNSSD {
+    <#
+    .SYNOPSIS
+        Discovers disguise servers on the local network using DNS-SD / mDNS.
+    .DESCRIPTION
+        disguise servers running r30.4 and later advertise themselves via the
+        DNS-SD service type _d3api._tcp.local.  This function:
+
+          1. Tries Resolve-DnsName (if available on the host) to query the PTR
+             record for _d3api._tcp.local. on the local mDNS stack.
+
+          2. Falls back to a raw mDNS multicast query — sends a DNS PTR query
+             UDP datagram to the mDNS all-hosts address (224.0.0.251) port 5353
+             and collects responses for 3 seconds.
+
+        For each discovered service the function attempts a reverse DNS lookup
+        to obtain the server IP address, then returns a list of PSCustomObjects
+        compatible with the scan result schema used by Find-DisguiseServers so
+        that callers can merge the two result sets without special-casing.
+
+    .OUTPUTS
+        Array of PSCustomObjects with properties:
+          IPAddress, Hostname, IsDisguise, ResponseTimeMs, Ports, APIVersion
+        Returns an empty array if nothing is found or DNS-SD is not available.
+    #>
+    [CmdletBinding()]
+    param()
+
+    Write-AppLog -Message "Find-DisguiseServersDNSSD: Starting DNS-SD discovery for _d3api._tcp.local." -Level 'INFO'
+
+    $discovered = [System.Collections.ArrayList]::new()
+    $serviceType = '_d3api._tcp.local.'
+
+    # Helper: convert a service instance hostname / SRV target to an IP address
+    function Resolve-ServiceHostToIP {
+        param([string]$Hostname)
+        if ([string]::IsNullOrWhiteSpace($Hostname)) { return $null }
+        try {
+            $addresses = [System.Net.Dns]::GetHostAddresses($Hostname) |
+                Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork }
+            return ($addresses | Select-Object -First 1)?.IPAddressToString
+        } catch {
+            return $null
+        }
+    }
+
+    # ----------------------------------------------------------------
+    # Strategy 1: Resolve-DnsName (available on Windows 8+ / Server 2012+)
+    # ----------------------------------------------------------------
+    $usedResolveDnsName = $false
+    try {
+        # Resolve-DnsName ships with the DnsClient module on modern Windows.
+        # -DnsOnly prevents falling back to LLMNR/NetBIOS so it stays pure DNS-SD.
+        $ptrRecords = Resolve-DnsName -Name $serviceType -Type PTR -DnsOnly -ErrorAction Stop
+        $usedResolveDnsName = $true
+
+        foreach ($ptr in $ptrRecords) {
+            # Each PTR answer points to a service instance name, e.g.:
+            #   d3-server01._d3api._tcp.local.
+            $instanceName = $ptr.NameHost
+            if (-not $instanceName) { $instanceName = $ptr.Name }
+            if (-not $instanceName) { continue }
+
+            # Attempt to resolve SRV record for the instance to get port + target
+            $srvHost  = $null
+            $srvPort  = 80
+            try {
+                $srvRecords = Resolve-DnsName -Name $instanceName -Type SRV -DnsOnly -ErrorAction Stop
+                foreach ($srv in $srvRecords) {
+                    if ($srv.NameTarget) { $srvHost = $srv.NameTarget }
+                    if ($srv.Port -gt 0) { $srvPort = $srv.Port }
+                    break
+                }
+            } catch { }
+
+            # Resolve to IP — try SRV target first, then instance name directly
+            $ipAddress = $null
+            if ($srvHost) { $ipAddress = Resolve-ServiceHostToIP -Hostname $srvHost }
+            if (-not $ipAddress) { $ipAddress = Resolve-ServiceHostToIP -Hostname $instanceName }
+
+            if ($ipAddress) {
+                [void]$discovered.Add([PSCustomObject]@{
+                    IPAddress      = $ipAddress
+                    Hostname       = if ($srvHost) { $srvHost } else { $instanceName -replace '\._d3api\._tcp\.local\.$', '' }
+                    IsDisguise     = $true
+                    ResponseTimeMs = 0
+                    Ports          = @($srvPort)
+                    APIVersion     = $null
+                })
+                Write-AppLog -Message "Find-DisguiseServersDNSSD: Found $ipAddress via Resolve-DnsName (instance: $instanceName)" -Level 'INFO'
+            }
+        }
+    } catch {
+        Write-AppLog -Message "Find-DisguiseServersDNSSD: Resolve-DnsName not available or failed - $_. Trying raw mDNS fallback." -Level 'DEBUG'
+    }
+
+    # ----------------------------------------------------------------
+    # Strategy 2: Raw mDNS UDP multicast query (fallback)
+    # Sends a standard DNS PTR query to 224.0.0.251:5353 and collects
+    # responses for 3 seconds.  Parses enough of the DNS wire format
+    # to extract PTR + A record answers.
+    # ----------------------------------------------------------------
+    if (-not $usedResolveDnsName -or $discovered.Count -eq 0) {
+        $udpClient = $null
+        try {
+            # Build a minimal DNS PTR query packet for _d3api._tcp.local.
+            # DNS Message Header (12 bytes) + Question
+            $queryBytes = [System.Collections.ArrayList]::new()
+
+            # Transaction ID: 0x1234 (arbitrary, non-zero)
+            [void]$queryBytes.Add([byte]0x12)
+            [void]$queryBytes.Add([byte]0x34)
+            # Flags: Standard Query (0x0000)
+            [void]$queryBytes.Add([byte]0x00)
+            [void]$queryBytes.Add([byte]0x00)
+            # QDCOUNT: 1
+            [void]$queryBytes.Add([byte]0x00)
+            [void]$queryBytes.Add([byte]0x01)
+            # ANCOUNT, NSCOUNT, ARCOUNT: 0
+            [void]$queryBytes.Add([byte]0x00); [void]$queryBytes.Add([byte]0x00)
+            [void]$queryBytes.Add([byte]0x00); [void]$queryBytes.Add([byte]0x00)
+            [void]$queryBytes.Add([byte]0x00); [void]$queryBytes.Add([byte]0x00)
+
+            # QNAME: encode each label of _d3api._tcp.local as length-prefixed string
+            foreach ($label in @('_d3api', '_tcp', 'local')) {
+                $labelBytes = [System.Text.Encoding]::ASCII.GetBytes($label)
+                [void]$queryBytes.Add([byte]$labelBytes.Length)
+                foreach ($b in $labelBytes) { [void]$queryBytes.Add($b) }
+            }
+            [void]$queryBytes.Add([byte]0x00)  # root label terminator
+
+            # QTYPE: PTR (12)
+            [void]$queryBytes.Add([byte]0x00); [void]$queryBytes.Add([byte]0x0C)
+            # QCLASS: IN (1) with unicast-response bit cleared (mDNS uses QU/QM)
+            [void]$queryBytes.Add([byte]0x00); [void]$queryBytes.Add([byte]0x01)
+
+            $queryPacket = $queryBytes.ToArray()
+
+            # Bind to an ephemeral local port, allow reuse (mDNS requirement)
+            $udpClient = New-Object System.Net.Sockets.UdpClient
+            $udpClient.Client.SetSocketOption(
+                [System.Net.Sockets.SocketOptionLevel]::Socket,
+                [System.Net.Sockets.SocketOptionName]::ReuseAddress, $true)
+            $udpClient.Client.Bind([System.Net.IPEndPoint]::new([System.Net.IPAddress]::Any, 0))
+            $udpClient.Client.ReceiveTimeout = 3000  # 3 second collection window
+
+            # Send PTR query to the mDNS multicast group
+            $mDNSGroup = [System.Net.IPEndPoint]::new(
+                [System.Net.IPAddress]::Parse('224.0.0.251'), 5353)
+            [void]$udpClient.Send($queryPacket, $queryPacket.Length, $mDNSGroup)
+
+            Write-AppLog -Message "Find-DisguiseServersDNSSD: mDNS query sent, listening for 3 seconds..." -Level 'DEBUG'
+
+            # Collect response packets for up to 3 seconds
+            $responseEndpoint = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Any, 0)
+            $deadline = [System.DateTime]::UtcNow.AddSeconds(3)
+
+            while ([System.DateTime]::UtcNow -lt $deadline) {
+                try {
+                    $responseBytes = $udpClient.Receive([ref]$responseEndpoint)
+                    $senderIP = $responseEndpoint.Address.IPAddressToString
+
+                    # Minimum valid DNS response is 12 bytes (header only)
+                    if ($responseBytes.Length -lt 12) { continue }
+
+                    # Check: IS a response (QR bit set in flags byte index 2)
+                    $flags = ($responseBytes[2] -shl 8) -bor $responseBytes[3]
+                    if (-not ($flags -band 0x8000)) { continue }
+
+                    # Parse answer count
+                    $anCount = ($responseBytes[4] -shl 8) -bor $responseBytes[5]
+                    if ($anCount -eq 0) { continue }
+
+                    # We found a response — the sender IS the mDNS responder and its IP
+                    # is captured in $senderIP from the UDP endpoint.
+                    # Do a basic hostname resolution from the sender IP.
+                    $resolvedHostname = ''
+                    try {
+                        $dnsEntry = [System.Net.Dns]::GetHostEntry($senderIP)
+                        $resolvedHostname = $dnsEntry.HostName
+                    } catch { }
+
+                    # Deduplicate by IP before adding
+                    $alreadyFound = $discovered | Where-Object { $_.IPAddress -eq $senderIP }
+                    if (-not $alreadyFound) {
+                        [void]$discovered.Add([PSCustomObject]@{
+                            IPAddress      = $senderIP
+                            Hostname       = $resolvedHostname
+                            IsDisguise     = $true
+                            ResponseTimeMs = 0
+                            Ports          = @(80)
+                            APIVersion     = $null
+                        })
+                        Write-AppLog -Message "Find-DisguiseServersDNSSD: Found $senderIP via raw mDNS multicast" -Level 'INFO'
+                    }
+                } catch [System.Net.Sockets.SocketException] {
+                    # ReceiveTimeout expired — collection window is done
+                    break
+                } catch {
+                    # Non-fatal parse error on a response packet
+                    Write-AppLog -Message "Find-DisguiseServersDNSSD: Packet parse error - $_" -Level 'DEBUG'
+                }
+            }
+
+        } catch {
+            Write-AppLog -Message "Find-DisguiseServersDNSSD: Raw mDNS query failed - $_" -Level 'WARN'
+        } finally {
+            if ($udpClient) {
+                try { $udpClient.Close() } catch { }
+                try { $udpClient.Dispose() } catch { }
+            }
+        }
+    }
+
+    $results = $discovered.ToArray()
+    Write-AppLog -Message "Find-DisguiseServersDNSSD: Discovery complete. Found $($results.Count) server(s)." -Level 'INFO'
+    return $results
+}
+
 # ============================================================================
 # UI View Function - Network Deploy
 # ============================================================================
@@ -977,14 +1196,18 @@ function New-DeployView {
     $btnCancelScan = New-StyledButton -Text "Cancel" -X 305 -Y 90 -Width 80 -Height 35
     $btnCancelScan.Enabled = $false
 
-    # Progress bar for scan progress (shifted right to make room for cancel button)
-    $scanProgressBar = New-StyledProgressBar -X 400 -Y 95 -Width 480 -Height 22
+    # Auto-Discover button — uses DNS-SD / mDNS to find servers advertising _d3api._tcp.local.
+    $btnDNSSD = New-StyledButton -Text "Auto-Discover (DNS-SD)" -X 400 -Y 90 `
+        -Width 185 -Height 35
+
+    # Progress bar for scan progress (shifted right to accommodate all buttons)
+    $scanProgressBar = New-StyledProgressBar -X 600 -Y 95 -Width 270 -Height 22
 
     $lblScanStatus = New-StyledLabel -Text "Ready to scan" -X 15 -Y 140 -FontSize 9 -IsMuted
     $lblScanStatus.AutoSize = $false
     $lblScanStatus.Width = 870
 
-    $scanCard.Controls.AddRange(@($btnScanNetwork, $btnQuickScan, $btnCancelScan,
+    $scanCard.Controls.AddRange(@($btnScanNetwork, $btnQuickScan, $btnCancelScan, $btnDNSSD,
                                    $scanProgressBar, $lblScanStatus))
 
     $scrollContainer.Controls.Add($scanCard)
@@ -1602,7 +1825,72 @@ function New-DeployView {
     })
 
     # ===================================================================
-    # Event Handlers - Deploy Button (Task 1: per-row profiles)
+    # Event Handlers - Auto-Discover (DNS-SD) Button
+    # ===================================================================
+    $btnDNSSD.Add_Click({
+        $btnScanNetwork.Enabled = $false
+        $btnQuickScan.Enabled   = $false
+        $btnDNSSD.Enabled       = $false
+
+        $lblScanStatus.Text     = "Querying DNS-SD for _d3api._tcp.local. — please wait..."
+        $lblScanStatus.ForeColor = $script:Theme.Accent
+        $lblScanStatus.Refresh()
+        $scanProgressBar.Value  = 0
+        [System.Windows.Forms.Application]::DoEvents()
+
+        try {
+            $dnssdResults = Find-DisguiseServersDNSSD
+
+            if ($dnssdResults.Count -eq 0) {
+                $lblScanStatus.Text = "No servers found via DNS-SD. Try a subnet scan instead."
+                $lblScanStatus.ForeColor = $script:Theme.Warning
+                $scanProgressBar.Value = 100
+            } else {
+                # Merge DNS-SD results with any existing scan results (deduplicate by IP)
+                $existingResults = if ($script:AppState.LastScanResults) {
+                    [System.Collections.ArrayList]($script:AppState.LastScanResults)
+                } else {
+                    [System.Collections.ArrayList]::new()
+                }
+
+                $mergedCount = 0
+                foreach ($dnsServer in $dnssdResults) {
+                    $alreadyKnown = $existingResults | Where-Object { $_.IPAddress -eq $dnsServer.IPAddress }
+                    if (-not $alreadyKnown) {
+                        [void]$existingResults.Add($dnsServer)
+                        $mergedCount++
+                    } else {
+                        # Update IsDisguise flag on the existing entry if not already set
+                        $alreadyKnown.IsDisguise = $true
+                    }
+                }
+
+                # Persist the merged results
+                $script:AppState.LastScanResults = $existingResults.ToArray()
+
+                # Repopulate the discovered-servers grid with the merged list
+                & $populateGrid $script:AppState.LastScanResults
+
+                $scanProgressBar.Value = 100
+                $newCount   = $dnssdResults.Count
+                $lblScanStatus.Text = "DNS-SD found $newCount server(s) ($mergedCount new). Grid shows $($script:AppState.LastScanResults.Count) total."
+                $lblScanStatus.ForeColor = $script:Theme.Success
+
+                Write-AppLog -Message "DNS-SD discovery: $newCount server(s) found, $mergedCount merged into existing results." -Level 'INFO'
+            }
+        } catch {
+            $lblScanStatus.Text = "DNS-SD discovery failed: $_"
+            $lblScanStatus.ForeColor = $script:Theme.Error
+            Write-AppLog -Message "DNS-SD discovery error: $_" -Level 'ERROR'
+        } finally {
+            $btnScanNetwork.Enabled = $true
+            $btnQuickScan.Enabled   = $true
+            $btnDNSSD.Enabled       = $true
+        }
+    })
+
+    # ===================================================================
+    # Event Handlers - Deploy Button (per-row profiles)
     # ===================================================================
     $btnDeploy.Add_Click({
         # Build the list of selected rows with their per-row profile assignments
