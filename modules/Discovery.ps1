@@ -914,6 +914,13 @@ function New-DeployView {
     # Suspend layout to prevent flicker during UI construction
     $ContentPanel.SuspendLayout()
 
+    # ===================================================================
+    # BackgroundWorker for non-blocking network scan (Task 2)
+    # ===================================================================
+    $scanWorker = New-Object System.ComponentModel.BackgroundWorker
+    $scanWorker.WorkerReportsProgress      = $true
+    $scanWorker.WorkerSupportsCancellation = $true
+
     # Create a scrollable container for the entire view
     $scrollContainer = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
     $scrollContainer.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
@@ -959,21 +966,26 @@ function New-DeployView {
     $scanCard.Controls.AddRange(@($lblSubnet, $txtSubnet, $lblStartIP, $txtStartIP,
                                    $lblEndIP, $txtEndIP, $lblTimeout, $txtTimeout))
 
-    # --- Row 2: Scan buttons, progress bar, and status label ---
+    # --- Row 2: Scan buttons, progress bar, status label, and cancel button ---
     $btnScanNetwork = New-StyledButton -Text "Scan Network" -X 15 -Y 90 `
         -Width 140 -Height 35 -IsPrimary
 
     $btnQuickScan = New-StyledButton -Text "Quick Scan" -X 170 -Y 90 `
         -Width 120 -Height 35
 
-    # Progress bar for scan progress (styled)
-    $scanProgressBar = New-StyledProgressBar -X 310 -Y 95 -Width 350 -Height 22
+    # Cancel button — only enabled while a background scan is running
+    $btnCancelScan = New-StyledButton -Text "Cancel" -X 305 -Y 90 -Width 80 -Height 35
+    $btnCancelScan.Enabled = $false
+
+    # Progress bar for scan progress (shifted right to make room for cancel button)
+    $scanProgressBar = New-StyledProgressBar -X 400 -Y 95 -Width 480 -Height 22
 
     $lblScanStatus = New-StyledLabel -Text "Ready to scan" -X 15 -Y 140 -FontSize 9 -IsMuted
     $lblScanStatus.AutoSize = $false
     $lblScanStatus.Width = 870
 
-    $scanCard.Controls.AddRange(@($btnScanNetwork, $btnQuickScan, $scanProgressBar, $lblScanStatus))
+    $scanCard.Controls.AddRange(@($btnScanNetwork, $btnQuickScan, $btnCancelScan,
+                                   $scanProgressBar, $lblScanStatus))
 
     $scrollContainer.Controls.Add($scanCard)
 
@@ -985,7 +997,15 @@ function New-DeployView {
     # DataGridView for the server list
     $dgvServers = New-StyledDataGridView -X 15 -Y 45 -Width 870 -Height 180
 
-    # Configure columns: Checkbox, IP Address, Hostname, Status, d3 API, Ports, Response Time
+    # Collect profile names once for use in the per-row Profile column
+    $allProfileNames = @()
+    try {
+        $allProfileNames = Get-AllProfiles | ForEach-Object { $_.Name }
+    } catch {
+        Write-AppLog -Message "New-DeployView: Could not pre-load profile names for grid column - $_" -Level 'WARN'
+    }
+
+    # Configure columns: Checkbox, IP Address, Hostname, Status, d3 API, Ports, Response Time, Profile
     $colSelect = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
     $colSelect.HeaderText = ""
     $colSelect.Name = "Select"
@@ -995,45 +1015,60 @@ function New-DeployView {
     $colIP = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colIP.HeaderText = "IP Address"
     $colIP.Name = "IPAddress"
-    $colIP.Width = 120
+    $colIP.Width = 110
     $colIP.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
     $colHostname = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colHostname.HeaderText = "Hostname"
     $colHostname.Name = "Hostname"
-    $colHostname.Width = 150
+    $colHostname.Width = 130
     $colHostname.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
     $colStatus = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colStatus.HeaderText = "Status"
     $colStatus.Name = "Status"
-    $colStatus.Width = 90
+    $colStatus.Width = 80
     $colStatus.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
     $colAPI = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colAPI.HeaderText = "d3 API"
     $colAPI.Name = "D3API"
-    $colAPI.Width = 100
+    $colAPI.Width = 85
     $colAPI.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
     $colPorts = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colPorts.HeaderText = "Ports"
     $colPorts.Name = "Ports"
-    $colPorts.Width = 130
+    $colPorts.Width = 100
     $colPorts.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
     $colResponseTime = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
-    $colResponseTime.HeaderText = "Response Time"
+    $colResponseTime.HeaderText = "ms"
     $colResponseTime.Name = "ResponseTime"
-    $colResponseTime.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::Fill
+    $colResponseTime.Width = 55
+    $colResponseTime.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
+
+    # Per-row Profile assignment column (Task 1)
+    # DataGridViewComboBoxColumn lets each row pick its own profile.
+    $colProfile = New-Object System.Windows.Forms.DataGridViewComboBoxColumn
+    $colProfile.HeaderText = "Profile"
+    $colProfile.Name = "Profile"
+    $colProfile.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::Fill
+    $colProfile.DisplayStyleForCurrentCellOnly = $true   # show as text in non-focused cells
+    $colProfile.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    # Add a blank sentinel so rows can have no profile selected
+    [void]$colProfile.Items.Add("")
+    foreach ($pName in $allProfileNames) {
+        [void]$colProfile.Items.Add($pName)
+    }
 
     $dgvServers.Columns.AddRange(@($colSelect, $colIP, $colHostname, $colStatus,
-                                    $colAPI, $colPorts, $colResponseTime))
+                                    $colAPI, $colPorts, $colResponseTime, $colProfile))
     $dgvServers.ReadOnly = $false
 
-    # Make only the checkbox column editable
+    # Only the Select (checkbox) and Profile (combobox) columns are user-editable
     foreach ($col in $dgvServers.Columns) {
-        if ($col.Name -ne "Select") {
+        if ($col.Name -ne "Select" -and $col.Name -ne "Profile") {
             $col.ReadOnly = $true
         }
     }
@@ -1106,18 +1141,20 @@ function New-DeployView {
         $selectedRow = $dgvServers.CurrentRow
         if ($selectedRow) {
             $ip = $selectedRow.Cells["IPAddress"].Value
-            if ($ip -and $cboProfiles.SelectedItem) {
+            # Read the profile from this row's per-row Profile cell (Task 1)
+            $rowProfileName = $selectedRow.Cells["Profile"].Value
+            if ($ip -and -not [string]::IsNullOrWhiteSpace($rowProfileName)) {
                 $confirmResult = [System.Windows.Forms.MessageBox]::Show(
-                    "Push profile '$($cboProfiles.SelectedItem)' to $ip?",
+                    "Push profile '$rowProfileName' to $ip?",
                     "Confirm Deployment",
                     [System.Windows.Forms.MessageBoxButtons]::YesNo,
                     [System.Windows.Forms.MessageBoxIcon]::Question)
                 if ($confirmResult -eq [System.Windows.Forms.DialogResult]::Yes) {
                     $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting push to $ip...`r`n")
                     try {
-                        $profileObj = Get-Profile -Name $cboProfiles.SelectedItem
+                        $profileObj = Get-Profile -Name $rowProfileName
                         if (-not $profileObj) {
-                            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Could not load profile '$($cboProfiles.SelectedItem)'`r`n")
+                            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Could not load profile '$rowProfileName'`r`n")
                         } else {
                             # Build credentials if provided
                             $cred = $null
@@ -1139,8 +1176,8 @@ function New-DeployView {
                 }
             } else {
                 [System.Windows.Forms.MessageBox]::Show(
-                    "Please select a profile first.",
-                    "No Profile",
+                    "Please assign a profile to this row first (use the Profile column or 'Set All To:' dropdown).",
+                    "No Profile Assigned",
                     [System.Windows.Forms.MessageBoxButtons]::OK,
                     [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
             }
@@ -1170,7 +1207,7 @@ function New-DeployView {
 
     $btnRefreshServers = New-StyledButton -Text "Refresh" -X 245 -Y 235 -Width 100 -Height 30
     $btnRefreshServers.Add_Click({
-        # Re-trigger the last scan if results exist
+        # Re-populate the grid from the last cached scan results
         if ($script:AppState.LastScanResults.Count -gt 0) {
             $dgvServers.Rows.Clear()
             foreach ($server in $script:AppState.LastScanResults) {
@@ -1181,8 +1218,9 @@ function New-DeployView {
                 $portsText = if ($server.Ports.Count -gt 0) { $server.Ports -join ", " } else { "None" }
                 $responseText = if ($server.ResponseTimeMs -ge 0) { "$($server.ResponseTimeMs) ms" } else { "N/A" }
 
+                # Profile cell starts blank; columns: Select, IP, Hostname, Status, API, Ports, ResponseTime, Profile
                 [void]$dgvServers.Rows.Add($false, $server.IPAddress, $server.Hostname,
-                                            $statusText, $apiText, $portsText, $responseText)
+                                            $statusText, $apiText, $portsText, $responseText, "")
             }
             $lblScanStatus.Text = "Refreshed: $($script:AppState.LastScanResults.Count) server(s)"
             $lblScanStatus.ForeColor = $script:Theme.TextMuted
@@ -1231,22 +1269,25 @@ function New-DeployView {
     # ===================================================================
     $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 560 -Width 900 -Height 250
 
-    # --- Profile selector ---
-    $lblProfile = New-StyledLabel -Text "Profile:" -X 15 -Y 48 -FontSize 9
-    $profileNames = @()
-    try {
-        $allProfiles = Get-AllProfiles
-        $profileNames = $allProfiles | ForEach-Object { $_.Name }
-    } catch {
-        Write-AppLog -Message "New-DeployView: Could not load profiles - $_" -Level 'WARN'
-    }
-    $cboProfiles = New-StyledComboBox -X 80 -Y 45 -Width 250 -Items $profileNames
-    if ($cboProfiles.Items.Count -gt 0) {
-        $cboProfiles.SelectedIndex = 0
-    }
+    # --- "Set All To:" bulk profile setter (Task 1)
+    # Selecting a profile here propagates it to every row's Profile cell in one shot.
+    # The per-row Profile column remains the authoritative source for deployment.
+    $lblProfile = New-StyledLabel -Text "Set All To:" -X 15 -Y 48 -FontSize 9
+    # Reuse the already-collected $allProfileNames (gathered when building the grid column)
+    $cboProfiles = New-StyledComboBox -X 100 -Y 45 -Width 230 -Items $allProfileNames
+
+    $cboProfiles.Add_SelectedIndexChanged({
+        # Bulk-set every row's Profile cell to the selected value
+        $bulkProfile = $cboProfiles.SelectedItem
+        if (-not [string]::IsNullOrWhiteSpace($bulkProfile)) {
+            foreach ($row in $dgvServers.Rows) {
+                $row.Cells["Profile"].Value = $bulkProfile
+            }
+        }
+    })
 
     # --- Target summary label ---
-    $lblTargetSummary = New-StyledLabel -Text "0 servers selected" -X 350 -Y 48 -FontSize 9 -IsSecondary
+    $lblTargetSummary = New-StyledLabel -Text "0 servers selected" -X 345 -Y 48 -FontSize 9 -IsSecondary
 
     $deployCard.Controls.AddRange(@($lblProfile, $cboProfiles, $lblTargetSummary))
 
@@ -1301,116 +1342,206 @@ function New-DeployView {
     $scrollContainer.Controls.Add($deployCard)
 
     # ===================================================================
-    # Event Handlers - Scan Network Button
+    # Helper: populate the server grid from a results array
+    # Used by both scan completion paths.
     # ===================================================================
-    $btnScanNetwork.Add_Click({
-        $subnet = $txtSubnet.Text.Trim()
-        $startIP = 1
-        $endIP = 254
-        $timeout = 200
-
-        # Validate inputs
-        try { $startIP = [int]$txtStartIP.Text.Trim() } catch { $startIP = 1 }
-        try { $endIP = [int]$txtEndIP.Text.Trim() } catch { $endIP = 254 }
-        try { $timeout = [int]$txtTimeout.Text.Trim() } catch { $timeout = 200 }
-
-        # Clamp timeout to safe bounds (50ms - 5000ms)
-        $timeout = [Math]::Min([Math]::Max(50, $timeout), 5000)
-
-        if ([string]::IsNullOrWhiteSpace($subnet)) {
-            $subnet = "10.0.0"
-        }
-
-        # Validate subnet format before scanning
-        if ($subnet -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}$') {
-            $lblScanStatus.Text = "Invalid subnet format. Use 'X.X.X' (e.g. '10.0.0')."
-            $lblScanStatus.ForeColor = $script:Theme.Error
-            return
-        }
-
-        # Validate IP range bounds
-        if ($startIP -lt 0 -or $startIP -gt 255 -or $endIP -lt 0 -or $endIP -gt 255 -or $startIP -gt $endIP) {
-            $lblScanStatus.Text = "Invalid IP range. Start and End must be 0-255, Start <= End."
-            $lblScanStatus.ForeColor = $script:Theme.Error
-            return
-        }
-
-        # Disable button during scan
-        $btnScanNetwork.Enabled = $false
-        $btnQuickScan.Enabled = $false
-        $lblScanStatus.Text = "Scanning $subnet.$startIP - $subnet.$endIP ..."
-        $lblScanStatus.ForeColor = $script:Theme.Accent
-        $lblScanStatus.Refresh()
-        $scanProgressBar.Value = 0
+    $populateGrid = {
+        param([array]$ScanResults)
         $dgvServers.Rows.Clear()
+        foreach ($server in $ScanResults) {
+            $statusText   = if ($server.IsDisguise) { "Disguise" }
+                            elseif ($server.Ports.Count -gt 0) { "Online" }
+                            else { "Unreachable" }
+            $apiText      = if ($server.APIVersion) { $server.APIVersion } else { "N/A" }
+            $portsText    = if ($server.Ports.Count -gt 0) { $server.Ports -join ", " } else { "None" }
+            $responseText = if ($server.ResponseTimeMs -ge 0) { "$($server.ResponseTimeMs) ms" } else { "N/A" }
+
+            # Columns order: Select, IP, Hostname, Status, API, Ports, ResponseTime, Profile
+            [void]$dgvServers.Rows.Add($false, $server.IPAddress, $server.Hostname,
+                                        $statusText, $apiText, $portsText, $responseText, "")
+        }
+        # Apply status-based cell colouring
+        foreach ($row in $dgvServers.Rows) {
+            $statusVal = $row.Cells["Status"].Value
+            if ($statusVal -eq "Disguise") {
+                $row.Cells["Status"].Style.ForeColor = $script:Theme.Success
+                $row.Cells["Status"].Style.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
+            } elseif ($statusVal -eq "Online") {
+                $row.Cells["Status"].Style.ForeColor = $script:Theme.Warning
+            }
+        }
+    }
+
+    # ===================================================================
+    # BackgroundWorker events (Task 2)
+    # ===================================================================
+
+    # DoWork — runs on the worker thread.
+    # Arguments passed via RunWorkerAsync are available in $e.Argument.
+    $scanWorker.Add_DoWork({
+        param($sender, $e)
+        $args       = $e.Argument           # hashtable: SubnetBase, StartIP, EndIP, TimeoutMs
+        $worker     = $sender               # reference to the BackgroundWorker itself
+
+        $progressCb = {
+            param($currentIP, $percentComplete, $statusMessage)
+            # Guard against calling ReportProgress after cancellation was acknowledged
+            if (-not $worker.CancellationPending) {
+                $worker.ReportProgress($percentComplete, $statusMessage)
+            }
+        }
 
         try {
-            # Run the scan with progress callback
-            $progressAction = {
-                param($currentIP, $percentComplete, $statusMessage)
-                # UI updates must be done via Invoke if cross-thread, but since
-                # Find-DisguiseServers runs in the same thread context with runspaces
-                # collecting results, we can update controls directly here.
-                $scanProgressBar.Value = [Math]::Min(100, $percentComplete)
-                $lblScanStatus.Text = $statusMessage
-                # Force repaint to show progress
-                $scanProgressBar.Refresh()
-                $lblScanStatus.Refresh()
-                [System.Windows.Forms.Application]::DoEvents()
+            $results = Find-DisguiseServers `
+                -SubnetBase  $args.SubnetBase  `
+                -StartIP     $args.StartIP     `
+                -EndIP       $args.EndIP       `
+                -TimeoutMs   $args.TimeoutMs   `
+                -ProgressCallback $progressCb
+
+            if ($worker.CancellationPending) {
+                $e.Cancel = $true
+                # Return whatever partial results Find-DisguiseServers stored in AppState
+                $e.Result = $script:AppState.LastScanResults
+            } else {
+                $e.Result = $results
             }
-
-            $results = Find-DisguiseServers -SubnetBase $subnet -StartIP $startIP `
-                -EndIP $endIP -TimeoutMs $timeout -ProgressCallback $progressAction
-
-            # Populate the grid with results
-            foreach ($server in $results) {
-                $statusText = if ($server.IsDisguise) { "Disguise" }
-                              elseif ($server.Ports.Count -gt 0) { "Online" }
-                              else { "Unreachable" }
-                $apiText = if ($server.APIVersion) { $server.APIVersion } else { "N/A" }
-                $portsText = if ($server.Ports.Count -gt 0) { $server.Ports -join ", " } else { "None" }
-                $responseText = if ($server.ResponseTimeMs -ge 0) { "$($server.ResponseTimeMs) ms" } else { "N/A" }
-
-                [void]$dgvServers.Rows.Add($false, $server.IPAddress, $server.Hostname,
-                                            $statusText, $apiText, $portsText, $responseText)
-            }
-
-            # Apply row coloring based on status
-            foreach ($row in $dgvServers.Rows) {
-                $statusVal = $row.Cells["Status"].Value
-                if ($statusVal -eq "Disguise") {
-                    $row.Cells["Status"].Style.ForeColor = $script:Theme.Success
-                    $row.Cells["Status"].Style.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
-                } elseif ($statusVal -eq "Online") {
-                    $row.Cells["Status"].Style.ForeColor = $script:Theme.Warning
-                }
-            }
-
-            $scanProgressBar.Value = 100
-            $disguiseCount = ($results | Where-Object { $_.IsDisguise }).Count
-            $lblScanStatus.Text = "Scan complete: Found $($results.Count) host(s), $disguiseCount disguise server(s)"
-            $lblScanStatus.ForeColor = $script:Theme.Success
-
         } catch {
-            $lblScanStatus.Text = "Scan failed: $_"
+            # Surface the exception to RunWorkerCompleted via e.Error
+            throw
+        }
+    })
+
+    # ProgressChanged — runs on the UI thread; safe to update controls directly.
+    $scanWorker.Add_ProgressChanged({
+        param($sender, $e)
+        $pct = [Math]::Min(100, [Math]::Max(0, $e.ProgressPercentage))
+        $scanProgressBar.Value = $pct
+        if ($e.UserState) {
+            $lblScanStatus.Text      = $e.UserState
+            $lblScanStatus.ForeColor = $script:Theme.Accent
+        }
+    })
+
+    # RunWorkerCompleted — runs on the UI thread after DoWork exits (normally, cancelled, or error).
+    $scanWorker.Add_RunWorkerCompleted({
+        param($sender, $e)
+
+        # Re-enable scan controls
+        $btnScanNetwork.Enabled = $true
+        $btnQuickScan.Enabled   = $true
+        $btnCancelScan.Enabled  = $false
+
+        if ($e.Cancelled) {
+            $scanProgressBar.Value   = 0
+            $lblScanStatus.Text      = "Scan cancelled."
+            $lblScanStatus.ForeColor = $script:Theme.Warning
+            Write-AppLog -Message "Network scan cancelled by user." -Level 'INFO'
+
+            # Show any partial results that were collected before cancellation
+            if ($e.Result -and $e.Result.Count -gt 0) {
+                & $populateGrid $e.Result
+                $lblScanStatus.Text = "Scan cancelled — showing $($e.Result.Count) partial result(s)."
+            }
+        } elseif ($e.Error) {
+            $lblScanStatus.Text      = "Scan failed: $($e.Error.Message)"
             $lblScanStatus.ForeColor = $script:Theme.Error
-            Write-AppLog -Message "Scan error: $_" -Level 'ERROR'
-        } finally {
-            $btnScanNetwork.Enabled = $true
-            $btnQuickScan.Enabled = $true
+            Write-AppLog -Message "Background scan error: $($e.Error)" -Level 'ERROR'
+        } else {
+            $results = $e.Result
+            $script:AppState.LastScanResults = $results
+
+            & $populateGrid $results
+
+            $scanProgressBar.Value   = 100
+            $disguiseCount           = ($results | Where-Object { $_.IsDisguise }).Count
+            $lblScanStatus.Text      = "Scan complete: Found $($results.Count) host(s), $disguiseCount disguise server(s)"
+            $lblScanStatus.ForeColor = $script:Theme.Success
+        }
+    })
+
+    # ===================================================================
+    # Event Handlers - Scan Network Button (now uses BackgroundWorker)
+    # ===================================================================
+    $btnScanNetwork.Add_Click({
+        $subnet  = $txtSubnet.Text.Trim()
+        $startIP = 1
+        $endIP   = 254
+        $timeout = 200
+
+        # Validate and parse inputs
+        try { $startIP = [int]$txtStartIP.Text.Trim() } catch { $startIP = 1 }
+        try { $endIP   = [int]$txtEndIP.Text.Trim()   } catch { $endIP   = 254 }
+        try { $timeout = [int]$txtTimeout.Text.Trim() } catch { $timeout = 200 }
+
+        # Clamp timeout to safe bounds (50ms – 5000ms)
+        $timeout = [Math]::Min([Math]::Max(50, $timeout), 5000)
+
+        if ([string]::IsNullOrWhiteSpace($subnet)) { $subnet = "10.0.0" }
+
+        # Validate subnet format
+        if ($subnet -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+            $lblScanStatus.Text      = "Invalid subnet format. Use 'X.X.X' (e.g. '10.0.0')."
+            $lblScanStatus.ForeColor = $script:Theme.Error
+            return
+        }
+
+        # Validate IP range
+        if ($startIP -lt 0 -or $startIP -gt 255 -or $endIP -lt 0 -or $endIP -gt 255 -or $startIP -gt $endIP) {
+            $lblScanStatus.Text      = "Invalid IP range. Start and End must be 0-255, Start <= End."
+            $lblScanStatus.ForeColor = $script:Theme.Error
+            return
+        }
+
+        if ($scanWorker.IsBusy) {
+            # Guard against double-start (should not happen because button is disabled)
+            return
+        }
+
+        # Update UI state for scanning
+        $btnScanNetwork.Enabled  = $false
+        $btnQuickScan.Enabled    = $false
+        $btnCancelScan.Enabled   = $true
+        $lblScanStatus.Text      = "Scanning $subnet.$startIP - $subnet.$endIP ..."
+        $lblScanStatus.ForeColor = $script:Theme.Accent
+        $scanProgressBar.Value   = 0
+        $dgvServers.Rows.Clear()
+
+        # Pack arguments into a hashtable; DoWork receives them via e.Argument
+        $scanArgs = @{
+            SubnetBase = $subnet
+            StartIP    = $startIP
+            EndIP      = $endIP
+            TimeoutMs  = $timeout
+        }
+
+        $scanWorker.RunWorkerAsync($scanArgs)
+    })
+
+    # ===================================================================
+    # Event Handlers - Cancel Scan Button (Task 2)
+    # ===================================================================
+    $btnCancelScan.Add_Click({
+        if ($scanWorker.IsBusy -and -not $scanWorker.CancellationPending) {
+            $scanWorker.CancelAsync()
+            $lblScanStatus.Text      = "Cancelling scan..."
+            $lblScanStatus.ForeColor = $script:Theme.Warning
+            $btnCancelScan.Enabled   = $false   # prevent double-clicks
         }
     })
 
     # ===================================================================
     # Event Handlers - Quick Scan Button (common IPs only)
+    # Quick scan runs synchronously on the UI thread (small target set).
     # ===================================================================
     $btnQuickScan.Add_Click({
         $subnet = $txtSubnet.Text.Trim()
         if ([string]::IsNullOrWhiteSpace($subnet)) { $subnet = "10.0.0" }
 
-        $btnScanNetwork.Enabled = $false
-        $btnQuickScan.Enabled = $false
-        $lblScanStatus.Text = "Quick scan on common IPs..."
+        $btnScanNetwork.Enabled  = $false
+        $btnQuickScan.Enabled    = $false
+        $btnCancelScan.Enabled   = $false   # quick scan is not cancellable
+        $lblScanStatus.Text      = "Quick scan on common IPs..."
         $lblScanStatus.ForeColor = $script:Theme.Accent
         $lblScanStatus.Refresh()
         $scanProgressBar.Value = 0
@@ -1425,7 +1556,7 @@ function New-DeployView {
 
             for ($idx = 0; $idx -lt $totalTargets; $idx++) {
                 $ip = "$subnet.$($quickTargets[$idx])"
-                $lblScanStatus.Text = "Quick scan: $ip ($($idx + 1)/$totalTargets)"
+                $lblScanStatus.Text    = "Quick scan: $ip ($($idx + 1)/$totalTargets)"
                 $scanProgressBar.Value = [int](($idx / $totalTargets) * 100)
                 $scanProgressBar.Refresh()
                 $lblScanStatus.Refresh()
@@ -1452,57 +1583,40 @@ function New-DeployView {
             # Store results in app state
             $script:AppState.LastScanResults = $results.ToArray()
 
-            # Populate the grid
-            foreach ($server in $results) {
-                $statusText = if ($server.IsDisguise) { "Disguise" }
-                              elseif ($server.Ports.Count -gt 0) { "Online" }
-                              else { "Unreachable" }
-                $apiText = if ($server.APIVersion) { $server.APIVersion } else { "N/A" }
-                $portsText = if ($server.Ports.Count -gt 0) { $server.Ports -join ", " } else { "None" }
+            # Populate the grid using the shared helper (includes Profile column)
+            & $populateGrid $results.ToArray()
 
-                [void]$dgvServers.Rows.Add($false, $server.IPAddress, $server.Hostname,
-                                            $statusText, $apiText, $portsText, "N/A")
-            }
-
-            # Apply row coloring
-            foreach ($row in $dgvServers.Rows) {
-                $statusVal = $row.Cells["Status"].Value
-                if ($statusVal -eq "Disguise") {
-                    $row.Cells["Status"].Style.ForeColor = $script:Theme.Success
-                    $row.Cells["Status"].Style.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
-                } elseif ($statusVal -eq "Online") {
-                    $row.Cells["Status"].Style.ForeColor = $script:Theme.Warning
-                }
-            }
-
-            $scanProgressBar.Value = 100
-            $disguiseCount = ($results | Where-Object { $_.IsDisguise }).Count
-            $lblScanStatus.Text = "Quick scan complete: Found $($results.Count) host(s), $disguiseCount disguise server(s)"
+            $scanProgressBar.Value   = 100
+            $disguiseCount           = ($results | Where-Object { $_.IsDisguise }).Count
+            $lblScanStatus.Text      = "Quick scan complete: Found $($results.Count) host(s), $disguiseCount disguise server(s)"
             $lblScanStatus.ForeColor = $script:Theme.Success
 
         } catch {
-            $lblScanStatus.Text = "Quick scan failed: $_"
+            $lblScanStatus.Text      = "Quick scan failed: $_"
             $lblScanStatus.ForeColor = $script:Theme.Error
             Write-AppLog -Message "Quick scan error: $_" -Level 'ERROR'
         } finally {
             $btnScanNetwork.Enabled = $true
-            $btnQuickScan.Enabled = $true
+            $btnQuickScan.Enabled   = $true
         }
     })
 
     # ===================================================================
-    # Event Handlers - Deploy Button
+    # Event Handlers - Deploy Button (Task 1: per-row profiles)
     # ===================================================================
     $btnDeploy.Add_Click({
-        # Collect selected server IPs from the grid
-        $selectedIPs = [System.Collections.ArrayList]::new()
+        # Build the list of selected rows with their per-row profile assignments
+        $selectedTargets = [System.Collections.ArrayList]::new()
         foreach ($row in $dgvServers.Rows) {
             if ($row.Cells["Select"].Value -eq $true) {
-                [void]$selectedIPs.Add($row.Cells["IPAddress"].Value)
+                [void]$selectedTargets.Add([PSCustomObject]@{
+                    IP          = $row.Cells["IPAddress"].Value
+                    ProfileName = $row.Cells["Profile"].Value
+                })
             }
         }
 
-        if ($selectedIPs.Count -eq 0) {
+        if ($selectedTargets.Count -eq 0) {
             [System.Windows.Forms.MessageBox]::Show(
                 "No servers selected. Please check the servers you want to deploy to.",
                 "No Selection",
@@ -1511,18 +1625,22 @@ function New-DeployView {
             return
         }
 
-        if (-not $cboProfiles.SelectedItem) {
+        # --- Pre-deploy validation: every selected row must have a profile assigned ---
+        $missingProfile = $selectedTargets | Where-Object { [string]::IsNullOrWhiteSpace($_.ProfileName) }
+        if ($missingProfile.Count -gt 0) {
+            $missingList = ($missingProfile | ForEach-Object { $_.IP }) -join "`n"
             [System.Windows.Forms.MessageBox]::Show(
-                "Please select a profile to deploy.",
-                "No Profile",
+                "The following selected server(s) have no profile assigned.`nAssign a profile in the Profile column (or use 'Set All To:') before deploying.`n`n$missingList",
+                "Missing Profile Assignment",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
             return
         }
 
-        # Confirm deployment
+        # Build a confirmation summary (show distinct profiles used)
+        $summaryLines = $selectedTargets | ForEach-Object { "  $($_.IP)  ->  $($_.ProfileName)" }
         $confirmResult = [System.Windows.Forms.MessageBox]::Show(
-            "Deploy profile '$($cboProfiles.SelectedItem)' to $($selectedIPs.Count) server(s)?`n`nTargets:`n$($selectedIPs -join "`n")",
+            "Deploy to $($selectedTargets.Count) server(s)?`n`n$($summaryLines -join "`n")",
             "Confirm Deployment",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question)
@@ -1531,7 +1649,7 @@ function New-DeployView {
             return
         }
 
-        # Build credential object
+        # Build credential object once (shared across all targets)
         $credential = $null
         if (-not $chkCurrentCreds.Checked) {
             $username = $txtUsername.Text.Trim()
@@ -1540,43 +1658,49 @@ function New-DeployView {
                 $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
                 $credential = New-Object System.Management.Automation.PSCredential($username, $securePassword)
             }
-            # Clear plaintext password from memory
+            # Clear plaintext password from memory immediately
             $password = $null
             $txtPassword.Text = ''
-        }
-
-        # Load the selected profile
-        $profileObj = $null
-        try {
-            $profileObj = Get-Profile -Name $cboProfiles.SelectedItem
-        } catch {
-            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Could not load profile '$($cboProfiles.SelectedItem)': $_`r`n")
-            return
-        }
-
-        if (-not $profileObj) {
-            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Profile '$($cboProfiles.SelectedItem)' not found.`r`n")
-            return
         }
 
         # Disable the deploy button during operation
         $btnDeploy.Enabled = $false
         $deployProgressBar.Value = 0
 
-        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting deployment of '$($profileObj.Name)' to $($selectedIPs.Count) server(s)...`r`n")
+        $totalServers  = $selectedTargets.Count
+        $currentIdx    = 0
+        $successCount  = 0
+        $lastSuccessProfile = $null
+
+        $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Starting deployment to $totalServers server(s)...`r`n")
         $txtDeployLog.Refresh()
 
-        $totalServers = $selectedIPs.Count
-        $currentIdx = 0
-        $successCount = 0
-
-        foreach ($serverIP in $selectedIPs) {
+        foreach ($target in $selectedTargets) {
             $currentIdx++
-            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] [$currentIdx/$totalServers] Deploying to $serverIP...`r`n")
+            $serverIP    = $target.IP
+            $profileName = $target.ProfileName
+
+            $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] [$currentIdx/$totalServers] $serverIP <- '$profileName'...`r`n")
             $txtDeployLog.Refresh()
             $deployProgressBar.Value = [int](($currentIdx / $totalServers) * 100)
             $deployProgressBar.Refresh()
             [System.Windows.Forms.Application]::DoEvents()
+
+            # Load this target's specific profile
+            $profileObj = $null
+            try {
+                $profileObj = Get-Profile -Name $profileName
+            } catch {
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   ERROR: Could not load profile '$profileName': $_`r`n")
+                $txtDeployLog.Refresh()
+                continue
+            }
+
+            if (-not $profileObj) {
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   ERROR: Profile '$profileName' not found.`r`n")
+                $txtDeployLog.Refresh()
+                continue
+            }
 
             try {
                 $pushParams = @{
@@ -1596,12 +1720,13 @@ function New-DeployView {
 
                 if ($pushResult.Success) {
                     $successCount++
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment SUCCEEDED`r`n")
+                    $lastSuccessProfile = $profileObj.Name
+                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   $serverIP: Deployment SUCCEEDED`r`n")
                 } else {
-                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: Deployment FAILED - $($pushResult.ErrorMessage)`r`n")
+                    $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   $serverIP: Deployment FAILED - $($pushResult.ErrorMessage)`r`n")
                 }
             } catch {
-                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $serverIP: EXCEPTION - $_`r`n")
+                $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')]   $serverIP: EXCEPTION - $_`r`n")
             }
 
             $txtDeployLog.Refresh()
@@ -1612,9 +1737,9 @@ function New-DeployView {
         $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] Deployment complete: $successCount/$totalServers succeeded.`r`n")
         $txtDeployLog.AppendText("------------------------------------------------------------`r`n")
 
-        # Update app state only if at least one deployment succeeded
-        if ($successCount -gt 0) {
-            $script:AppState.LastAppliedProfile = $profileObj.Name
+        # Track the last successfully deployed profile in app state
+        if ($lastSuccessProfile) {
+            $script:AppState.LastAppliedProfile = $lastSuccessProfile
         }
 
         $btnDeploy.Enabled = $true
@@ -1637,10 +1762,22 @@ function New-DeployView {
         }
     })
 
-    # Ensure cell value changes are committed immediately (needed for checkbox columns)
+    # Ensure cell value changes are committed immediately (needed for checkbox and combobox columns)
     $dgvServers.Add_CurrentCellDirtyStateChanged({
         if ($dgvServers.IsCurrentCellDirty) {
             $dgvServers.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
+        }
+    })
+
+    # Suppress DataError events from the Profile combobox column.
+    # WinForms fires DataError when a cell value is not in the column's Items list
+    # (e.g., the empty string sentinel we use as the "no profile" state).
+    # We handle this gracefully at deploy time, so the built-in error dialog is unwanted.
+    $dgvServers.Add_DataError({
+        param($sender, $e)
+        # Only suppress errors from the Profile combobox column; let others surface normally.
+        if ($e.ColumnIndex -ge 0 -and $dgvServers.Columns[$e.ColumnIndex].Name -eq "Profile") {
+            $e.ThrowException = $false
         }
     })
 
