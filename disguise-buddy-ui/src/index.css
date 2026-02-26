@@ -1,0 +1,133 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Custom scrollbar ─────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2A2A3C #0F0F14;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: #0F0F14;
+    border-radius: 3px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: #2A2A3C;
+    border-radius: 3px;
+    border: 1px solid #0F0F14;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: #3F3F5C;
+  }
+
+  html,
+  body {
+    @apply bg-bg text-text font-sans;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  #root {
+    height: 100%;
+  }
+}
+
+/* ─── Utility classes ──────────────────────────────────────────────────────── */
+@layer components {
+  .glass-card {
+    @apply bg-card border border-border rounded-xl;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+      0 4px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-200;
+  }
+
+  .glass-card-hover:hover {
+    @apply border-borderLight;
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+      0 8px 32px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(124, 58, 237, 0.1);
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-lg text-textSecondary
+           transition-all duration-150 cursor-pointer select-none;
+  }
+
+  .nav-item:hover {
+    @apply bg-hover text-text;
+  }
+
+  .nav-item.active {
+    @apply bg-primary/20 text-primaryLight;
+    box-shadow: inset 3px 0 0 #7C3AED;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
+           bg-primary hover:bg-primaryLight active:bg-primaryDark
+           text-white font-medium text-sm
+           transition-all duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
+           bg-transparent hover:bg-hover border border-border hover:border-borderLight
+           text-textSecondary hover:text-text font-medium text-sm
+           transition-all duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 rounded-lg
+           bg-surface border border-border
+           text-text text-sm font-mono
+           placeholder:text-textMuted
+           focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40
+           transition-colors duration-150;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-success/15 text-success;
+  }
+
+  .badge-warning {
+    @apply badge bg-warning/15 text-warning;
+  }
+
+  .badge-error {
+    @apply badge bg-error/15 text-error;
+  }
+
+  .badge-info {
+    @apply badge bg-accent/15 text-accent;
+  }
+
+  .badge-muted {
+    @apply badge bg-surface text-textMuted;
+  }
+}
