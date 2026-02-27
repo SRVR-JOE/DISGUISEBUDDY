@@ -449,7 +449,7 @@ $mainForm.Add_KeyDown({
 
         # --- Escape : close any open modal (SendKeys approach) ---
         ([System.Windows.Forms.Keys]::Escape) {
-            # Let Escape propagate naturally — WinForms modal dialogs handle it
+            # Let Escape propagate naturally -- WinForms modal dialogs handle it
             # via their CancelButton or DialogResult. Nothing to do here unless
             # a non-standard popup is open.
         }

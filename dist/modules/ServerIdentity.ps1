@@ -1,4 +1,4 @@
-# ServerIdentity.ps1 - DISGUISE BUDDY Server Identity Configuration Module
+﻿# ServerIdentity.ps1 - DISGUISE BUDDY Server Identity Configuration Module
 # Manages server hostname and system identification for disguise (d3) media servers.
 # The hostname is critical for d3Net discovery, UNC paths, and API access.
 
@@ -218,6 +218,8 @@ function New-ServerIdentityView {
     .DESCRIPTION
         Builds the complete UI for viewing and changing the server hostname,
         displaying system information, and providing naming convention guidance.
+        Layout mirrors the React dark glass-morphism design: 3 cards in a scrollable
+        container with 24px padding and 24px gap between cards.
     .PARAMETER ContentPanel
         The parent panel in which to render the view.
     #>
@@ -230,308 +232,361 @@ function New-ServerIdentityView {
     $ContentPanel.Controls.Clear()
     $ContentPanel.SuspendLayout()
 
-    # Create a scrollable container for all content
+    # Scrollable container -- full content panel size, background matches app background
     $scrollPanel = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
 
-    # ---- Section Header ----
-    $header = New-SectionHeader -Text "Server Identity" -X 20 -Y 15 -Width 900
+    # ---- Page header (24px padding) ----
+    $header = New-SectionHeader -Text "Server Identity" -X 24 -Y 16 -Width 880
     $scrollPanel.Controls.Add($header)
 
-    $subtitle = New-StyledLabel -Text "Manage server hostname and system identification" -X 20 -Y 55 -IsSecondary
+    $subtitle = New-StyledLabel -Text "Manage server hostname and system identification" -X 24 -Y 58 -IsSecondary -FontSize 9.5
     $scrollPanel.Controls.Add($subtitle)
 
-    # Retrieve system information once for use across all cards
+    # Fetch system information once -- shared across all cards
     $sysInfo = Get-ServerSystemInfo
 
     # ========================================================================
-    # Card 1: Current Identity
+    # Card 1: Current Identity  (purple left-accent border, matching React)
     # ========================================================================
-    $card1 = New-StyledCard -Title "Current Identity" -X 20 -Y 90 -Width 900 -Height 300
+    # Header area height ~90px, divider, info grid ~120px, total ~230px
+    $card1 = New-StyledCard -Title "Current Identity" -X 24 -Y 90 -Width 880 -Height 310 `
+                            -AccentColor $script:Theme.Primary
 
-    # Status badge: Domain-joined vs Workgroup
+    # Domain / Workgroup status badge -- top-right of card
     $domainStatusType = if ($sysInfo.DomainType -eq 'Domain') { 'Info' } else { 'Warning' }
-    $domainStatusText = if ($sysInfo.DomainType -eq 'Domain') { "DOMAIN: $($sysInfo.Domain)" } else { "WORKGROUP: $($sysInfo.Domain)" }
-    $domainBadge = New-StatusBadge -Text $domainStatusText -X 680 -Y 15 -Type $domainStatusType
+    $domainStatusText = if ($sysInfo.DomainType -eq 'Domain') {
+        "Domain: $($sysInfo.Domain)"
+    } else {
+        "Workgroup: $($sysInfo.Domain)"
+    }
+    $domainBadge = New-StatusBadge -Text $domainStatusText -X 660 -Y 15 -Type $domainStatusType
     $card1.Controls.Add($domainBadge)
 
-    # Large hostname display
-    $lblHostnameValue = New-StyledLabel -Text $sysInfo.Hostname -X 15 -Y 50 -FontSize 18 -IsBold
+    # --- Hero hostname display ---
+    # Purple icon block (monitor icon stand-in: a solid-colored square label)
+    $hostnameIconBlock = New-Object System.Windows.Forms.Panel
+    $hostnameIconBlock.Location = New-Object System.Drawing.Point(19, 44)
+    $hostnameIconBlock.Size = New-Object System.Drawing.Size(42, 42)
+    $hostnameIconBlock.BackColor = $script:Theme.Primary
+    $card1.Controls.Add($hostnameIconBlock)
+
+    $hostnameIconLabel = New-Object System.Windows.Forms.Label
+    $hostnameIconLabel.Text = [char]0xF878   # Segoe Fluent / fallback -- shows as block on Segoe UI
+    $hostnameIconLabel.Location = New-Object System.Drawing.Point(0, 0)
+    $hostnameIconLabel.Size = New-Object System.Drawing.Size(42, 42)
+    $hostnameIconLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+    $hostnameIconLabel.Font = New-Object System.Drawing.Font('Segoe UI', 14)
+    $hostnameIconLabel.ForeColor = [System.Drawing.Color]::White
+    $hostnameIconLabel.BackColor = [System.Drawing.Color]::Transparent
+    $hostnameIconBlock.Controls.Add($hostnameIconLabel)
+
+    # Large hostname -- the hero element (30pt bold, Primary color)
+    $lblHostnameValue = New-Object System.Windows.Forms.Label
+    $lblHostnameValue.Text = $sysInfo.Hostname
+    $lblHostnameValue.Location = New-Object System.Drawing.Point(71, 38)
+    $lblHostnameValue.AutoSize = $true
+    $lblHostnameValue.Font = New-Object System.Drawing.Font('Segoe UI', 22, [System.Drawing.FontStyle]::Bold)
     $lblHostnameValue.ForeColor = $script:Theme.Primary
     $card1.Controls.Add($lblHostnameValue)
 
-    $lblHostnameHint = New-StyledLabel -Text "Server Hostname" -X 15 -Y 85 -IsMuted -FontSize 9
+    # "Server Hostname" subtitle beneath the large name
+    $lblHostnameHint = New-StyledLabel -Text "Server Hostname" -X 71 -Y 82 -IsMuted -FontSize 9
     $card1.Controls.Add($lblHostnameHint)
 
-    # System info grid displayed inside a clean sub-panel with aligned columns
-    $infoPanel = New-Object System.Windows.Forms.Panel
-    $infoPanel.Location = New-Object System.Drawing.Point(15, 110)
-    $infoPanel.Size = New-Object System.Drawing.Size(860, 170)
-    $infoPanel.BackColor = $script:Theme.Surface
+    # Divider line between header area and info grid
+    $divider = New-Object System.Windows.Forms.Panel
+    $divider.Location = New-Object System.Drawing.Point(15, 105)
+    $divider.Size = New-Object System.Drawing.Size(840, 1)
+    $divider.BackColor = $script:Theme.Border
+    $card1.Controls.Add($divider)
 
-    # Separator line above the info panel
-    $infoSep = New-Object System.Windows.Forms.Panel
-    $infoSep.Location = New-Object System.Drawing.Point(0, 0)
-    $infoSep.Size = New-Object System.Drawing.Size(860, 1)
-    $infoSep.BackColor = $script:Theme.Border
-    $infoPanel.Controls.Add($infoSep)
+    # --- Info grid (2 columns, uppercase labels, monospace values) ---
+    # Column layout: left label X=19, left value X=155, right label X=455, right value X=595
+    $gridY      = 118
+    $rowGap     = 30
+    $lblX       = 19
+    $valX       = 155
+    $rLblX      = 455
+    $rValX      = 595
+    $labelFont  = New-Object System.Drawing.Font('Segoe UI', 8, [System.Drawing.FontStyle]::Bold)
+    $monoFont   = New-Object System.Drawing.Font('Consolas', 9)
 
-    $infoRowHeight = 26
-    $infoY = 12
+    # Helper to create an uppercase tracking label (muted, small-caps style)
+    # and a monospace value label side-by-side in the grid
+    $addGridRow = {
+        param($leftLabel, $leftValue, $rightLabel, $rightValue, $rowY)
 
-    # Left column: labels at X=10, values at X=130
-    $leftLabelX = 10
-    $leftValueX = 130
-    # Right column: labels at X=440, values at X=560
-    $rightLabelX = 440
-    $rightValueX = 560
+        $lLbl = New-Object System.Windows.Forms.Label
+        $lLbl.Text = $leftLabel.ToUpper()
+        $lLbl.Location = New-Object System.Drawing.Point($lblX, $rowY)
+        $lLbl.AutoSize = $true
+        $lLbl.Font = $labelFont
+        $lLbl.ForeColor = $script:Theme.TextMuted
+        $card1.Controls.Add($lLbl)
 
-    # Row 1: OS (left), Domain/Workgroup (right)
-    $lblOS = New-StyledLabel -Text "OS:" -X $leftLabelX -Y $infoY -IsBold -FontSize 9.5
-    $infoPanel.Controls.Add($lblOS)
-    $lblOSValue = New-StyledLabel -Text $sysInfo.OSVersion -X $leftValueX -Y $infoY -FontSize 9.5 -MaxWidth 290
-    $infoPanel.Controls.Add($lblOSValue)
+        $lVal = New-Object System.Windows.Forms.Label
+        $lVal.Text = $leftValue
+        $lVal.Location = New-Object System.Drawing.Point($valX, ($rowY - 1))
+        $lVal.AutoSize = $false
+        $lVal.Width = 270
+        $lVal.MaximumSize = New-Object System.Drawing.Size(270, 0)
+        $lVal.AutoSize = $true
+        $lVal.Font = $monoFont
+        $lVal.ForeColor = $script:Theme.TextSecondary
+        $card1.Controls.Add($lVal)
 
-    $lblDomain = New-StyledLabel -Text "$($sysInfo.DomainType):" -X $rightLabelX -Y $infoY -IsBold -FontSize 9.5
-    $infoPanel.Controls.Add($lblDomain)
-    $lblDomainValue = New-StyledLabel -Text $sysInfo.Domain -X $rightValueX -Y $infoY -FontSize 9.5 -MaxWidth 280
-    $infoPanel.Controls.Add($lblDomainValue)
-    $infoY += $infoRowHeight
+        if ($rightLabel) {
+            $rLbl = New-Object System.Windows.Forms.Label
+            $rLbl.Text = $rightLabel.ToUpper()
+            $rLbl.Location = New-Object System.Drawing.Point($rLblX, $rowY)
+            $rLbl.AutoSize = $true
+            $rLbl.Font = $labelFont
+            $rLbl.ForeColor = $script:Theme.TextMuted
+            $card1.Controls.Add($rLbl)
 
-    # Row 2: Uptime (left), Model (right)
-    $lblUptime = New-StyledLabel -Text "Uptime:" -X $leftLabelX -Y $infoY -IsBold -FontSize 9.5
-    $infoPanel.Controls.Add($lblUptime)
-    $lblUptimeValue = New-StyledLabel -Text $sysInfo.Uptime -X $leftValueX -Y $infoY -FontSize 9.5
-    $infoPanel.Controls.Add($lblUptimeValue)
+            $rVal = New-Object System.Windows.Forms.Label
+            $rVal.Text = $rightValue
+            $rVal.Location = New-Object System.Drawing.Point($rValX, ($rowY - 1))
+            $rVal.AutoSize = $false
+            $rVal.Width = 250
+            $rVal.MaximumSize = New-Object System.Drawing.Size(250, 0)
+            $rVal.AutoSize = $true
+            $rVal.Font = $monoFont
+            $rVal.ForeColor = $script:Theme.TextSecondary
+            $card1.Controls.Add($rVal)
+        }
+    }
 
-    $lblModel = New-StyledLabel -Text "Model:" -X $rightLabelX -Y $infoY -IsBold -FontSize 9.5
-    $infoPanel.Controls.Add($lblModel)
-    $lblModelValue = New-StyledLabel -Text $sysInfo.Model -X $rightValueX -Y $infoY -FontSize 9.5 -MaxWidth 280
-    $infoPanel.Controls.Add($lblModelValue)
-    $infoY += $infoRowHeight
+    # Row 1: OS | Domain/Workgroup
+    & $addGridRow 'Operating System' $sysInfo.OSVersion $sysInfo.DomainType $sysInfo.Domain $gridY
+    $gridY += $rowGap
 
-    # Row 3: Serial Number (left - spanning)
-    $lblSerial = New-StyledLabel -Text "Serial Number:" -X $leftLabelX -Y $infoY -IsBold -FontSize 9.5
-    $infoPanel.Controls.Add($lblSerial)
-    $lblSerialValue = New-StyledLabel -Text $sysInfo.SerialNumber -X $leftValueX -Y $infoY -FontSize 9.5
-    $infoPanel.Controls.Add($lblSerialValue)
+    # Row 2: Uptime | Model
+    & $addGridRow 'Uptime' $sysInfo.Uptime 'Model' $sysInfo.Model $gridY
+    $gridY += $rowGap
 
-    $card1.Controls.Add($infoPanel)
+    # Row 3: Serial Number (spans full width)
+    & $addGridRow 'Serial Number' $sysInfo.SerialNumber $null $null $gridY
 
     $scrollPanel.Controls.Add($card1)
 
     # ========================================================================
-    # Card 2: Change Hostname
+    # Card 2: Change Hostname  (no accent)
     # ========================================================================
-    $card2 = New-StyledCard -Title "Change Hostname" -X 20 -Y 410 -Width 900 -Height 450
+    # Dynamic height: warning(60) + current host row(50) + input row(55)
+    #   + validation(28) + preview(118 when visible) + button(60) + padding = ~460
+    $card2 = New-StyledCard -Title "Change Hostname" -X 24 -Y 426 -Width 880 -Height 470
 
-    $yPos = 45
+    $yPos = 48
 
-    # Prominent restart warning panel with distinct visual styling
+    # --- Warning banner: semi-transparent WarningBackground + 4px left amber accent ---
     $warningPanel = New-Object System.Windows.Forms.Panel
     $warningPanel.Location = New-Object System.Drawing.Point(15, $yPos)
-    $warningPanel.Size = New-Object System.Drawing.Size(860, 50)
-    $warningPanel.BackColor = [System.Drawing.Color]::FromArgb(50, 245, 158, 11)  # Semi-transparent warning
+    $warningPanel.Size = New-Object System.Drawing.Size(840, 56)
+    $warningPanel.BackColor = $script:Theme.WarningBackground
+    $card2.Controls.Add($warningPanel)
 
-    # Warning accent bar on the left
+    # 4px left accent stripe in Warning color
     $warningAccent = New-Object System.Windows.Forms.Panel
     $warningAccent.Location = New-Object System.Drawing.Point(0, 0)
-    $warningAccent.Size = New-Object System.Drawing.Size(4, 50)
+    $warningAccent.Size = New-Object System.Drawing.Size(4, 56)
     $warningAccent.BackColor = $script:Theme.Warning
     $warningPanel.Controls.Add($warningAccent)
 
-    # Warning icon/label
+    # Warning icon (triangle)
     $lblWarningIcon = New-Object System.Windows.Forms.Label
-    $lblWarningIcon.Text = [char]0x26A0  # Warning triangle
-    $lblWarningIcon.Location = New-Object System.Drawing.Point(14, 6)
+    $lblWarningIcon.Text = [char]0x26A0
+    $lblWarningIcon.Location = New-Object System.Drawing.Point(14, 8)
     $lblWarningIcon.AutoSize = $true
-    $lblWarningIcon.Font = New-Object System.Drawing.Font('Segoe UI', 16)
+    $lblWarningIcon.Font = New-Object System.Drawing.Font('Segoe UI', 14)
     $lblWarningIcon.ForeColor = $script:Theme.Warning
     $warningPanel.Controls.Add($lblWarningIcon)
 
+    # "RESTART REQUIRED" bold title
     $lblWarningTitle = New-Object System.Windows.Forms.Label
     $lblWarningTitle.Text = "RESTART REQUIRED"
-    $lblWarningTitle.Location = New-Object System.Drawing.Point(44, 5)
+    $lblWarningTitle.Location = New-Object System.Drawing.Point(44, 7)
     $lblWarningTitle.AutoSize = $true
-    $lblWarningTitle.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+    $lblWarningTitle.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
     $lblWarningTitle.ForeColor = $script:Theme.Warning
     $warningPanel.Controls.Add($lblWarningTitle)
 
+    # Detail text below the title
     $lblWarningDetail = New-Object System.Windows.Forms.Label
     $lblWarningDetail.Text = "Changing the hostname requires a system restart. All active d3Net sessions and UNC share connections will be disrupted."
-    $lblWarningDetail.Location = New-Object System.Drawing.Point(44, 26)
+    $lblWarningDetail.Location = New-Object System.Drawing.Point(44, 28)
     $lblWarningDetail.AutoSize = $false
-    $lblWarningDetail.Size = New-Object System.Drawing.Size(800, 18)
+    $lblWarningDetail.Size = New-Object System.Drawing.Size(786, 20)
     $lblWarningDetail.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
     $lblWarningDetail.ForeColor = $script:Theme.Text
     $warningPanel.Controls.Add($lblWarningDetail)
 
-    $card2.Controls.Add($warningPanel)
+    $yPos += 68
 
-    $yPos += 60
+    # --- Current hostname: read-only display box ---
+    $lblCurrentHostTitle = New-StyledLabel -Text "CURRENT HOSTNAME" -X 15 -Y $yPos -IsMuted -FontSize 8 -IsBold
+    $card2.Controls.Add($lblCurrentHostTitle)
 
-    # Current hostname
-    $lblCurrentHost = New-StyledLabel -Text "Current Hostname:" -X 15 -Y $yPos -IsBold
-    $card2.Controls.Add($lblCurrentHost)
-    $lblCurrentHostValue = New-StyledLabel -Text $sysInfo.Hostname -X 200 -Y $yPos
-    $card2.Controls.Add($lblCurrentHostValue)
+    $yPos += 18
+
+    # Surface-bg read-only box styled to look like a disabled input
+    $pnlCurrentHost = New-Object System.Windows.Forms.Panel
+    $pnlCurrentHost.Location = New-Object System.Drawing.Point(15, $yPos)
+    $pnlCurrentHost.Size = New-Object System.Drawing.Size(460, 30)
+    $pnlCurrentHost.BackColor = $script:Theme.Surface
+    $card2.Controls.Add($pnlCurrentHost)
+
+    # 1px border painted on the panel
+    $pnlCurrentHost.Add_Paint({
+        param($sender, $e)
+        $pen = New-Object System.Drawing.Pen($script:Theme.BorderLight, 1)
+        $e.Graphics.DrawRectangle($pen, 0, 0, ($sender.Width - 1), ($sender.Height - 1))
+        $pen.Dispose()
+    })
+
+    $lblCurrentHostValue = New-Object System.Windows.Forms.Label
+    $lblCurrentHostValue.Text = $sysInfo.Hostname
+    $lblCurrentHostValue.Location = New-Object System.Drawing.Point(10, 6)
+    $lblCurrentHostValue.AutoSize = $true
+    $lblCurrentHostValue.Font = New-Object System.Drawing.Font('Consolas', 10)
+    $lblCurrentHostValue.ForeColor = $script:Theme.TextSecondary
+    $pnlCurrentHost.Controls.Add($lblCurrentHostValue)
+
+    $yPos += 40
+
+    # --- New hostname label + character counter on the same row ---
+    $lblNewHost = New-StyledLabel -Text "NEW HOSTNAME" -X 15 -Y $yPos -IsMuted -FontSize 8 -IsBold
+    $card2.Controls.Add($lblNewHost)
+
+    # Character counter right-aligned relative to the input width (15 + 460 = 475, counter at 480)
+    $lblCharCount = New-Object System.Windows.Forms.Label
+    $lblCharCount.Text = "0 / 15"
+    $lblCharCount.Name = 'lblCharCount'
+    $lblCharCount.Location = New-Object System.Drawing.Point(418, $yPos)
+    $lblCharCount.AutoSize = $true
+    $lblCharCount.Font = New-Object System.Drawing.Font('Segoe UI', 8, [System.Drawing.FontStyle]::Bold)
+    $lblCharCount.ForeColor = $script:Theme.TextMuted
+    $card2.Controls.Add($lblCharCount)
+
+    $yPos += 18
+
+    # Monospace text box, auto-uppercases input, placeholder matches the React spec
+    $txtNewHostname = New-StyledTextBox -X 15 -Y $yPos -Width 460 -Height 30 -PlaceholderText "MYSHOW-D3-01"
+    $txtNewHostname.Name = 'txtNewHostname'
+    $txtNewHostname.Font = New-Object System.Drawing.Font('Consolas', 10.5)
+    $txtNewHostname.MaxLength = 15
+    $card2.Controls.Add($txtNewHostname)
 
     $yPos += 38
 
-    # New hostname input
-    $lblNewHost = New-StyledLabel -Text "New Hostname:" -X 15 -Y $yPos -IsBold
-    $card2.Controls.Add($lblNewHost)
-
-    $txtNewHostname = New-StyledTextBox -X 200 -Y $yPos -Width 300 -PlaceholderText "e.g., MYSHOW-D3-01"
-    $txtNewHostname.Name = 'txtNewHostname'
-    $card2.Controls.Add($txtNewHostname)
-
-    # Character count label
-    $lblCharCount = New-StyledLabel -Text "0/15 characters" -X 510 -Y ($yPos + 4) -IsMuted -FontSize 8.5
-    $lblCharCount.Name = 'lblCharCount'
-    $card2.Controls.Add($lblCharCount)
-
-    $yPos += 28
-
-    # NetBIOS rules reminder text near the input
-    $lblNetBIOSRules = New-StyledLabel -Text "NetBIOS rules: Max 15 chars, A-Z / 0-9 / hyphens only, cannot start or end with hyphen" `
-                                       -X 200 -Y $yPos -IsMuted -FontSize 8 -MaxWidth 680
-    $lblNetBIOSRules.Name = 'lblNetBIOSRules'
-    $card2.Controls.Add($lblNetBIOSRules)
-
-    $yPos += 22
-
-    # Validation feedback label
-    $lblValidation = New-StyledLabel -Text "" -X 200 -Y $yPos -FontSize 9 -MaxWidth 680
+    # --- Validation feedback (icon + text) ---
+    $lblValidation = New-Object System.Windows.Forms.Label
+    $lblValidation.Text = ""
     $lblValidation.Name = 'lblValidation'
+    $lblValidation.Location = New-Object System.Drawing.Point(15, $yPos)
+    $lblValidation.AutoSize = $false
+    $lblValidation.Width = 700
+    $lblValidation.MaximumSize = New-Object System.Drawing.Size(700, 0)
+    $lblValidation.AutoSize = $true
+    $lblValidation.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+    $lblValidation.ForeColor = $script:Theme.TextMuted
     $card2.Controls.Add($lblValidation)
-
-    # Real-time validation on text change
-    $txtNewHostname.Add_TextChanged({
-        $card = $this.Parent
-        $validationLabel = $card.Controls['lblValidation']
-        $charCountLabel = $card.Controls['lblCharCount']
-        $rulesLabel = $card.Controls['lblNetBIOSRules']
-        $previewPanel = $card.Controls['pnlPreview']
-        $inputText = $this.Text
-
-        # Handle placeholder text (do not validate the placeholder)
-        if ($inputText -eq $this.Tag) {
-            $validationLabel.Text = ''
-            $charCountLabel.Text = '0/15 characters'
-            $charCountLabel.ForeColor = $script:Theme.TextMuted
-            $this.BackColor = $script:Theme.InputBackground
-            if ($rulesLabel) { $rulesLabel.ForeColor = $script:Theme.TextMuted }
-            if ($previewPanel) { $previewPanel.Visible = $false }
-            return
-        }
-
-        # Update character count with visual feedback
-        $len = $inputText.Length
-        $charCountLabel.Text = "$len/15 characters"
-        if ($len -gt 15) {
-            $charCountLabel.ForeColor = $script:Theme.Error
-            $charCountLabel.Font = New-Object System.Drawing.Font('Segoe UI', 8.5, [System.Drawing.FontStyle]::Bold)
-        }
-        elseif ($len -gt 12) {
-            $charCountLabel.ForeColor = $script:Theme.Warning
-            $charCountLabel.Font = New-Object System.Drawing.Font('Segoe UI', 8.5, [System.Drawing.FontStyle]::Bold)
-        }
-        else {
-            $charCountLabel.ForeColor = $script:Theme.TextMuted
-            $charCountLabel.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
-        }
-
-        if ([string]::IsNullOrWhiteSpace($inputText)) {
-            $validationLabel.Text = ''
-            $this.BackColor = $script:Theme.InputBackground
-            if ($rulesLabel) { $rulesLabel.ForeColor = $script:Theme.TextMuted }
-            if ($previewPanel) { $previewPanel.Visible = $false }
-            return
-        }
-
-        # Check for invalid characters and highlight which ones
-        $invalidFound = @()
-        foreach ($ch in $inputText.ToCharArray()) {
-            if ($ch -notmatch '[a-zA-Z0-9\-]') {
-                if ($invalidFound -notcontains $ch) {
-                    $invalidFound += $ch
-                }
-            }
-        }
-
-        # Run validation
-        $result = Test-ServerHostname -Name $inputText
-        if ($result.IsValid) {
-            $validationLabel.Text = "[OK] Valid hostname"
-            $validationLabel.ForeColor = $script:Theme.Success
-            $this.BackColor = $script:Theme.InputBackground
-            if ($rulesLabel) { $rulesLabel.ForeColor = $script:Theme.TextMuted }
-            if ($previewPanel) { $previewPanel.Visible = $true }
-        }
-        else {
-            # Build detailed error with invalid character callout
-            $errText = "[X] $($result.ErrorMessage)"
-            if ($invalidFound.Count -gt 0) {
-                $badChars = ($invalidFound | ForEach-Object { "'$_'" }) -join ', '
-                $errText = "[X] Invalid characters found: $badChars -- Only A-Z, 0-9, and hyphens are allowed."
-            }
-            $validationLabel.Text = $errText
-            $validationLabel.ForeColor = $script:Theme.Error
-            # Tint the textbox background to indicate error
-            $this.BackColor = [System.Drawing.Color]::FromArgb(40, 239, 68, 68)
-            if ($rulesLabel) { $rulesLabel.ForeColor = $script:Theme.Warning }
-            if ($previewPanel) { $previewPanel.Visible = $false }
-        }
-
-        # Update preview content if valid
-        if ($result.IsValid -and $previewPanel) {
-            $lblPreviewUNC = $previewPanel.Controls['lblPreviewUNC']
-            $lblPreviewD3Net = $previewPanel.Controls['lblPreviewD3Net']
-            $lblPreviewAPI = $previewPanel.Controls['lblPreviewAPI']
-            if ($lblPreviewUNC)   { $lblPreviewUNC.Text   = "UNC Path:    \\$inputText\d3 Projects" }
-            if ($lblPreviewD3Net) { $lblPreviewD3Net.Text = "d3Net Name:  $inputText" }
-            if ($lblPreviewAPI)   { $lblPreviewAPI.Text   = "API Access:  http://${inputText}:80/api/..." }
-        }
-    })
 
     $yPos += 30
 
-    # Preview Changes section
-    $lblPreviewTitle = New-StyledLabel -Text "Preview Changes:" -X 15 -Y $yPos -IsBold -FontSize 10.5
-    $card2.Controls.Add($lblPreviewTitle)
-
-    $yPos += 28
-
-    $pnlPreview = New-StyledPanel -X 15 -Y $yPos -Width 860 -Height 100 -IsCard
+    # --- Preview panel (hidden until hostname is valid) ---
+    $pnlPreview = New-Object System.Windows.Forms.Panel
     $pnlPreview.Name = 'pnlPreview'
+    $pnlPreview.Location = New-Object System.Drawing.Point(15, $yPos)
+    $pnlPreview.Size = New-Object System.Drawing.Size(840, 110)
+    $pnlPreview.BackColor = $script:Theme.Surface
     $pnlPreview.Visible = $false
 
-    $lblPreviewUNC = New-StyledLabel -Text "UNC Path:    \\NEWNAME\d3 Projects" -X 10 -Y 10 -FontSize 9.5 -MaxWidth 830
+    # 1px border painted on the preview panel
+    $pnlPreview.Add_Paint({
+        param($sender, $e)
+        $pen = New-Object System.Drawing.Pen($script:Theme.Border, 1)
+        $e.Graphics.DrawRectangle($pen, 0, 0, ($sender.Width - 1), ($sender.Height - 1))
+        $pen.Dispose()
+    })
+
+    # "Preview" heading inside the panel
+    $lblPreviewHeading = New-Object System.Windows.Forms.Label
+    $lblPreviewHeading.Text = "PREVIEW"
+    $lblPreviewHeading.Location = New-Object System.Drawing.Point(12, 10)
+    $lblPreviewHeading.AutoSize = $true
+    $lblPreviewHeading.Font = New-Object System.Drawing.Font('Segoe UI', 7.5, [System.Drawing.FontStyle]::Bold)
+    $lblPreviewHeading.ForeColor = $script:Theme.TextMuted
+    $pnlPreview.Controls.Add($lblPreviewHeading)
+
+    $previewMonoFont = New-Object System.Drawing.Font('Consolas', 9.5)
+
+    # UNC path row
+    $lblUNCTitle = New-Object System.Windows.Forms.Label
+    $lblUNCTitle.Text = "UNC Path"
+    $lblUNCTitle.Location = New-Object System.Drawing.Point(12, 30)
+    $lblUNCTitle.AutoSize = $true
+    $lblUNCTitle.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $lblUNCTitle.ForeColor = $script:Theme.TextMuted
+    $pnlPreview.Controls.Add($lblUNCTitle)
+
+    $lblPreviewUNC = New-Object System.Windows.Forms.Label
     $lblPreviewUNC.Name = 'lblPreviewUNC'
-    $lblPreviewUNC.Font = New-Object System.Drawing.Font('Consolas', 9.5)
+    $lblPreviewUNC.Text = "\\HOSTNAME\d3 Projects"
+    $lblPreviewUNC.Location = New-Object System.Drawing.Point(110, 29)
+    $lblPreviewUNC.AutoSize = $true
+    $lblPreviewUNC.Font = $previewMonoFont
+    $lblPreviewUNC.ForeColor = $script:Theme.Accent
     $pnlPreview.Controls.Add($lblPreviewUNC)
 
-    $lblPreviewD3Net = New-StyledLabel -Text "d3Net Name:  NEWNAME" -X 10 -Y 35 -FontSize 9.5 -MaxWidth 830
+    # d3Net name row
+    $lblD3NetTitle = New-Object System.Windows.Forms.Label
+    $lblD3NetTitle.Text = "d3Net Name"
+    $lblD3NetTitle.Location = New-Object System.Drawing.Point(12, 55)
+    $lblD3NetTitle.AutoSize = $true
+    $lblD3NetTitle.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $lblD3NetTitle.ForeColor = $script:Theme.TextMuted
+    $pnlPreview.Controls.Add($lblD3NetTitle)
+
+    $lblPreviewD3Net = New-Object System.Windows.Forms.Label
     $lblPreviewD3Net.Name = 'lblPreviewD3Net'
-    $lblPreviewD3Net.Font = New-Object System.Drawing.Font('Consolas', 9.5)
+    $lblPreviewD3Net.Text = "HOSTNAME"
+    $lblPreviewD3Net.Location = New-Object System.Drawing.Point(110, 54)
+    $lblPreviewD3Net.AutoSize = $true
+    $lblPreviewD3Net.Font = $previewMonoFont
+    $lblPreviewD3Net.ForeColor = $script:Theme.Accent
     $pnlPreview.Controls.Add($lblPreviewD3Net)
 
-    $lblPreviewAPI = New-StyledLabel -Text "API Access:  http://NEWNAME:80/api/..." -X 10 -Y 60 -FontSize 9.5 -MaxWidth 830
+    # API access row
+    $lblAPITitle = New-Object System.Windows.Forms.Label
+    $lblAPITitle.Text = "API Access"
+    $lblAPITitle.Location = New-Object System.Drawing.Point(12, 80)
+    $lblAPITitle.AutoSize = $true
+    $lblAPITitle.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $lblAPITitle.ForeColor = $script:Theme.TextMuted
+    $pnlPreview.Controls.Add($lblAPITitle)
+
+    $lblPreviewAPI = New-Object System.Windows.Forms.Label
     $lblPreviewAPI.Name = 'lblPreviewAPI'
-    $lblPreviewAPI.Font = New-Object System.Drawing.Font('Consolas', 9.5)
+    $lblPreviewAPI.Text = "http://HOSTNAME:80/api/..."
+    $lblPreviewAPI.Location = New-Object System.Drawing.Point(110, 79)
+    $lblPreviewAPI.AutoSize = $true
+    $lblPreviewAPI.Font = $previewMonoFont
+    $lblPreviewAPI.ForeColor = $script:Theme.Accent
     $pnlPreview.Controls.Add($lblPreviewAPI)
 
     $card2.Controls.Add($pnlPreview)
 
-    $yPos += 115
+    $yPos += 120
 
-    # Apply Hostname Change button
-    $btnApplyHostname = New-StyledButton -Text "Apply Hostname Change" -X 15 -Y $yPos -Width 200 -Height 40 -IsPrimary -OnClick {
+    # --- Apply button ---
+    $btnApplyHostname = New-StyledButton -Text "Apply Hostname Change" -X 15 -Y $yPos `
+                                         -Width 220 -Height 38 -IsPrimary -OnClick {
         $card = $this.Parent
-        $newName = $card.Controls['txtNewHostname'].Text
+        $txtBox = $card.Controls['txtNewHostname']
+        $newName = Get-TextBoxValue $txtBox
 
-        # Handle placeholder text
-        if (-not $newName -or $newName -eq $card.Controls['txtNewHostname'].Tag) {
+        if ([string]::IsNullOrWhiteSpace($newName)) {
             [System.Windows.Forms.MessageBox]::Show(
                 "Please enter a new hostname.",
                 "No Hostname Entered",
@@ -617,64 +672,259 @@ All active d3 sessions will be disconnected.
     }
     $card2.Controls.Add($btnApplyHostname)
 
+    # Real-time validation handler -- wired after all named controls exist on card2
+    $txtNewHostname.Add_TextChanged({
+        $card             = $this.Parent
+        $validationLabel  = $card.Controls['lblValidation']
+        $charCountLabel   = $card.Controls['lblCharCount']
+        $previewPanel     = $card.Controls['pnlPreview']
+        $inputText        = $this.Text
+
+        # Suppress validation while showing placeholder text
+        if ($inputText -eq $this.Tag) {
+            $validationLabel.Text      = ''
+            $charCountLabel.Text       = "0 / 15"
+            $charCountLabel.ForeColor  = $script:Theme.TextMuted
+            $this.BackColor            = $script:Theme.InputBackground
+            if ($previewPanel) { $previewPanel.Visible = $false }
+            return
+        }
+
+        # Auto-uppercase: store caret, update, restore
+        $caretPos = $this.SelectionStart
+        $upper = $inputText.ToUpper()
+        if ($inputText -cne $upper) {
+            $this.Text = $upper
+            $this.SelectionStart = [Math]::Min($caretPos, $this.Text.Length)
+            return  # TextChanged will re-fire with the uppercased value
+        }
+
+        # Character counter -- color shifts at thresholds
+        $len = $inputText.Length
+        $charCountLabel.Text = "$len / 15"
+        if ($len -gt 15) {
+            $charCountLabel.ForeColor = $script:Theme.Error
+        } elseif ($len -gt 12) {
+            $charCountLabel.ForeColor = $script:Theme.Warning
+        } else {
+            $charCountLabel.ForeColor = $script:Theme.TextMuted
+        }
+
+        # Empty input -- clear state
+        if ([string]::IsNullOrWhiteSpace($inputText)) {
+            $validationLabel.Text  = ''
+            $this.BackColor        = $script:Theme.InputBackground
+            if ($previewPanel) { $previewPanel.Visible = $false }
+            return
+        }
+
+        # Identify any invalid characters for detailed error messaging
+        $invalidFound = @()
+        foreach ($ch in $inputText.ToCharArray()) {
+            if ($ch -notmatch '[A-Z0-9\-]' -and ($invalidFound -notcontains $ch)) {
+                $invalidFound += $ch
+            }
+        }
+
+        # Run full validation
+        $result = Test-ServerHostname -Name $inputText
+        if ($result.IsValid) {
+            $validationLabel.Text     = [char]0x2713 + "  Valid hostname"   # check mark
+            $validationLabel.ForeColor = $script:Theme.Success
+            $this.BackColor           = $script:Theme.InputBackground
+            if ($previewPanel) { $previewPanel.Visible = $true }
+        } else {
+            $errText = if ($invalidFound.Count -gt 0) {
+                $badChars = ($invalidFound | ForEach-Object { "'$_'" }) -join ', '
+                [char]0x2715 + "  Invalid character(s): $badChars"   # cross mark
+            } else {
+                [char]0x2715 + "  $($result.ErrorMessage)"
+            }
+            $validationLabel.Text      = $errText
+            $validationLabel.ForeColor = $script:Theme.Error
+            $this.BackColor            = [System.Drawing.Color]::FromArgb(40, 239, 68, 68)
+            if ($previewPanel) { $previewPanel.Visible = $false }
+        }
+
+        # Keep preview labels current while valid
+        if ($result.IsValid -and $previewPanel) {
+            $lblPreviewUNC  = $previewPanel.Controls['lblPreviewUNC']
+            $lblPreviewD3Net = $previewPanel.Controls['lblPreviewD3Net']
+            $lblPreviewAPI   = $previewPanel.Controls['lblPreviewAPI']
+            if ($lblPreviewUNC)   { $lblPreviewUNC.Text   = "\\$inputText\d3 Projects" }
+            if ($lblPreviewD3Net) { $lblPreviewD3Net.Text = $inputText }
+            if ($lblPreviewAPI)   { $lblPreviewAPI.Text   = "http://${inputText}:80/api/..." }
+        }
+    })
+
     $scrollPanel.Controls.Add($card2)
 
     # ========================================================================
-    # Card 3: Naming Conventions
+    # Card 3: Naming Conventions  (no accent)
     # ========================================================================
-    $card3 = New-StyledCard -Title "Naming Conventions" -X 20 -Y 880 -Width 900 -Height 260
+    # 7 guidelines at ~26px each + header area ~120px = ~302px
+    $card3 = New-StyledCard -Title "Naming Conventions" -X 24 -Y 920 -Width 880 -Height 350
 
-    $yPos = 50
+    $yPos = 48
 
-    # Info icon-style indicator
-    $infoBadge = New-StatusBadge -Text "INFO" -X 820 -Y 15 -Type Info
-    $card3.Controls.Add($infoBadge)
-
-    # Recommended format
-    $lblRecFormat = New-StyledLabel -Text "Recommended Format" -X 15 -Y $yPos -IsBold -FontSize 10.5
+    # --- "Recommended Format" label + accent-colored monospace format string ---
+    $lblRecFormat = New-Object System.Windows.Forms.Label
+    $lblRecFormat.Text = "RECOMMENDED FORMAT"
+    $lblRecFormat.Location = New-Object System.Drawing.Point(19, $yPos)
+    $lblRecFormat.AutoSize = $true
+    $lblRecFormat.Font = New-Object System.Drawing.Font('Segoe UI', 8, [System.Drawing.FontStyle]::Bold)
+    $lblRecFormat.ForeColor = $script:Theme.TextMuted
     $card3.Controls.Add($lblRecFormat)
-    $yPos += 25
 
-    $lblFormatExample = New-StyledLabel -Text "{SHOW}-{ROLE}-{NUMBER}" -X 15 -Y $yPos -FontSize 11
-    $lblFormatExample.Font = New-Object System.Drawing.Font('Consolas', 11, [System.Drawing.FontStyle]::Bold)
-    $lblFormatExample.ForeColor = $script:Theme.Accent
-    $card3.Controls.Add($lblFormatExample)
+    $yPos += 20
 
-    $lblFormatDesc = New-StyledLabel -Text "Example: MYSHOW-D3-01, CONCERT-GX3-02, TOUR24-UDX-01" -X 350 -Y ($yPos + 2) -IsSecondary -FontSize 9.5
-    $card3.Controls.Add($lblFormatDesc)
+    $lblFormatValue = New-Object System.Windows.Forms.Label
+    $lblFormatValue.Text = "{SHOW}-{ROLE}-{NUMBER}"
+    $lblFormatValue.Location = New-Object System.Drawing.Point(19, $yPos)
+    $lblFormatValue.AutoSize = $true
+    $lblFormatValue.Font = New-Object System.Drawing.Font('Consolas', 14, [System.Drawing.FontStyle]::Bold)
+    $lblFormatValue.ForeColor = $script:Theme.Primary
+    $card3.Controls.Add($lblFormatValue)
+
+    $yPos += 36
+
+    # --- "Examples" label + 3 pill-shaped monospace tags ---
+    $lblExamples = New-Object System.Windows.Forms.Label
+    $lblExamples.Text = "EXAMPLES"
+    $lblExamples.Location = New-Object System.Drawing.Point(19, $yPos)
+    $lblExamples.AutoSize = $true
+    $lblExamples.Font = New-Object System.Drawing.Font('Segoe UI', 8, [System.Drawing.FontStyle]::Bold)
+    $lblExamples.ForeColor = $script:Theme.TextMuted
+    $card3.Controls.Add($lblExamples)
+
+    $yPos += 20
+
+    # Render pill-shaped example tags at fixed horizontal positions
+    $exampleTags = @("MYSHOW-D3-01", "CONCERT-GX3-02", "TOUR-D3-03")
+    $tagX = 19
+    $tagFont = New-Object System.Drawing.Font('Consolas', 9.5)
+
+    foreach ($tagText in $exampleTags) {
+        # Measure text width to size the pill correctly
+        $tempGfx = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
+        $measured = $tempGfx.MeasureString($tagText, $tagFont)
+        $tempGfx.Dispose()
+        $tagWidth  = [int]$measured.Width + 24
+        $tagHeight = 26
+
+        $tagPanel = New-Object System.Windows.Forms.Panel
+        $tagPanel.Location = New-Object System.Drawing.Point($tagX, $yPos)
+        $tagPanel.Size = New-Object System.Drawing.Size($tagWidth, $tagHeight)
+        $tagPanel.BackColor = $script:Theme.Surface
+
+        # Capture values for paint closure
+        $capturedText  = $tagText
+        $capturedFont  = $tagFont
+        $capturedW     = $tagWidth
+        $capturedH     = $tagHeight
+
+        $tagPanel.Add_Paint({
+            param($sender, $e)
+            $g = $e.Graphics
+            $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+
+            # Border
+            $pen = New-Object System.Drawing.Pen($script:Theme.BorderLight, 1)
+            $rect = New-Object System.Drawing.Rectangle(0, 0, ($sender.Width - 1), ($sender.Height - 1))
+            $radius = 5
+            $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+            $path.AddArc($rect.X, $rect.Y, $radius * 2, $radius * 2, 180, 90)
+            $path.AddArc($rect.Right - $radius * 2, $rect.Y, $radius * 2, $radius * 2, 270, 90)
+            $path.AddArc($rect.Right - $radius * 2, $rect.Bottom - $radius * 2, $radius * 2, $radius * 2, 0, 90)
+            $path.AddArc($rect.X, $rect.Bottom - $radius * 2, $radius * 2, $radius * 2, 90, 90)
+            $path.CloseFigure()
+            $g.DrawPath($pen, $path)
+            $pen.Dispose()
+            $path.Dispose()
+
+            # Text
+            $textBrush = New-Object System.Drawing.SolidBrush($script:Theme.TextSecondary)
+            $sf = New-Object System.Drawing.StringFormat
+            $sf.Alignment     = [System.Drawing.StringAlignment]::Center
+            $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
+            $textRect = New-Object System.Drawing.RectangleF(0, 0, $sender.Width, $sender.Height)
+            $g.DrawString($sender.Tag, $capturedFont, $textBrush, $textRect, $sf)
+            $textBrush.Dispose()
+            $sf.Dispose()
+        }.GetNewClosure())
+
+        $tagPanel.Tag = $capturedText
+        $card3.Controls.Add($tagPanel)
+        $tagX += $tagWidth + 10
+    }
+
     $yPos += 38
 
-    # Separator line
-    $separator = New-Object System.Windows.Forms.Panel
-    $separator.Location = New-Object System.Drawing.Point(15, $yPos)
-    $separator.Size = New-Object System.Drawing.Size(860, 1)
-    $separator.BackColor = $script:Theme.Border
-    $card3.Controls.Add($separator)
-    $yPos += 15
+    # Separator between examples and guidelines
+    $sep2 = New-Object System.Windows.Forms.Panel
+    $sep2.Location = New-Object System.Drawing.Point(19, $yPos)
+    $sep2.Size = New-Object System.Drawing.Size(836, 1)
+    $sep2.BackColor = $script:Theme.Border
+    $card3.Controls.Add($sep2)
 
-    # Guidelines list
+    $yPos += 14
+
+    # --- "Guidelines" label + 7 bullet points ---
+    $lblGuidelinesHdr = New-Object System.Windows.Forms.Label
+    $lblGuidelinesHdr.Text = "GUIDELINES"
+    $lblGuidelinesHdr.Location = New-Object System.Drawing.Point(19, $yPos)
+    $lblGuidelinesHdr.AutoSize = $true
+    $lblGuidelinesHdr.Font = New-Object System.Drawing.Font('Segoe UI', 8, [System.Drawing.FontStyle]::Bold)
+    $lblGuidelinesHdr.ForeColor = $script:Theme.TextMuted
+    $card3.Controls.Add($lblGuidelinesHdr)
+
+    $yPos += 20
+
     $guidelines = @(
-        "NetBIOS limit: 15 characters maximum",
+        "Maximum 15 characters (Windows NetBIOS limit)",
         "Use only letters (A-Z), numbers (0-9), and hyphens (-)",
-        "Avoid spaces, underscores, and special characters",
-        "The hostname is used for d3Net discovery, UNC share paths (\\hostname\d3 Projects\), and API access"
+        "Cannot start or end with a hyphen",
+        "No spaces, underscores, or special characters",
+        "Used for d3Net discovery -- must be unique on the subnet",
+        "UNC share paths reference the hostname (\\hostname\d3 Projects)",
+        "API endpoint addresses use the hostname as the host (http://hostname:80/api/...)"
     )
 
     foreach ($guideline in $guidelines) {
-        $bulletLabel = New-StyledLabel -Text $guideline -X 30 -Y $yPos -FontSize 9.5 -MaxWidth 830
-        $card3.Controls.Add($bulletLabel)
+        # Purple dot bullet indicator
+        $bullet = New-Object System.Windows.Forms.Panel
+        $bullet.Location = New-Object System.Drawing.Point(19, ($yPos + 5))
+        $bullet.Size = New-Object System.Drawing.Size(7, 7)
+        $bullet.BackColor = $script:Theme.Primary
 
-        # Bullet point marker
-        $bulletMarker = New-StyledLabel -Text "`u{2022}" -X 15 -Y $yPos -FontSize 9.5
-        $bulletMarker.ForeColor = $script:Theme.Primary
-        $card3.Controls.Add($bulletMarker)
+        $bullet.Add_Paint({
+            param($sender, $e)
+            $g = $e.Graphics
+            $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+            $brush = New-Object System.Drawing.SolidBrush($script:Theme.Primary)
+            $g.FillEllipse($brush, 0, 0, ($sender.Width - 1), ($sender.Height - 1))
+            $brush.Dispose()
+        })
 
-        $yPos += 25
+        $card3.Controls.Add($bullet)
+
+        $guideLabel = New-Object System.Windows.Forms.Label
+        $guideLabel.Text = $guideline
+        $guideLabel.Location = New-Object System.Drawing.Point(34, $yPos)
+        $guideLabel.AutoSize = $false
+        $guideLabel.Width = 820
+        $guideLabel.MaximumSize = New-Object System.Drawing.Size(820, 0)
+        $guideLabel.AutoSize = $true
+        $guideLabel.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
+        $guideLabel.ForeColor = $script:Theme.TextSecondary
+        $card3.Controls.Add($guideLabel)
+
+        $yPos += 26
     }
 
     $scrollPanel.Controls.Add($card3)
 
-    # Add scroll panel to content panel
+    # Commit to the content panel
     $ContentPanel.Controls.Add($scrollPanel)
     $ContentPanel.ResumeLayout()
 }

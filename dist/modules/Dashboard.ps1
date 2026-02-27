@@ -1,4 +1,4 @@
-# Dashboard.ps1 - DISGUISE BUDDY Dashboard Overview Module
+﻿# Dashboard.ps1 - DISGUISE BUDDY Dashboard Overview Module
 # Provides the New-DashboardView function which builds the main Dashboard panel
 # displaying quick status cards, network overview, recent profiles, and quick actions.
 
@@ -10,7 +10,7 @@
 # Helper Functions (private to this module)
 # ============================================================================
 
-# Get-ServerHostname removed — use Get-ServerHostname from ServerIdentity.ps1 instead
+# Get-ServerHostname removed -- use Get-ServerHostname from ServerIdentity.ps1 instead
 
 function Get-ActiveAdapterCount {
     <#
@@ -159,7 +159,7 @@ function Get-DisguiseServerDetails {
         }
     }
 
-    # Build the base URL once — use the discovered port, not a hardcoded 80
+    # Build the base URL once -- use the discovered port, not a hardcoded 80
     $baseUrl = if ($Port -eq 80) { "http://$IPAddress" } else { "http://$IPAddress`:$Port" }
 
     $result = [PSCustomObject]@{
@@ -179,7 +179,7 @@ function Get-DisguiseServerDetails {
         $httpClient.Timeout = [TimeSpan]::FromSeconds(3)
 
         # ----------------------------------------------------------------
-        # 1. System info — version
+        # 1. System info -- version
         # ----------------------------------------------------------------
         try {
             $sysJson = $httpClient.GetStringAsync("$baseUrl/api/service/system").Result
@@ -199,7 +199,7 @@ function Get-DisguiseServerDetails {
         }
 
         # ----------------------------------------------------------------
-        # 2. Network adapters — enabled count and disconnected list
+        # 2. Network adapters -- enabled count and disconnected list
         # ----------------------------------------------------------------
         try {
             $nicJson = $httpClient.GetStringAsync("$baseUrl/api/service/system/networkadapters").Result
@@ -232,7 +232,7 @@ function Get-DisguiseServerDetails {
         }
 
         # ----------------------------------------------------------------
-        # 3. GPU outputs — count of active outputs
+        # 3. GPU outputs -- count of active outputs
         # ----------------------------------------------------------------
         try {
             $gpuJson = $httpClient.GetStringAsync("$baseUrl/api/service/system/gpuoutputs").Result
@@ -263,7 +263,7 @@ function Get-DisguiseServerDetails {
         }
 
         # ----------------------------------------------------------------
-        # 4. Projects — count and names
+        # 4. Projects -- count and names
         # ----------------------------------------------------------------
         try {
             $projJson = $httpClient.GetStringAsync("$baseUrl/api/service/system/projects").Result
@@ -850,7 +850,7 @@ function New-DashboardView {
     $fleetContentY = $fleetHeaderY + 50  # below the section header
 
     if ($disguiseServers.Count -eq 0) {
-        # No servers known — show a helpful prompt
+        # No servers known -- show a helpful prompt
         $lblNoFleet = New-StyledLabel `
             -Text "No disguise servers discovered yet. Run a Scan Network or Auto-Discover (DNS-SD) from the Network Deploy view." `
             -X 20 -Y $fleetContentY -FontSize 9 -IsMuted -MaxWidth 880
@@ -871,7 +871,7 @@ function New-DashboardView {
             -X 20 -Y $fleetContentY -FontSize 9 -IsMuted
         $scrollContainer.Controls.Add($lblFleetStatus)
 
-        # "Refresh Fleet" button — re-queries all known servers
+        # "Refresh Fleet" button -- re-queries all known servers
         $btnRefreshFleet = New-StyledButton -Text ([char]0x21BB + " Refresh Fleet") `
             -X 820 -Y ($fleetHeaderY + 5) -Width 120 -Height 28
         $scrollContainer.Controls.Add($btnRefreshFleet)
@@ -895,7 +895,7 @@ function New-DashboardView {
                 [System.Windows.Forms.Panel]$CardPanel
             )
 
-            # Determine which port to use — prefer discovered port 80, else fallback
+            # Determine which port to use -- prefer discovered port 80, else fallback
             $apiPort = 80
             if ($ServerScanResult.Ports -and ($ServerScanResult.Ports -contains 80)) {
                 $apiPort = 80
@@ -912,7 +912,7 @@ function New-DashboardView {
                 $existingAccent.BackColor = $accentColor
             }
 
-            # Update all the stat labels — they are stored by Name on the card panel
+            # Update all the stat labels -- they are stored by Name on the card panel
             $hostname = if ($ServerScanResult.Hostname -and $ServerScanResult.Hostname -ne '') {
                 $ServerScanResult.Hostname
             } else {
@@ -1056,7 +1056,7 @@ function New-DashboardView {
         }
 
         # ---------------------------------------------------------------
-        # Populate the cards — query servers sequentially with DoEvents()
+        # Populate the cards -- query servers sequentially with DoEvents()
         # so the UI remains responsive.
         # ---------------------------------------------------------------
         $totalFleet = $fleetCardPanels.Count
@@ -1080,7 +1080,7 @@ function New-DashboardView {
         $lblFleetStatus.ForeColor = $script:Theme.Success
 
         # ---------------------------------------------------------------
-        # Refresh Fleet click handler — re-runs the query loop
+        # Refresh Fleet click handler -- re-runs the query loop
         # ---------------------------------------------------------------
         $btnRefreshFleet.Add_Click({
             $totalRefresh = $fleetCardPanels.Count
