@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
     "api": "npx tsx electron/dev-server.ts",
+    "start": "concurrently --kill-others \"npx tsx electron/dev-server.ts\" \"vite --open\"",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "vite build && electron-builder"
   },
