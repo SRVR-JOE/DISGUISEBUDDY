@@ -161,4 +161,20 @@ export const api = {
     const params = new URLSearchParams({ server, packages: packageIds.join(',') })
     return openEventSource(`/api/install?${params.toString()}`)
   },
+
+  // SSE — Terminal: execute command
+  // Returns an EventSource. Caller is responsible for attaching handlers and closing it.
+  executeCommand(command: string, server?: string): EventSource {
+    const params = new URLSearchParams({ command })
+    if (server) params.set('server', server)
+    return openEventSource(`/api/terminal/execute?${params.toString()}`)
+  },
+
+  // SSE — Terminal: ping host
+  // Returns an EventSource. Caller is responsible for attaching handlers and closing it.
+  pingHost(target: string, count?: number): EventSource {
+    const params = new URLSearchParams({ target })
+    if (count) params.set('count', String(count))
+    return openEventSource(`/api/terminal/ping?${params.toString()}`)
+  },
 }

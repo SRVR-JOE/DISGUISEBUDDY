@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-const VIEW_IDS = ['dashboard', 'profiles', 'network', 'smb', 'identity', 'deploy'] as const
+const VIEW_IDS = ['dashboard', 'profiles', 'network', 'smb', 'identity', 'deploy', 'software', 'terminal'] as const
 type ViewId = typeof VIEW_IDS[number]
 
 interface UseKeyboardShortcutsOptions {
@@ -20,10 +20,10 @@ export function useKeyboardShortcuts({
 }: UseKeyboardShortcutsOptions): void {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent): void {
-      // Ctrl+1 through Ctrl+6: switch views
+      // Ctrl+1 through Ctrl+8: switch views
       if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
         const digit = parseInt(e.key, 10)
-        if (digit >= 1 && digit <= 6) {
+        if (digit >= 1 && digit <= 8) {
           e.preventDefault()
           const viewId: ViewId = VIEW_IDS[digit - 1]
           onViewChange(viewId)

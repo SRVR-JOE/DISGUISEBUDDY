@@ -10,6 +10,7 @@ import { SMBPage } from './pages/SMBPage'
 import { IdentityPage } from './pages/IdentityPage'
 import { DeployPage } from './pages/DeployPage'
 import { SoftwarePage } from './pages/SoftwarePage'
+import { TerminalPage } from './pages/TerminalPage'
 
 export default function App(): React.ReactElement {
   const [activeView, setActiveView] = useState('dashboard')
@@ -42,6 +43,7 @@ export default function App(): React.ReactElement {
       case 'identity':  return <IdentityPage />
       case 'deploy':    return <DeployPage />
       case 'software':  return <SoftwarePage />
+      case 'terminal':  return <TerminalPage />
       default:          return <DashboardPage onViewChange={setActiveView} />
     }
   }

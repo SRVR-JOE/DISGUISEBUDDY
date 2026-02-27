@@ -21,6 +21,7 @@ import {
 import { scanNetwork } from './services/scanner.js'
 import { deployProfile } from './services/deployer.js'
 import { installSoftware, getPackages, addPackage, removePackage } from './services/installer.js'
+import { executeRemote, executeLocal, pingHost } from './services/terminal.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SOFTWARE_DIR = path.resolve(__dirname, '..', '..', 'software')
@@ -256,6 +257,74 @@ app.get('/api/install', (req: Request, res: Response) => {
         res.end()
       },
     }
+  )
+
+  req.on('close', () => cancel())
+})
+
+// ─── SSE: Terminal execute ────────────────────────────────────────────────────
+// Query params: command (required), server (optional), credential_user (optional), credential_pass (optional)
+// If server is provided the command runs remotely via WinRM; otherwise locally.
+
+app.get('/api/terminal/execute', (req: Request, res: Response) => {
+  sseHeaders(res)
+
+  const command = (req.query.command as string) || ''
+  const server = (req.query.server as string) || ''
+  const credUser = (req.query.credential_user as string) || ''
+  const credPass = (req.query.credential_pass as string) || ''
+
+  if (!command.trim()) {
+    sendSse(res, 'error', { message: 'command query param is required' })
+    res.end()
+    return
+  }
+
+  const credential =
+    credUser && credPass ? { username: credUser, password: credPass } : undefined
+
+  const callbacks = {
+    onOutput: (line: string) => sendSse(res, 'output', { line }),
+    onError: (line: string) => sendSse(res, 'error', { line }),
+    onComplete: (result: { exitCode: number; durationMs: number; stdout: string; stderr: string }) => {
+      sendSse(res, 'complete', result)
+      res.end()
+    },
+  }
+
+  const { cancel } = server
+    ? executeRemote(server, command, callbacks, credential)
+    : executeLocal(command, callbacks)
+
+  req.on('close', () => cancel())
+})
+
+// ─── SSE: Terminal ping ───────────────────────────────────────────────────────
+// Query params: target (required), count (optional, default 4)
+
+app.get('/api/terminal/ping', (req: Request, res: Response) => {
+  sseHeaders(res)
+
+  const target = (req.query.target as string) || ''
+  const count = parseInt(req.query.count as string) || 4
+
+  if (!target.trim()) {
+    sendSse(res, 'error', { message: 'target query param is required' })
+    res.end()
+    return
+  }
+
+  const { cancel } = pingHost(
+    target,
+    count,
+    {
+      onOutput: (line: string) => sendSse(res, 'output', { line }),
+      onError: (line: string) => sendSse(res, 'error', { line }),
+      onComplete: (result) => {
+        sendSse(res, 'complete', result)
+        res.end()
+      },
+    },
   )
 
   req.on('close', () => cancel())

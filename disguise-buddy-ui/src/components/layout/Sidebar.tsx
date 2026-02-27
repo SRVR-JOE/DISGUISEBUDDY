@@ -8,6 +8,7 @@ import {
   Server,
   Rocket,
   Package,
+  Terminal,
   Sun,
   Moon,
   ChevronRight,
@@ -37,6 +38,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'identity',  label: 'Server Identity',  icon: Server,          shortcut: 'Ctrl+5' },
   { id: 'deploy',    label: 'Network Deploy',   icon: Rocket,          shortcut: 'Ctrl+6' },
   { id: 'software',  label: 'Software',         icon: Package,         shortcut: 'Ctrl+7' },
+  { id: 'terminal',  label: 'Terminal',         icon: Terminal,        shortcut: 'Ctrl+8' },
 ]
 
 // ─── Constants ────────────────────────────────────────────────────────────────

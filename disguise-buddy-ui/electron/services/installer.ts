@@ -5,55 +5,39 @@
  * disguise servers via PowerShell remoting / SMB.
  *
  * Package manifest
- * ────────────────
- * Packages live in a `software/` directory that sits alongside the `profiles/`
- * directory.  A `software/packages.json` file holds metadata; the actual
- * installer binaries sit next to it.
- *
- *   ../../software/
- *     packages.json     ← manifest
- *     disguise-r27.4.exe
- *     vcredist_x64.exe
- *     ...
+ * ----------------
+ * Packages live in a `software/` directory alongside `profiles/`.
+ * A `software/packages.json` file holds metadata; the actual installer
+ * binaries sit next to it.
  *
  * Installation flow (per package)
- * ────────────────────────────────
- *  1. copying    — Copy installer to \\{ip}\C$\Temp\ via PowerShell Copy-Item
- *  2. installing — Invoke-Command runs the installer silently
- *  3. verifying  — Check that the process exited cleanly
+ * -------------------------------
+ *  1. copying    -- Copy installer to \\{ip}\C$\Temp\ via PowerShell Copy-Item
+ *  2. installing -- Invoke-Command runs the installer silently
+ *  3. verifying  -- Check that the process exited cleanly
  *  4. done | error
- *
- * Dev / mock mode (non-Windows or MOCK_BACKEND=true):
- *   Simulates each step with realistic delays and always returns success.
  */
 
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { randomUUID } from 'crypto'
-import { isDevMode, runPowerShell, delay, randomInt } from './utils.js'
+import { runPowerShell, delay } from './utils.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// ─── Resolve software directory relative to this file ─────────────────────────
-// electron/services/installer.ts → ../../software
-// (same level as profiles/)
 const DEFAULT_SOFTWARE_DIR = path.resolve(__dirname, '..', '..', '..', 'software')
 const MANIFEST_FILENAME = 'packages.json'
 
-// ─── Public types ─────────────────────────────────────────────────────────────
+// -- Public types -------------------------------------------------------------
 
 export interface SoftwarePackage {
   id: string
   name: string
   version: string
-  /** Installer filename (basename only) */
   filename: string
-  /** Full absolute path to the installer on the local machine */
   path: string
-  /** Silent install arguments, e.g. "/S" or "/quiet /norestart" */
   silentArgs: string
-  /** File size in bytes (0 if not yet measured) */
   size: number
   description: string
 }
@@ -81,7 +65,7 @@ export interface InstallCallbacks {
   onError: (error: Error) => void
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// -- Public API ---------------------------------------------------------------
 
 export function installSoftware(
   options: InstallOptions,
@@ -92,11 +76,7 @@ export function installSoftware(
 
   const run = async () => {
     try {
-      if (isDevMode()) {
-        await runMockInstall(options, callbacks, () => cancelled)
-      } else {
-        await runLiveInstall(options, callbacks, () => cancelled)
-      }
+      await runLiveInstall(options, callbacks, () => cancelled)
     } catch (err) {
       if (!cancelled) {
         callbacks.onError(err instanceof Error ? err : new Error(String(err)))
@@ -113,12 +93,8 @@ export function installSoftware(
   return { cancel }
 }
 
-// ─── Package management ───────────────────────────────────────────────────────
+// -- Package management -------------------------------------------------------
 
-/**
- * Reads the packages.json manifest from `packagesDir` and returns all
- * package entries, enriching each with the real file size from disk.
- */
 export function getPackages(packagesDir: string = DEFAULT_SOFTWARE_DIR): SoftwarePackage[] {
   const manifestPath = path.join(packagesDir, MANIFEST_FILENAME)
 
@@ -137,7 +113,7 @@ export function getPackages(packagesDir: string = DEFAULT_SOFTWARE_DIR): Softwar
       try {
         size = fs.statSync(fullPath).size
       } catch {
-        // File may not exist yet (package catalogued but not yet downloaded)
+        // File may not exist yet
       }
       return { ...pkg, path: fullPath, size }
     })
@@ -147,10 +123,6 @@ export function getPackages(packagesDir: string = DEFAULT_SOFTWARE_DIR): Softwar
   }
 }
 
-/**
- * Adds a new package entry to the manifest.  Does NOT copy the installer file.
- * Returns the complete SoftwarePackage including the generated id.
- */
 export function addPackage(
   packagesDir: string = DEFAULT_SOFTWARE_DIR,
   pkg: Omit<SoftwarePackage, 'id' | 'size'>,
@@ -178,11 +150,6 @@ export function addPackage(
   return newPkg
 }
 
-/**
- * Removes a package from the manifest by id.
- * Returns true if found and removed, false if the id was not in the manifest.
- * Does NOT delete the installer file from disk.
- */
 export function removePackage(
   packagesDir: string = DEFAULT_SOFTWARE_DIR,
   id: string,
@@ -194,7 +161,7 @@ export function removePackage(
   return true
 }
 
-// ─── Manifest I/O helpers ─────────────────────────────────────────────────────
+// -- Manifest I/O helpers -----------------------------------------------------
 
 function ensureManifestDir(packagesDir: string): void {
   if (!fs.existsSync(packagesDir)) {
@@ -208,13 +175,11 @@ function ensureManifestDir(packagesDir: string): void {
 
 function writeManifest(packagesDir: string, packages: SoftwarePackage[]): void {
   const manifestPath = path.join(packagesDir, MANIFEST_FILENAME)
-  // Strip the resolved absolute path before writing — store only filename so
-  // the manifest is portable across machines
   const portable = packages.map(({ path: _p, size: _s, ...rest }) => rest)
   fs.writeFileSync(manifestPath, JSON.stringify(portable, null, 2), 'utf-8')
 }
 
-// ─── Live implementation ──────────────────────────────────────────────────────
+// -- Live implementation ------------------------------------------------------
 
 async function runLiveInstall(
   options: InstallOptions,
@@ -241,10 +206,9 @@ async function runLiveInstall(
     }
 
     try {
-      // ── 1. Copy installer to remote Temp directory ─────────────────────────
-      progress('copying', 10, `Copying ${pkg.filename} to \\\\${targetIP}\\C$\\Temp\\…`)
+      // 1. Copy installer to remote Temp directory
+      progress('copying', 10, `Copying ${pkg.filename} to \\\\${targetIP}\\C$\\Temp\\...`)
 
-      // Ensure C:\Temp exists on the remote machine
       const mkdirResult = await runPowerShell(
         `Invoke-Command -ComputerName ${targetIP}${credArg} ` +
         `-ScriptBlock { New-Item -ItemType Directory -Path 'C:\\Temp' -Force | Out-Null } -ErrorAction Stop`
@@ -253,9 +217,7 @@ async function runLiveInstall(
         throw new Error(`Could not create remote Temp directory: ${mkdirResult.stderr || mkdirResult.stdout}`)
       }
 
-      const remoteTempPath = `\\\\${targetIP}\\C$\\Temp\\${pkg.filename}`
       const copyResult = await runPowerShell(
-        // Use New-PSSession + Copy-Item -ToSession so credentials flow correctly
         `$session = New-PSSession -ComputerName ${targetIP}${credArg} -ErrorAction Stop; ` +
         `Copy-Item -Path '${escapePs(pkg.path)}' -Destination 'C:\\Temp\\${pkg.filename}' ` +
         `-ToSession $session -ErrorAction Stop; ` +
@@ -267,8 +229,8 @@ async function runLiveInstall(
 
       progress('copying', 50, `${pkg.filename} copied successfully`)
 
-      // ── 2. Execute installer remotely ──────────────────────────────────────
-      progress('installing', 60, `Installing ${pkg.name}…`)
+      // 2. Execute installer remotely
+      progress('installing', 60, `Installing ${pkg.name}...`)
 
       const installResult = await runPowerShell(
         `Invoke-Command -ComputerName ${targetIP}${credArg} -ScriptBlock { ` +
@@ -280,7 +242,7 @@ async function runLiveInstall(
         `} -ErrorAction Stop`
       )
 
-      // Common silent-install exit codes: 0 = success, 3010 = success + reboot pending
+      // Exit codes: 0 = success, 3010 = success + reboot pending
       if (installResult.exitCode !== 0 && installResult.exitCode !== 3010) {
         throw new Error(
           `Installer exited with code ${installResult.exitCode}: ` +
@@ -290,14 +252,14 @@ async function runLiveInstall(
 
       progress('installing', 85, `${pkg.name} installed (exit code ${installResult.exitCode})`)
 
-      // ── 3. Cleanup temp file ───────────────────────────────────────────────
-      progress('verifying', 90, `Cleaning up temporary files…`)
+      // 3. Cleanup temp file
+      progress('verifying', 90, `Cleaning up temporary files...`)
 
       await runPowerShell(
         `Invoke-Command -ComputerName ${targetIP}${credArg} -ScriptBlock { ` +
         `Remove-Item 'C:\\Temp\\${pkg.filename}' -Force -ErrorAction SilentlyContinue } -ErrorAction SilentlyContinue`
       ).catch(() => {
-        // Non-critical — do not fail the overall install
+        // Non-critical
       })
 
       progress('done', 100, `${pkg.name} installation complete`)
@@ -310,15 +272,11 @@ async function runLiveInstall(
       failed.push(pkg.id)
     }
 
-    // Brief pause between packages so the WinRM session doesn't flood
+    // Brief pause between packages
     if (!isCancelled() && packages.indexOf(pkg) < packages.length - 1) {
       await delay(500)
     }
   }
-
-  // Use a local reference to avoid referencing remote path after loop
-  const _remoteTempPath = `\\\\${targetIP}\\C$\\Temp`
-  console.info(`[installer] Cleanup: ${_remoteTempPath}`)
 
   if (!isCancelled()) {
     callbacks.onComplete({
@@ -329,7 +287,7 @@ async function runLiveInstall(
   }
 }
 
-// ─── PowerShell helpers ───────────────────────────────────────────────────────
+// -- PowerShell helpers -------------------------------------------------------
 
 function buildCredentialArg(credential?: InstallOptions['credential']): string {
   if (!credential) return ''
@@ -343,113 +301,4 @@ function buildCredentialArg(credential?: InstallOptions['credential']): string {
 
 function escapePs(s: string): string {
   return s.replace(/'/g, "''")
-}
-
-// ─── Mock / dev implementation ────────────────────────────────────────────────
-
-interface MockPackageStep {
-  step: InstallProgress['step']
-  percent: number
-  message: (pkg: SoftwarePackage, ip: string) => string
-  minMs: number
-  maxMs: number
-}
-
-const MOCK_PACKAGE_STEPS: MockPackageStep[] = [
-  {
-    step: 'copying',
-    percent: 10,
-    message: (pkg, ip) => `Copying ${pkg.filename} to \\\\${ip}\\C$\\Temp\\…`,
-    minMs: 600,
-    maxMs: 1800,
-  },
-  {
-    step: 'copying',
-    percent: 50,
-    message: (pkg) => `${pkg.filename} (${formatSize(pkg.size)}) uploaded`,
-    minMs: 400,
-    maxMs: 900,
-  },
-  {
-    step: 'installing',
-    percent: 60,
-    message: (pkg) => `Launching ${pkg.filename} with args: ${pkg.silentArgs || '/quiet'}…`,
-    minMs: 200,
-    maxMs: 400,
-  },
-  {
-    step: 'installing',
-    percent: 85,
-    message: (pkg) => `${pkg.name} installer running silently…`,
-    minMs: 1500,
-    maxMs: 4000,
-  },
-  {
-    step: 'verifying',
-    percent: 92,
-    message: (pkg) => `Verifying ${pkg.name} installation…`,
-    minMs: 400,
-    maxMs: 800,
-  },
-  {
-    step: 'done',
-    percent: 100,
-    message: (pkg) => `${pkg.name} installed successfully`,
-    minMs: 100,
-    maxMs: 200,
-  },
-]
-
-async function runMockInstall(
-  options: InstallOptions,
-  callbacks: InstallCallbacks,
-  isCancelled: () => boolean,
-): Promise<void> {
-  const { targetIP, packages } = options
-  const installed: string[] = []
-  const failed: string[] = []
-
-  for (const pkg of packages) {
-    if (isCancelled()) break
-
-    for (const mockStep of MOCK_PACKAGE_STEPS) {
-      if (isCancelled()) break
-
-      callbacks.onProgress({
-        packageId: pkg.id,
-        packageName: pkg.name,
-        step: mockStep.step,
-        percent: mockStep.percent,
-        message: mockStep.message(pkg, targetIP),
-      })
-
-      await delay(randomInt(mockStep.minMs, mockStep.maxMs))
-    }
-
-    if (!isCancelled()) {
-      installed.push(pkg.id)
-    }
-  }
-
-  if (!isCancelled()) {
-    callbacks.onComplete({
-      success: failed.length === 0,
-      installed,
-      failed,
-    })
-  }
-}
-
-// ─── Formatting helpers ───────────────────────────────────────────────────────
-
-function formatSize(bytes: number): string {
-  if (!bytes || bytes === 0) return 'unknown size'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
 }
