@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 title DISGUISE BUDDY
 color 0A
 echo.
@@ -7,17 +8,16 @@ echo   DISGUISE BUDDY
 echo   ============================================
 echo.
 
-:: Check Node.js is installed
+:: Check Node.js is installed — auto-install if missing
 where node >nul 2>nul
 if %ERRORLEVEL% NEQ 0 (
-    color 0C
-    echo   ERROR: Node.js is not installed or not in PATH
+    echo   Node.js not found. Installing automatically...
     echo.
-    echo   Download it from: https://nodejs.org
-    echo   Install the LTS version, then restart this script.
-    echo.
-    pause
-    exit /b 1
+    call :INSTALL_NODE
+    if !ERRORLEVEL! NEQ 0 (
+        pause
+        exit /b 1
+    )
 )
 
 :: Show Node version
@@ -90,3 +90,65 @@ echo.
 
 :: Keep the window open so the background processes stay alive
 cmd /k
+goto :eof
+
+:: ============================================================
+:: Subroutine: Download and install Node.js LTS
+:: ============================================================
+:INSTALL_NODE
+    :: Detect architecture
+    if "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
+        set "NODE_ARCH=x64"
+    ) else (
+        set "NODE_ARCH=x86"
+    )
+
+    set "NODE_MSI=%TEMP%\node-install.msi"
+    echo   Downloading Node.js 22 LTS for !NODE_ARCH!...
+    echo.
+
+    powershell -NoProfile -Command ^
+        "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;" ^
+        "$page = Invoke-WebRequest -Uri 'https://nodejs.org/dist/latest-v22.x/' -UseBasicParsing;" ^
+        "$msi = ($page.Links | Where-Object { $_.href -match 'node-v.+-!NODE_ARCH!\.msi$' } | Select-Object -First 1).href;" ^
+        "if (-not $msi) { Write-Host '  ERROR: Could not find installer'; exit 1 }" ^
+        "$url = 'https://nodejs.org/dist/latest-v22.x/' + $msi;" ^
+        "Write-Host \"  Downloading $url\";" ^
+        "Invoke-WebRequest -Uri $url -OutFile '!NODE_MSI!' -UseBasicParsing"
+
+    if not exist "!NODE_MSI!" (
+        color 0C
+        echo.
+        echo   ERROR: Failed to download Node.js installer.
+        exit /b 1
+    )
+
+    :: Silent install (requires admin for Program Files)
+    echo.
+    echo   Installing Node.js (this may take a minute)...
+    msiexec /i "!NODE_MSI!" /qn /norestart
+    if !ERRORLEVEL! NEQ 0 (
+        echo   Silent install needs elevation, retrying with UI...
+        msiexec /i "!NODE_MSI!" /passive /norestart
+    )
+
+    :: Clean up
+    del "!NODE_MSI!" >nul 2>nul
+
+    :: Add to PATH for this session
+    set "PATH=%ProgramFiles%\nodejs;%PATH%"
+
+    :: Verify
+    where node >nul 2>nul
+    if !ERRORLEVEL! NEQ 0 (
+        color 0C
+        echo.
+        echo   ERROR: Node.js installation failed.
+        echo   Try right-clicking Start-DisguiseBuddy.bat
+        echo   and selecting "Run as Administrator".
+        exit /b 1
+    )
+
+    for /f "tokens=*" %%v in ('node --version') do echo   Node.js %%v installed successfully.
+    echo.
+    exit /b 0
