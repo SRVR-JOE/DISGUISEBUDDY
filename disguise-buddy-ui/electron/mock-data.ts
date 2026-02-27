@@ -1,4 +1,8 @@
-// ─── Types (mirrored from src/lib/types.ts — no path alias in electron layer) ──
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+// ─── Types (mirrored from src/lib/types.ts -- no path alias in electron layer) ──
 
 interface AdapterConfig {
   Index: number
@@ -82,133 +86,64 @@ interface Result {
   message: string
 }
 
-// ─── Shared adapter template ──────────────────────────────────────────────────
+// ─── Load profiles from disk ────────────────────────────────────────────────
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const PROFILES_DIR = path.resolve(__dirname, '..', '..', 'profiles')
 
-function makeAdapter(
-  index: number,
-  role: string,
-  displayName: string,
-  adapterName: string,
-  ip: string,
-  subnet: string,
-  dhcp: boolean,
-  enabled: boolean,
-): AdapterConfig {
-  return {
-    Index: index,
-    Role: role,
-    DisplayName: displayName,
-    AdapterName: adapterName,
-    IPAddress: ip,
-    SubnetMask: subnet,
-    Gateway: '',
-    DNS1: '',
-    DNS2: '',
-    DHCP: dhcp,
-    VLANID: null,
-    Enabled: enabled,
+// ─── Load profiles from disk ────────────────────────────────────────────────
+
+function loadProfilesFromDisk(): Profile[] {
+  try {
+    if (!fs.existsSync(PROFILES_DIR)) {
+      console.warn(`[mock-data] Profiles directory not found: ${PROFILES_DIR}`)
+      return []
+    }
+    const files = fs.readdirSync(PROFILES_DIR).filter(f => f.endsWith('.json')).sort()
+    const profiles: Profile[] = []
+    for (const file of files) {
+      try {
+        const raw = fs.readFileSync(path.join(PROFILES_DIR, file), 'utf-8')
+        const data = JSON.parse(raw)
+        // Ensure required fields exist with defaults
+        profiles.push({
+          Name: data.Name ?? path.basename(file, '.json'),
+          Description: data.Description ?? '',
+          Created: data.Created ?? new Date().toISOString(),
+          Modified: data.Modified ?? new Date().toISOString(),
+          ServerName: data.ServerName ?? '',
+          NetworkAdapters: data.NetworkAdapters ?? [],
+          SMBSettings: data.SMBSettings ?? {
+            ShareD3Projects: true,
+            ProjectsPath: 'D:\\d3 Projects',
+            ShareName: 'd3 Projects',
+            SharePermissions: 'Administrators:Full',
+            AdditionalShares: [],
+          },
+          CustomSettings: data.CustomSettings ?? {},
+        })
+      } catch (err) {
+        console.warn(`[mock-data] Failed to parse ${file}: ${err}`)
+      }
+    }
+    console.log(`[mock-data] Loaded ${profiles.length} profiles from ${PROFILES_DIR}`)
+    return profiles
+  } catch (err) {
+    console.error(`[mock-data] Error reading profiles directory: ${err}`)
+    return []
   }
 }
 
 // ─── Mock data stores ─────────────────────────────────────────────────────────
-
 // In-memory stores so mutation endpoints (save, delete, configure) are reflected
-// within the same server session.
-let mockAdapters: AdapterConfig[] = [
-  makeAdapter(0, 'd3Net', 'NIC A - d3 Network',    'NIC A', '192.168.10.11', '255.255.255.0', false, true),
-  makeAdapter(1, 'sACN',  'NIC B - Lighting',       'NIC B', '',              '',              true,  true),
-  makeAdapter(2, 'Media', 'NIC C - Media Network',  'NIC C', '192.168.20.11', '255.255.255.0', false, true),
-  makeAdapter(3, 'NDI',   'NIC D - NDI Video',      'NIC D', '',              '',              true,  true),
-  makeAdapter(4, '100G',  'NIC E - 100G',           'NIC E', '',              '',              true,  true),
-  makeAdapter(5, '100G',  'NIC F - 100G',           'NIC F', '',              '',              true,  true),
-]
+// within the same server session. Profiles are seeded from the real JSON files.
 
-const directorAdapters = (): AdapterConfig[] => [
-  makeAdapter(0, 'd3Net', 'NIC A - d3 Network',    'NIC A', '192.168.10.11', '255.255.255.0', false, true),
-  makeAdapter(1, 'sACN',  'NIC B - Lighting (sACN/Art-Net)', 'NIC B', '', '', true, true),
-  makeAdapter(2, 'Media', 'NIC C - Media Network',  'NIC C', '192.168.20.11', '255.255.255.0', false, true),
-  makeAdapter(3, 'NDI',   'NIC D - NDI Video',      'NIC D', '', '', true, true),
-  makeAdapter(4, '100G',  'NIC E - 100G',           'NIC E', '', '', true, true),
-  makeAdapter(5, '100G',  'NIC F - 100G',           'NIC F', '', '', true, true),
-]
+let mockProfiles: Profile[] = loadProfilesFromDisk()
 
-const actor01Adapters = (): AdapterConfig[] => [
-  makeAdapter(0, 'd3Net', 'NIC A - d3 Network',    'NIC A', '192.168.10.21', '255.255.255.0', false, true),
-  makeAdapter(1, 'sACN',  'NIC B - Lighting (sACN/Art-Net)', 'NIC B', '', '', true, true),
-  makeAdapter(2, 'Media', 'NIC C - Media Network',  'NIC C', '192.168.20.21', '255.255.255.0', false, true),
-  makeAdapter(3, 'NDI',   'NIC D - NDI Video',      'NIC D', '', '', true, true),
-  makeAdapter(4, '100G',  'NIC E - 100G',           'NIC E', '', '', true, true),
-  makeAdapter(5, '100G',  'NIC F - 100G',           'NIC F', '', '', true, true),
-]
-
-const actor02Adapters = (): AdapterConfig[] => [
-  makeAdapter(0, 'd3Net', 'NIC A - d3 Network',    'NIC A', '192.168.10.22', '255.255.255.0', false, true),
-  makeAdapter(1, 'sACN',  'NIC B - Lighting (sACN/Art-Net)', 'NIC B', '', '', true, true),
-  makeAdapter(2, 'Media', 'NIC C - Media Network',  'NIC C', '192.168.20.22', '255.255.255.0', false, true),
-  makeAdapter(3, 'NDI',   'NIC D - NDI Video',      'NIC D', '', '', true, true),
-  makeAdapter(4, '100G',  'NIC E - 100G',           'NIC E', '', '', true, true),
-  makeAdapter(5, '100G',  'NIC F - 100G',           'NIC F', '', '', true, true),
-]
-
-const understudy01Adapters = (): AdapterConfig[] => [
-  makeAdapter(0, 'd3Net', 'NIC A - d3 Network',    'NIC A', '192.168.10.31', '255.255.255.0', false, true),
-  makeAdapter(1, 'sACN',  'NIC B - Lighting (sACN/Art-Net)', 'NIC B', '', '', true, true),
-  makeAdapter(2, 'Media', 'NIC C - Media Network',  'NIC C', '', '', true, false),
-  makeAdapter(3, 'NDI',   'NIC D - NDI Video',      'NIC D', '', '', true, true),
-  makeAdapter(4, '100G',  'NIC E - 100G',           'NIC E', '', '', true, true),
-  makeAdapter(5, '100G',  'NIC F - 100G',           'NIC F', '', '', true, true),
-]
-
-const directorSMB: SMBSettings = {
-  ShareD3Projects: true,
-  ProjectsPath: 'D:\\d3 Projects',
-  ShareName: 'd3 Projects',
-  SharePermissions: 'Administrators:Full',
-  AdditionalShares: [],
-}
-
-let mockProfiles: Profile[] = [
-  {
-    Name: 'Director',
-    Description: 'Director server - sequences the show, sends start commands to Actors',
-    Created: '2026-02-18T00:00:00',
-    Modified: '2026-02-18T00:00:00',
-    ServerName: 'DIRECTOR',
-    NetworkAdapters: directorAdapters(),
-    SMBSettings: directorSMB,
-    CustomSettings: {},
-  },
-  {
-    Name: 'Actor-01',
-    Description: 'Actor 1 server - outputs video according to assigned Feed scenes',
-    Created: '2026-02-18T00:00:00',
-    Modified: '2026-02-18T00:00:00',
-    ServerName: 'ACTOR-01',
-    NetworkAdapters: actor01Adapters(),
-    SMBSettings: { ...directorSMB },
-    CustomSettings: {},
-  },
-  {
-    Name: 'Actor-02',
-    Description: 'Actor 2 server - outputs video according to assigned Feed scenes',
-    Created: '2026-02-18T00:00:00',
-    Modified: '2026-02-18T00:00:00',
-    ServerName: 'ACTOR-02',
-    NetworkAdapters: actor02Adapters(),
-    SMBSettings: { ...directorSMB },
-    CustomSettings: {},
-  },
-  {
-    Name: 'Understudy-01',
-    Description: 'Understudy 1 server - failover machine, can take over from any Actor',
-    Created: '2026-02-18T00:00:00',
-    Modified: '2026-02-18T00:00:00',
-    ServerName: 'USTUDY-01',
-    NetworkAdapters: understudy01Adapters(),
-    SMBSettings: { ...directorSMB },
-    CustomSettings: {},
-  },
-]
+// Default adapters come from Director profile (or a sensible fallback)
+const directorProfile = mockProfiles.find(p => p.Name === 'Director')
+let mockAdapters: AdapterConfig[] = directorProfile
+  ? directorProfile.NetworkAdapters.map(a => ({ ...a }))
+  : []
 
 let mockSmb: SmbShare[] = [
   {
@@ -268,32 +203,22 @@ function buildDashboard(): DashboardData {
   }
 }
 
-const mockDiscovery: DiscoveredServer[] = [
-  {
-    IPAddress: '192.168.10.11',
-    Hostname: 'DIRECTOR',
-    IsDisguise: true,
-    ResponseTimeMs: 4,
-    Ports: [80, 873, 9864],
-    APIVersion: 'r27.4',
-  },
-  {
-    IPAddress: '192.168.10.21',
-    Hostname: 'ACTOR-01',
-    IsDisguise: true,
-    ResponseTimeMs: 6,
-    Ports: [80, 873, 9864],
-    APIVersion: 'r27.4',
-  },
-  {
-    IPAddress: '192.168.10.22',
-    Hostname: 'ACTOR-02',
-    IsDisguise: true,
-    ResponseTimeMs: 8,
-    Ports: [80, 873, 9864],
-    APIVersion: 'r27.4',
-  },
-]
+// Build discovery list from loaded profiles (every profile with a d3Net IP becomes a "discovered" server)
+const mockDiscovery: DiscoveredServer[] = mockProfiles
+  .map((p, i) => {
+    const d3Adapter = p.NetworkAdapters.find(a => a.Role === 'd3Net')
+    const ip = d3Adapter?.IPAddress || ''
+    if (!ip) return null
+    return {
+      IPAddress: ip,
+      Hostname: p.ServerName,
+      IsDisguise: true,
+      ResponseTimeMs: 2 + i * 2,
+      Ports: [80, 873, 9864],
+      APIVersion: 'r27.4',
+    }
+  })
+  .filter((s): s is DiscoveredServer => s !== null)
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
@@ -319,10 +244,18 @@ export function saveProfile(profile: Profile): Result {
   const existing = mockProfiles.findIndex((p) => p.Name === profile.Name)
   if (existing >= 0) {
     mockProfiles[existing] = { ...profile, Modified: now }
-    return { success: true, message: `Profile "${profile.Name}" updated` }
+  } else {
+    mockProfiles.push({ ...profile, Created: now, Modified: now })
   }
-  mockProfiles.push({ ...profile, Created: now, Modified: now })
-  return { success: true, message: `Profile "${profile.Name}" created` }
+  // Persist to disk
+  try {
+    const safeName = profile.Name.replace(/[\\/:*?"<>|]/g, '_')
+    const filePath = path.join(PROFILES_DIR, `${safeName}.json`)
+    fs.writeFileSync(filePath, JSON.stringify(mockProfiles.find(p => p.Name === profile.Name), null, 4), 'utf-8')
+  } catch (err) {
+    console.warn(`[mock-data] Failed to write profile to disk: ${err}`)
+  }
+  return { success: true, message: `Profile "${profile.Name}" ${existing >= 0 ? 'updated' : 'created'}` }
 }
 
 export function applyProfile(name: string): Result {
