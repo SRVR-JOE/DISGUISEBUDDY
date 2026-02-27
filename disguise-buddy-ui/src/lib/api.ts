@@ -6,6 +6,7 @@ import type {
   IdentityInfo,
   DashboardData,
   DiscoveredServer,
+  SoftwarePackage,
 } from '@/lib/types'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -139,5 +140,25 @@ export const api = {
   deployProfile(server: string, profileName: string): EventSource {
     const params = new URLSearchParams({ server, profile: profileName })
     return openEventSource(`/api/deploy?${params.toString()}`)
+  },
+
+  // Software packages
+  getSoftware(): Promise<SoftwarePackage[]> {
+    return get<SoftwarePackage[]>('/api/software')
+  },
+
+  addSoftware(pkg: Omit<SoftwarePackage, 'id' | 'size'>): Promise<{ success: boolean; package: SoftwarePackage }> {
+    return post('/api/software', pkg)
+  },
+
+  deleteSoftware(id: string): Promise<Result> {
+    return del<Result>(`/api/software/${id}`)
+  },
+
+  // SSE — Software installation
+  // Returns an EventSource. Caller is responsible for attaching handlers and closing it.
+  installSoftware(server: string, packageIds: string[]): EventSource {
+    const params = new URLSearchParams({ server, packages: packageIds.join(',') })
+    return openEventSource(`/api/install?${params.toString()}`)
   },
 }

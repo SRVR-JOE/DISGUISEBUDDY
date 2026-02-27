@@ -1,6 +1,8 @@
 import express from 'express'
 import cors from 'cors'
 import type { Request, Response } from 'express'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import {
   getAdapters,
   configureAdapter,
@@ -16,6 +18,12 @@ import {
   getDashboard,
   getDiscovery,
 } from './mock-data.js'
+import { scanNetwork } from './services/scanner.js'
+import { deployProfile } from './services/deployer.js'
+import { installSoftware, getPackages, addPackage, removePackage } from './services/installer.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const SOFTWARE_DIR = path.resolve(__dirname, '..', '..', 'software')
 
 const PORT = 47100
 const app = express()
@@ -26,6 +34,11 @@ app.use(cors())
 app.use(express.json())
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Coerce Express 5 param type (string | string[]) to plain string */
+function param(value: string | string[]): string {
+  return Array.isArray(value) ? value[0] : value
+}
 
 function sendSse(res: Response, event: string, data: unknown): void {
   res.write(`event: ${event}\n`)
@@ -47,7 +60,7 @@ app.get('/api/adapters', (_req: Request, res: Response) => {
 })
 
 app.post('/api/adapters/:index/configure', (req: Request, res: Response) => {
-  const index = parseInt(req.params.index, 10)
+  const index = parseInt(param(req.params.index), 10)
   if (isNaN(index)) {
     res.status(400).json({ success: false, message: 'Invalid adapter index' })
     return
@@ -73,12 +86,12 @@ app.post('/api/profiles', (req: Request, res: Response) => {
 })
 
 app.post('/api/profiles/:name/apply', (req: Request, res: Response) => {
-  const result = applyProfile(decodeURIComponent(req.params.name))
+  const result = applyProfile(decodeURIComponent(param(req.params.name)))
   res.status(result.success ? 200 : 404).json(result)
 })
 
 app.delete('/api/profiles/:name', (req: Request, res: Response) => {
-  const result = deleteProfile(decodeURIComponent(req.params.name))
+  const result = deleteProfile(decodeURIComponent(param(req.params.name)))
   res.status(result.success ? 200 : 404).json(result)
 })
 
@@ -99,7 +112,7 @@ app.post('/api/smb/shares', (req: Request, res: Response) => {
 })
 
 app.delete('/api/smb/shares/:name', (req: Request, res: Response) => {
-  const result = deleteShare(decodeURIComponent(req.params.name))
+  const result = deleteShare(decodeURIComponent(param(req.params.name)))
   res.status(result.success ? 200 : 404).json(result)
 })
 
@@ -132,77 +145,120 @@ app.get('/api/discovery', (_req: Request, res: Response) => {
 })
 
 // ─── SSE: Network scan ────────────────────────────────────────────────────────
-// Query params: subnet, start, end
-// Simulates a progressive subnet scan over ~3 seconds, emitting discovered servers.
+// Query params: subnet, start, end, timeout
 
 app.get('/api/scan', (req: Request, res: Response) => {
   sseHeaders(res)
 
-  const servers = getDiscovery()
-  const total = servers.length
-  const intervalMs = Math.floor(3000 / (total + 1))
-  let index = 0
+  const subnet = (req.query.subnet as string) || '192.168.10'
+  const start = parseInt(req.query.start as string) || 1
+  const end = parseInt(req.query.end as string) || 254
+  const timeout = parseInt(req.query.timeout as string) || 200
 
-  sendSse(res, 'status', { message: 'Scan started', total })
-
-  const interval = setInterval(() => {
-    if (index < servers.length) {
-      sendSse(res, 'discovered', servers[index])
-      index++
-    } else {
-      sendSse(res, 'complete', { message: 'Scan complete', found: total })
-      clearInterval(interval)
-      res.end()
+  const { cancel } = scanNetwork(
+    { subnet, startIP: start, endIP: end, timeoutMs: timeout, ports: [80, 873, 9864] },
+    {
+      onProgress: (p) => sendSse(res, 'progress', p),
+      onDiscovered: (s) => sendSse(res, 'discovered', s),
+      onComplete: (servers) => {
+        sendSse(res, 'complete', { message: 'Scan complete', found: servers.length })
+        res.end()
+      },
+      onError: (err) => {
+        sendSse(res, 'error', { message: err.message })
+        res.end()
+      },
     }
-  }, intervalMs)
+  )
 
-  req.on('close', () => {
-    clearInterval(interval)
-  })
+  req.on('close', () => cancel())
 })
 
 // ─── SSE: Profile deployment ──────────────────────────────────────────────────
 // Query params: server, profile
-// Simulates a multi-step deployment over ~3 seconds.
 
 app.get('/api/deploy', (req: Request, res: Response) => {
   sseHeaders(res)
 
-  const server = (req.query.server as string) || 'unknown'
-  const profileName = (req.query.profile as string) || 'unknown'
+  const server = (req.query.server as string) || ''
+  const profileName = (req.query.profile as string) || ''
 
-  const steps = [
-    { step: 'connect',    message: `Connecting to ${server}...` },
-    { step: 'transfer',   message: `Transferring profile "${profileName}"...` },
-    { step: 'apply',      message: 'Applying network configuration...' },
-    { step: 'hostname',   message: 'Setting hostname...' },
-    { step: 'smb',        message: 'Configuring SMB shares...' },
-    { step: 'verify',     message: 'Verifying configuration...' },
-  ]
+  const profiles = getProfiles()
+  const profile = profiles.find(p => p.Name === profileName)
 
-  const intervalMs = Math.floor(3000 / steps.length)
-  let stepIndex = 0
+  if (!profile) {
+    sendSse(res, 'error', { message: `Profile "${profileName}" not found` })
+    res.end()
+    return
+  }
 
-  sendSse(res, 'status', { message: `Deploying "${profileName}" to ${server}`, steps: steps.length })
-
-  const interval = setInterval(() => {
-    if (stepIndex < steps.length) {
-      const current = steps[stepIndex]
-      sendSse(res, 'progress', { ...current, stepNumber: stepIndex + 1, total: steps.length })
-      stepIndex++
-    } else {
-      sendSse(res, 'complete', {
-        success: true,
-        message: `Profile "${profileName}" successfully deployed to ${server}`,
-      })
-      clearInterval(interval)
-      res.end()
+  const { cancel } = deployProfile(
+    { targetIP: server, profile },
+    {
+      onStep: (step) => sendSse(res, 'progress', step),
+      onComplete: (result) => {
+        sendSse(res, 'complete', result)
+        res.end()
+      },
+      onError: (err) => {
+        sendSse(res, 'error', { message: err.message })
+        res.end()
+      },
     }
-  }, intervalMs)
+  )
 
-  req.on('close', () => {
-    clearInterval(interval)
-  })
+  req.on('close', () => cancel())
+})
+
+// ─── Software packages ────────────────────────────────────────────────────────
+
+app.get('/api/software', (_req: Request, res: Response) => {
+  res.json(getPackages(SOFTWARE_DIR))
+})
+
+app.post('/api/software', (req: Request, res: Response) => {
+  const pkg = addPackage(SOFTWARE_DIR, req.body as Parameters<typeof addPackage>[1])
+  res.json({ success: true, package: pkg })
+})
+
+app.delete('/api/software/:id', (req: Request, res: Response) => {
+  const ok = removePackage(SOFTWARE_DIR, param(req.params.id))
+  res.status(ok ? 200 : 404).json({ success: ok, message: ok ? 'Removed' : 'Not found' })
+})
+
+// ─── SSE: Software installation ───────────────────────────────────────────────
+// Query params: server, packages (comma-separated package IDs)
+
+app.get('/api/install', (req: Request, res: Response) => {
+  sseHeaders(res)
+
+  const server = (req.query.server as string) || ''
+  const packageIds = ((req.query.packages as string) || '').split(',').filter(Boolean)
+  const allPkgs = getPackages(SOFTWARE_DIR)
+  const packages = allPkgs.filter(p => packageIds.includes(p.id))
+
+  if (packages.length === 0) {
+    sendSse(res, 'error', { message: 'No valid packages specified' })
+    res.end()
+    return
+  }
+
+  const { cancel } = installSoftware(
+    { targetIP: server, packages },
+    {
+      onProgress: (p) => sendSse(res, 'progress', p),
+      onComplete: (result) => {
+        sendSse(res, 'complete', result)
+        res.end()
+      },
+      onError: (err) => {
+        sendSse(res, 'error', { message: err.message })
+        res.end()
+      },
+    }
+  )
+
+  req.on('close', () => cancel())
 })
 
 // ─── 404 fallback ─────────────────────────────────────────────────────────────

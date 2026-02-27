@@ -89,3 +89,30 @@ export interface DiscoveredServer {
   Ports: number[]
   APIVersion: string
 }
+
+// ─── Software installation ────────────────────────────────────────────────────
+
+export interface SoftwarePackage {
+  id: string
+  name: string
+  version: string
+  filename: string
+  path: string
+  silentArgs: string
+  size: number
+  description: string
+}
+
+export interface InstallProgress {
+  packageId: string
+  packageName: string
+  step: 'copying' | 'installing' | 'verifying' | 'done' | 'error'
+  percent: number
+  message: string
+}
+
+export interface InstallResult {
+  success: boolean
+  installed: string[]
+  failed: string[]
+}
