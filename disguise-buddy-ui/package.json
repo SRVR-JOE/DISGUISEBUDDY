@@ -8,8 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
-    "api": "npx tsx electron/dev-server.ts",
-    "start": "concurrently --kill-others \"npx tsx electron/dev-server.ts\" \"vite --open\"",
+    "api": "tsx electron/dev-server.ts",
+    "start": "concurrently --kill-others-on-fail \"tsx electron/dev-server.ts\" \"vite --open\"",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "vite build && electron-builder"
   },
@@ -38,7 +38,7 @@
     "electron-builder": "^26.8.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",
-    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "wait-on": "^9.0.4"

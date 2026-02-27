@@ -346,8 +346,7 @@ export function startApiServer(): Promise<void> {
     })
     server.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
-        console.warn(`[api-server] Port ${PORT} already in use — continuing`)
-        resolve()
+        reject(new Error(`Port ${PORT} is already in use. Kill the old process and try again.`))
       } else {
         reject(err)
       }

@@ -13,7 +13,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    strictPort: true,
+    strictPort: false,
   },
   build: {
     outDir: 'dist-renderer',

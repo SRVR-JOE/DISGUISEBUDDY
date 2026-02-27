@@ -8,18 +8,16 @@
     then opens the browser. Cleans up child processes on exit.
 #>
 
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-
 # ─────────────────────────────────────────────────────────────────────────────
 # GLOBALS
 # ─────────────────────────────────────────────────────────────────────────────
 $script:ApiProcess  = $null
 $script:ViteProcess = $null
 $script:UiDir       = Join-Path $PSScriptRoot 'disguise-buddy-ui'
+$script:Running     = $true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CLEANUP HANDLER  — registered once, fires on Ctrl+C or normal exit
+# CLEANUP — kills both server processes and their children
 # ─────────────────────────────────────────────────────────────────────────────
 function Stop-Servers {
     Write-Host ''
@@ -28,16 +26,16 @@ function Stop-Servers {
     foreach ($proc in @($script:ApiProcess, $script:ViteProcess)) {
         if ($null -ne $proc -and -not $proc.HasExited) {
             try {
-                # Kill the entire process tree so child npx/node processes also die
-                $childProcs = Get-CimInstance Win32_Process |
-                    Where-Object { $_.ParentProcessId -eq $proc.Id }
-                foreach ($child in $childProcs) {
-                    try { Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
-                }
+                # Kill child processes first (npx spawns node underneath)
+                Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                    Where-Object { $_.ParentProcessId -eq $proc.Id } |
+                    ForEach-Object {
+                        try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+                    }
                 $proc.Kill()
                 $proc.WaitForExit(3000) | Out-Null
             } catch {
-                # Process may have already exited — that is fine
+                # Process may have already exited
             }
         }
     }
@@ -45,39 +43,63 @@ function Stop-Servers {
     Write-Host '  Servers stopped.' -ForegroundColor Green
 }
 
-# Register the cleanup handler so it fires when the script exits for any reason
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Stop-Servers }
-
-# Also trap Ctrl+C explicitly (the engine event alone is not always enough in
-# interactive consoles on older PowerShell 5.1 hosts)
-[Console]::TreatControlCAsInput = $false
-$null = [Console]::CancelKeyPress  # ensure the event delegate slot is allocated
-$cancelHandler = [ConsoleCancelEventHandler] {
-    param($s, $e)
-    $e.Cancel = $true   # prevent immediate hard-kill so we can clean up
-    Stop-Servers
-    exit 0
-}
-[Console]::add_CancelKeyPress($cancelHandler)
-
 # ─────────────────────────────────────────────────────────────────────────────
 # BANNER
 # ─────────────────────────────────────────────────────────────────────────────
 Clear-Host
 Write-Host ''
-Write-Host '  ╔══════════════════════════════════════════════╗' -ForegroundColor Cyan
-Write-Host '  ║           D I S G U I S E  B U D D Y         ║' -ForegroundColor Cyan
-Write-Host '  ║          Web UI Launcher  v1.0               ║' -ForegroundColor Cyan
-Write-Host '  ╚══════════════════════════════════════════════╝' -ForegroundColor Cyan
+Write-Host '  ================================================' -ForegroundColor Cyan
+Write-Host '       D I S G U I S E   B U D D Y' -ForegroundColor Cyan
+Write-Host '       Web UI Launcher  v2.0' -ForegroundColor Cyan
+Write-Host '  ================================================' -ForegroundColor Cyan
 Write-Host ''
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HELPER: Refresh PATH from registry (call after any Node install)
+# HELPER: Refresh PATH from registry (call after any install)
 # ─────────────────────────────────────────────────────────────────────────────
 function Update-PathFromRegistry {
     $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $userPath    = [Environment]::GetEnvironmentVariable('Path', 'User')
     $env:Path    = "$machinePath;$userPath"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPER: Wait for an HTTP endpoint to respond 200
+# ─────────────────────────────────────────────────────────────────────────────
+function Wait-ForServer {
+    param(
+        [string] $Url,
+        [string] $Label,
+        [System.Diagnostics.Process] $Process = $null,
+        [int]    $MaxAttempts = 30,
+        [int]    $DelaySeconds = 2
+    )
+
+    Write-Host "        Waiting for $Label..." -ForegroundColor Cyan
+
+    for ($i = 1; $i -le $MaxAttempts; $i++) {
+        # Early exit if the process has already died
+        if ($null -ne $Process -and $Process.HasExited) {
+            Write-Host "  ERROR: $Label process exited with code $($Process.ExitCode)." -ForegroundColor Red
+            return $false
+        }
+
+        try {
+            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3 -ErrorAction SilentlyContinue
+            if ($null -ne $response -and $response.StatusCode -eq 200) {
+                Write-Host "        $Label is ready." -ForegroundColor Green
+                return $true
+            }
+        } catch {
+            # Server not up yet — expected during startup
+        }
+
+        Write-Host "        Attempt $i / $MaxAttempts — retrying in ${DelaySeconds}s..." -ForegroundColor DarkGray
+        Start-Sleep -Seconds $DelaySeconds
+    }
+
+    Write-Host "  ERROR: $Label did not respond after $MaxAttempts attempts." -ForegroundColor Red
+    return $false
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -97,16 +119,14 @@ if ($null -ne $nodeCmd) {
     $installed = $false
 
     # ── Method 1: winget ────────────────────────────────────────────────────
-    $winget = Get-Command winget -ErrorAction SilentlyContinue
-    if ($null -ne $winget) {
+    $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+    if ($null -ne $wingetCmd) {
         Write-Host '        Trying winget...' -ForegroundColor Cyan
         try {
-            $proc = Start-Process -FilePath 'winget' `
-                -ArgumentList 'install', 'OpenJS.NodeJS.LTS',
-                              '--silent',
-                              '--accept-source-agreements',
-                              '--accept-package-agreements' `
-                -Wait -PassThru -NoNewWindow
+            $wingetArgs = @('install', 'OpenJS.NodeJS.LTS', '--silent',
+                            '--accept-source-agreements', '--accept-package-agreements')
+            $proc = Start-Process -FilePath 'winget.exe' -ArgumentList $wingetArgs `
+                        -Wait -PassThru -NoNewWindow
             if ($proc.ExitCode -eq 0) {
                 Update-PathFromRegistry
                 if (Get-Command node -ErrorAction SilentlyContinue) {
@@ -114,22 +134,22 @@ if ($null -ne $nodeCmd) {
                     Write-Host "        Node.js $nodeVer installed via winget." -ForegroundColor Green
                     $installed = $true
                 } else {
-                    Write-Host '        winget finished but node still not found. Trying MSI fallback...' -ForegroundColor Yellow
+                    Write-Host '        winget finished but node not in PATH. Trying MSI...' -ForegroundColor Yellow
                 }
             } else {
-                Write-Host "        winget exited with code $($proc.ExitCode). Trying MSI fallback..." -ForegroundColor Yellow
+                Write-Host "        winget exited with code $($proc.ExitCode). Trying MSI..." -ForegroundColor Yellow
             }
         } catch {
-            Write-Host "        winget failed: $_  Trying MSI fallback..." -ForegroundColor Yellow
+            Write-Host "        winget failed: $_  Trying MSI..." -ForegroundColor Yellow
         }
     } else {
-        Write-Host '        winget not available. Using MSI fallback...' -ForegroundColor Yellow
+        Write-Host '        winget not available. Using MSI download...' -ForegroundColor Yellow
     }
 
     # ── Method 2: Direct MSI download from nodejs.org ───────────────────────
     if (-not $installed) {
         Write-Host ''
-        Write-Host '        Querying nodejs.org for latest v22 LTS release...' -ForegroundColor Cyan
+        Write-Host '        Querying nodejs.org for latest v22 LTS...' -ForegroundColor Cyan
 
         try {
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -148,17 +168,16 @@ if ($null -ne $nodeCmd) {
             $msiPath = Join-Path $env:TEMP 'node-install.msi'
 
             Write-Host "        Downloading Node.js $version ($arch)..." -ForegroundColor Cyan
-            Write-Host "        URL: $msiUrl" -ForegroundColor Cyan
             Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath -UseBasicParsing
 
-            Write-Host '        Running installer (this may take a minute)...' -ForegroundColor Cyan
+            Write-Host '        Running installer...' -ForegroundColor Cyan
 
-            # Try silent first — if it needs elevation it will fail with 1603/1625
+            # Try silent install first
             $msi = Start-Process -FilePath 'msiexec.exe' `
                        -ArgumentList "/i `"$msiPath`" /qn /norestart" `
                        -Wait -PassThru -NoNewWindow
             if ($msi.ExitCode -ne 0) {
-                Write-Host '        Silent install requires elevation — launching passive installer (UAC prompt)...' -ForegroundColor Yellow
+                Write-Host '        Silent install needs elevation — launching UI installer...' -ForegroundColor Yellow
                 Start-Process -FilePath 'msiexec.exe' `
                     -ArgumentList "/i `"$msiPath`" /passive /norestart" `
                     -Wait -Verb RunAs
@@ -167,20 +186,19 @@ if ($null -ne $nodeCmd) {
             Remove-Item $msiPath -Force -ErrorAction SilentlyContinue
 
             Update-PathFromRegistry
-            # Also probe the default install location directly
             $env:Path = "$env:ProgramFiles\nodejs;$env:Path"
 
             if (Get-Command node -ErrorAction SilentlyContinue) {
                 $nodeVer = & node --version 2>&1
-                Write-Host "        Node.js $nodeVer installed successfully." -ForegroundColor Green
+                Write-Host "        Node.js $nodeVer installed." -ForegroundColor Green
                 $installed = $true
             } else {
-                throw 'Node.js MSI install appeared to succeed but node is still not in PATH.'
+                throw 'MSI install finished but node is still not in PATH.'
             }
         } catch {
             Write-Host ''
             Write-Host "  ERROR: Node.js installation failed: $_" -ForegroundColor Red
-            Write-Host '         Please install Node.js manually from https://nodejs.org and re-run this script.' -ForegroundColor Red
+            Write-Host '         Install Node.js manually from https://nodejs.org and re-run.' -ForegroundColor Red
             Write-Host ''
             Read-Host '  Press Enter to exit'
             exit 1
@@ -197,14 +215,13 @@ Write-Host '  [2/5] Locating UI directory...' -ForegroundColor Cyan
 if (-not (Test-Path $script:UiDir -PathType Container)) {
     Write-Host ''
     Write-Host "  ERROR: UI directory not found: $script:UiDir" -ForegroundColor Red
-    Write-Host '         Make sure you are running this script from the DISGUISEBUDDY root folder.' -ForegroundColor Red
+    Write-Host '         Make sure this script is in the DISGUISEBUDDY root folder.' -ForegroundColor Red
     Write-Host ''
     Read-Host '  Press Enter to exit'
     exit 1
 }
 
 Write-Host "        Found: $script:UiDir" -ForegroundColor Green
-Set-Location $script:UiDir
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 3 — npm install (first run only)
@@ -214,14 +231,14 @@ Write-Host '  [3/5] Checking npm dependencies...' -ForegroundColor Cyan
 
 $nodeModules = Join-Path $script:UiDir 'node_modules'
 if (-not (Test-Path $nodeModules -PathType Container)) {
-    Write-Host '        node_modules not found — running npm install (first run, may take a minute)...' -ForegroundColor Yellow
+    Write-Host '        node_modules not found — running npm install...' -ForegroundColor Yellow
     Write-Host ''
     try {
-        $npmInstall = Start-Process -FilePath 'npm' -ArgumentList 'install' `
-                          -WorkingDirectory $script:UiDir `
-                          -Wait -PassThru -NoNewWindow
-        if ($npmInstall.ExitCode -ne 0) {
-            throw "npm install exited with code $($npmInstall.ExitCode)."
+        $npmProc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'install' `
+                       -WorkingDirectory $script:UiDir `
+                       -Wait -PassThru -NoNewWindow
+        if ($npmProc.ExitCode -ne 0) {
+            throw "npm install exited with code $($npmProc.ExitCode)."
         }
         Write-Host ''
         Write-Host '        Dependencies installed.' -ForegroundColor Green
@@ -237,16 +254,60 @@ if (-not (Test-Path $nodeModules -PathType Container)) {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# STEP 3.5 — Kill any stale processes on our ports
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Host ''
+Write-Host '  [3.5] Clearing stale processes on ports 47100 and 5173...' -ForegroundColor Cyan
+
+foreach ($port in @(47100, 5173)) {
+    try {
+        $conns = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+        if ($null -ne $conns) {
+            $pids = $conns | Select-Object -ExpandProperty OwningProcess -Unique
+            foreach ($pid in $pids) {
+                if ($pid -ne 0) {
+                    Write-Host "        Killing stale process $pid on port $port" -ForegroundColor Yellow
+                    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+                }
+            }
+            Start-Sleep -Seconds 1
+        }
+    } catch {
+        # Get-NetTCPConnection may not be available — that's fine
+    }
+}
+
+Write-Host '        Ports clear.' -ForegroundColor Green
+
+# ─────────────────────────────────────────────────────────────────────────────
 # STEP 4 — Start background servers
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Host ''
 Write-Host '  [4/5] Starting servers...' -ForegroundColor Cyan
 
+# Resolve the local tsx binary path (installed in node_modules/.bin)
+$tsxBin = Join-Path $script:UiDir 'node_modules' '.bin' 'tsx.cmd'
+if (-not (Test-Path $tsxBin)) {
+    # Fallback to npx.cmd if tsx isn't installed locally
+    $tsxBin = 'npx.cmd'
+    $tsxArgs = @('tsx', 'electron/dev-server.ts')
+} else {
+    $tsxArgs = @('electron/dev-server.ts')
+}
+
+$viteBin = Join-Path $script:UiDir 'node_modules' '.bin' 'vite.cmd'
+if (-not (Test-Path $viteBin)) {
+    $viteBin = 'npx.cmd'
+    $viteArgs = @('vite')
+} else {
+    $viteArgs = $null
+}
+
 # ── API server (port 47100) ──────────────────────────────────────────────────
 Write-Host '        Starting API server  (http://localhost:47100)...' -ForegroundColor Cyan
 try {
-    $script:ApiProcess = Start-Process -FilePath 'npx' `
-        -ArgumentList 'tsx', 'electron/dev-server.ts' `
+    $script:ApiProcess = Start-Process -FilePath $tsxBin `
+        -ArgumentList $tsxArgs `
         -WorkingDirectory $script:UiDir `
         -PassThru -NoNewWindow
 } catch {
@@ -258,10 +319,16 @@ try {
 # ── Vite dev server (port 5173) ──────────────────────────────────────────────
 Write-Host '        Starting Vite dev server (http://localhost:5173)...' -ForegroundColor Cyan
 try {
-    $script:ViteProcess = Start-Process -FilePath 'npx' `
-        -ArgumentList 'vite' `
-        -WorkingDirectory $script:UiDir `
-        -PassThru -NoNewWindow
+    if ($null -ne $viteArgs) {
+        $script:ViteProcess = Start-Process -FilePath $viteBin `
+            -ArgumentList $viteArgs `
+            -WorkingDirectory $script:UiDir `
+            -PassThru -NoNewWindow
+    } else {
+        $script:ViteProcess = Start-Process -FilePath $viteBin `
+            -WorkingDirectory $script:UiDir `
+            -PassThru -NoNewWindow
+    }
 } catch {
     Write-Host "  ERROR: Could not start Vite server: $_" -ForegroundColor Red
     Stop-Servers
@@ -275,45 +342,16 @@ try {
 Write-Host ''
 Write-Host '  [5/5] Waiting for servers to be ready...' -ForegroundColor Cyan
 
-function Wait-ForServer {
-    param(
-        [string] $Url,
-        [string] $Label,
-        [int]    $MaxAttempts = 30,
-        [int]    $DelaySeconds = 2
-    )
-
-    Write-Host "        Waiting for $Label..." -ForegroundColor Cyan
-
-    for ($i = 1; $i -le $MaxAttempts; $i++) {
-        try {
-            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
-            if ($response.StatusCode -eq 200) {
-                Write-Host "        $Label is ready." -ForegroundColor Green
-                return $true
-            }
-        } catch {
-            # Server not up yet — expected during startup
-        }
-
-        # Show a simple dot-progress so the user knows we are still trying
-        Write-Host "        Attempt $i / $MaxAttempts — retrying in ${DelaySeconds}s..." -ForegroundColor DarkGray
-        Start-Sleep -Seconds $DelaySeconds
-    }
-
-    Write-Host "  ERROR: $Label did not respond after $MaxAttempts attempts." -ForegroundColor Red
-    return $false
-}
-
-# Wait for API first — it is the dependency, Vite just serves static JS
 $apiReady  = Wait-ForServer -Url 'http://localhost:47100/api/dashboard' `
-                            -Label 'API server (port 47100)'
+                            -Label 'API server (port 47100)' `
+                            -Process $script:ApiProcess
 $viteReady = Wait-ForServer -Url 'http://localhost:5173/' `
-                            -Label 'Vite dev server (port 5173)'
+                            -Label 'Vite dev server (port 5173)' `
+                            -Process $script:ViteProcess
 
 if (-not $apiReady -or -not $viteReady) {
     Write-Host ''
-    Write-Host '  One or more servers failed to start. Check the output above for errors.' -ForegroundColor Red
+    Write-Host '  One or more servers failed to start. Check the output above.' -ForegroundColor Red
     Stop-Servers
     Read-Host '  Press Enter to exit'
     exit 1
@@ -323,46 +361,32 @@ if (-not $apiReady -or -not $viteReady) {
 # READY — open browser and keep running
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Host ''
-Write-Host '  ╔══════════════════════════════════════════════╗' -ForegroundColor Green
-Write-Host '  ║        DISGUISE BUDDY IS RUNNING             ║' -ForegroundColor Green
-Write-Host '  ║                                              ║' -ForegroundColor Green
-Write-Host '  ║   UI  : http://localhost:5173                ║' -ForegroundColor Green
-Write-Host '  ║   API : http://localhost:47100               ║' -ForegroundColor Green
-Write-Host '  ║                                              ║' -ForegroundColor Green
-Write-Host '  ║   Close this window or press Ctrl+C to stop ║' -ForegroundColor Green
-Write-Host '  ╚══════════════════════════════════════════════╝' -ForegroundColor Green
+Write-Host '  ================================================' -ForegroundColor Green
+Write-Host '       DISGUISE BUDDY IS RUNNING' -ForegroundColor Green
+Write-Host '' -ForegroundColor Green
+Write-Host '       UI  : http://localhost:5173' -ForegroundColor Green
+Write-Host '       API : http://localhost:47100' -ForegroundColor Green
+Write-Host '' -ForegroundColor Green
+Write-Host '       Close this window or press Ctrl+C to stop' -ForegroundColor Green
+Write-Host '  ================================================' -ForegroundColor Green
 Write-Host ''
 
 # Open the default browser
 try {
     Start-Process 'http://localhost:5173'
 } catch {
-    Write-Host '  (Could not open browser automatically — navigate to http://localhost:5173 manually)' -ForegroundColor Yellow
+    Write-Host '  (Could not open browser — go to http://localhost:5173 manually)' -ForegroundColor Yellow
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# KEEP ALIVE — monitor child processes; exit cleanly if they die unexpectedly
+# KEEP ALIVE — wait for user to close the window
 # ─────────────────────────────────────────────────────────────────────────────
 try {
-    while ($true) {
+    Write-Host '  Press Ctrl+C or close this window to stop.' -ForegroundColor DarkGray
+    Write-Host ''
+
+    while ($script:Running) {
         Start-Sleep -Seconds 5
-
-        $apiAlive  = ($null -ne $script:ApiProcess)  -and -not $script:ApiProcess.HasExited
-        $viteAlive = ($null -ne $script:ViteProcess) -and -not $script:ViteProcess.HasExited
-
-        if (-not $apiAlive) {
-            Write-Host ''
-            Write-Host '  WARNING: API server process has exited unexpectedly.' -ForegroundColor Yellow
-        }
-        if (-not $viteAlive) {
-            Write-Host ''
-            Write-Host '  WARNING: Vite server process has exited unexpectedly.' -ForegroundColor Yellow
-        }
-
-        if (-not $apiAlive -or -not $viteAlive) {
-            Write-Host '  Both servers must be running for the app to work. Shutting down...' -ForegroundColor Red
-            break
-        }
     }
 } finally {
     Stop-Servers
