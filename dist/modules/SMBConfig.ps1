@@ -1,4 +1,4 @@
-# SMBConfig.ps1 - DISGUISE BUDDY SMB File Sharing Configuration Module
+﻿# SMBConfig.ps1 - DISGUISE BUDDY SMB File Sharing Configuration Module
 # Manages d3 Projects SMB shares for disguise (d3) media servers.
 # Provides backend functions for share management and a Windows Forms UI view.
 
@@ -351,6 +351,8 @@ function New-SMBView {
     .DESCRIPTION
         Builds the complete UI for managing d3 Projects SMB shares, including
         share creation, permissions, and additional share management.
+        Layout mirrors the React dark glass-morphism design: 3 auto-sized cards
+        in a scrollable container with 24px padding and 24px gaps between cards.
     .PARAMETER ContentPanel
         The parent panel in which to render the view.
     #>
@@ -359,174 +361,219 @@ function New-SMBView {
         [System.Windows.Forms.Panel]$ContentPanel
     )
 
-    # Clear existing content
-    $ContentPanel.Controls.Clear()
-    $ContentPanel.SuspendLayout()
+    # ------------------------------------------------------------------
+    # Layout constants (mirror React design spec)
+    # ------------------------------------------------------------------
+    $PAGE_PAD   = 24   # outer padding on all sides
+    $CARD_GAP   = 24   # vertical gap between cards
+    $INNER_PAD  = 20   # horizontal padding inside cards (left gutter)
+    $CTRL_GAP   = 12   # vertical gap between controls within a card
+    $BTN_H      = 35   # consistent button height
+    $BTN_GAP    = 12   # horizontal gap between buttons in a row
+    $INPUT_H    = 28   # textbox / combobox height
+    $LABEL_H    = 18   # single-line label height
+    $CARD_W     = 900  # card width (fixed, page scrolls vertically)
 
-    # Create a scrollable container for all content
-    $scrollPanel = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
-
-    # ---- Section Header ----
-    $header = New-SectionHeader -Text "SMB File Sharing" -X 20 -Y 15 -Width 900
-    $scrollPanel.Controls.Add($header)
-
-    $subtitle = New-StyledLabel -Text "Manage d3 Projects and media share access" -X 20 -Y 55 -IsSecondary
-    $scrollPanel.Controls.Add($subtitle)
-
-    # ========================================================================
-    # Card 1: d3 Projects Share
-    # ========================================================================
-    $card1 = New-StyledCard -Title "d3 Projects Share" -X 20 -Y 90 -Width 900 -Height 460
-
-    $yPos = 45
-
-    # -- Status badge --
-    # Determine whether the d3 Projects share currently exists
+    # ------------------------------------------------------------------
+    # Resolve current d3 Projects share state (used across all cards)
+    # ------------------------------------------------------------------
     $d3ShareActive = $false
-    $d3SharePath = ''
+    $d3SharePath   = ''
     try {
         $existingShare = Get-SmbShare -Name 'd3 Projects' -ErrorAction Stop
         $d3ShareActive = $true
-        $d3SharePath = $existingShare.Path
+        $d3SharePath   = $existingShare.Path
     }
     catch {
-        # Share does not exist
+        # Share does not exist - that is fine
     }
 
+    $hostname = $env:COMPUTERNAME
+    if (-not $hostname) {
+        try { $hostname = [System.Net.Dns]::GetHostName() } catch { $hostname = 'UNKNOWN' }
+    }
+    $uncPath = "\\$hostname\d3 Projects"
+
+    # ------------------------------------------------------------------
+    # Permissions text (computed once, reused in Card 1)
+    # ------------------------------------------------------------------
+    $permText = 'No permissions configured'
+    if ($d3ShareActive) {
+        try {
+            $perms = Get-SharePermissions -ShareName 'd3 Projects'
+            if ($perms -and $perms.Count -gt 0) {
+                $permEntries = foreach ($perm in $perms) {
+                    $aLabel = switch ($perm.AccessRight) {
+                        'Full'   { 'Full Control' }
+                        'Change' { 'Change (Read/Write)' }
+                        'Read'   { 'Read Only' }
+                        default  { $perm.AccessRight }
+                    }
+                    $dLabel = if ($perm.AccessControlType -eq 'Deny') { ' [DENY]' } else { '' }
+                    "$($perm.AccountName) - $aLabel$dLabel"
+                }
+                $permText = $permEntries -join '  |  '
+            }
+        }
+        catch {
+            $permText = 'Unable to retrieve permissions'
+        }
+    }
+
+    # ------------------------------------------------------------------
+    # Scaffold: clear + scroll container
+    # ------------------------------------------------------------------
+    $ContentPanel.Controls.Clear()
+    $ContentPanel.SuspendLayout()
+
+    $scrollPanel = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
+
+    # ---- Page header ----
+    $header = New-SectionHeader -Text "SMB File Sharing" -X $PAGE_PAD -Y $PAGE_PAD -Width $CARD_W
+    $scrollPanel.Controls.Add($header)
+
+    $subtitle = New-StyledLabel -Text "Manage d3 Projects and media share access" `
+        -X $PAGE_PAD -Y ($PAGE_PAD + 44) -IsSecondary -FontSize 9.5
+    $scrollPanel.Controls.Add($subtitle)
+
+    # ======================================================================
+    # CARD 1 -- d3 Projects Share   (purple left-accent border)
+    # ======================================================================
+    #
+    # Layout (Y coords relative to card interior, title sits at Y=15 in card):
+    #   Y=45   section header + status badge
+    #   Y=65   col headers: "Share Name" | "Local Path"
+    #   Y=83   input row: txtShareName (420w) | txtLocalPath (340w) + Browse (88w)
+    #   Y=107  toggle checkbox
+    #   Y=131  "Permissions" label
+    #   Y=153  current perms (muted, wrapping)
+    #   Y=173  col headers: "Account" | "Access Level"
+    #   Y=191  cmbAccount (270w) | cmbAccess (160w) | btnUpdatePerms (178w)
+    #   Y=215  separator
+    #   Y=227  action buttons: Apply (180w) | Remove (140w)
+    #   card height = 227 + 35 + 20 = 282
+    # ----------------------------------------------------------------------
+
+    # Y positions relative to card content area
+    $c1_y_inputHeaders = 45
+    $c1_y_inputs       = 63
+    $c1_y_toggle       = $c1_y_inputs + $INPUT_H + $CTRL_GAP        # 103
+    $c1_y_permHeader   = $c1_y_toggle + 26 + $CTRL_GAP              # 141
+    $c1_y_permCurrent  = $c1_y_permHeader + $LABEL_H + 4            # 163
+    $c1_y_permColHdrs  = $c1_y_permCurrent + ($LABEL_H * 2) + 2     # 201  (current perms wraps ~2 lines)
+    $c1_y_permInputs   = $c1_y_permColHdrs + $LABEL_H + 2           # 221
+    $c1_y_separator    = $c1_y_permInputs + $INPUT_H + $CTRL_GAP    # 261
+    $c1_y_actionBtns   = $c1_y_separator + 10                       # 271
+    $c1_height         = $c1_y_actionBtns + $BTN_H + $PAGE_PAD      # 330
+
+    $card1Y = $PAGE_PAD + 44 + 20 + $PAGE_PAD                       # header + subtitle + gap = 112
+    $card1 = New-StyledCard -Title "d3 Projects Share" `
+        -X $PAGE_PAD -Y $card1Y -Width $CARD_W -Height $c1_height `
+        -AccentColor $script:Theme.Primary
+
+    # -- Status badge (top-right of card header row) --
     $statusType = if ($d3ShareActive) { 'Success' } else { 'Error' }
-    $statusText = if ($d3ShareActive) { 'ACTIVE' } else { 'INACTIVE' }
-    $statusBadge = New-StatusBadge -Text $statusText -X 780 -Y 15 -Type $statusType
+    $statusText = if ($d3ShareActive) { 'ACTIVE'  } else { 'INACTIVE' }
+    $statusBadge = New-StatusBadge -Text $statusText -X ($CARD_W - 110) -Y 14 -Type $statusType
     $statusBadge.Name = 'statusBadge'
     $card1.Controls.Add($statusBadge)
 
-    # -- Share name --
-    $lblShareName = New-StyledLabel -Text "Share Name:" -X 15 -Y $yPos -IsBold
+    # ---- 2-column input row: field labels above, inputs side-by-side ----
+    # Column 1: Share Name (left half)
+    $lblShareName = New-StyledLabel -Text "Share Name" -X $INNER_PAD -Y $c1_y_inputHeaders -IsBold -FontSize 9
     $card1.Controls.Add($lblShareName)
 
-    $txtShareName = New-StyledTextBox -X 160 -Y $yPos -Width 350 -PlaceholderText "d3 Projects"
+    # Column 2: Local Path (right half, starts at x=452 = 20 + 420 + 12)
+    $col2X = $INNER_PAD + 420 + $CTRL_GAP
+    $lblLocalPath = New-StyledLabel -Text "Local Path" -X $col2X -Y $c1_y_inputHeaders -IsBold -FontSize 9
+    $card1.Controls.Add($lblLocalPath)
+
+    # Share Name textbox
+    $txtShareName = New-StyledTextBox -X $INNER_PAD -Y $c1_y_inputs -Width 408 -Height $INPUT_H `
+        -PlaceholderText "d3 Projects"
     $txtShareName.Name = 'txtShareName'
     if ($d3ShareActive) {
-        $txtShareName.Text = 'd3 Projects'
+        $txtShareName.Text     = 'd3 Projects'
         $txtShareName.ForeColor = $script:Theme.Text
     }
     $card1.Controls.Add($txtShareName)
 
-    $yPos += 40
-
-    # -- Local path --
-    $lblLocalPath = New-StyledLabel -Text "Local Path:" -X 15 -Y $yPos -IsBold
-    $card1.Controls.Add($lblLocalPath)
-
-    $txtLocalPath = New-StyledTextBox -X 160 -Y $yPos -Width 350 -PlaceholderText "D:\d3 Projects"
+    # Local Path textbox (narrower to leave room for Browse)
+    $txtLocalPath = New-StyledTextBox -X $col2X -Y $c1_y_inputs -Width 248 -Height $INPUT_H `
+        -PlaceholderText "D:\d3 Projects"
     $txtLocalPath.Name = 'txtLocalPath'
     if ($d3ShareActive -and $d3SharePath) {
-        $txtLocalPath.Text = $d3SharePath
+        $txtLocalPath.Text      = $d3SharePath
         $txtLocalPath.ForeColor = $script:Theme.Text
     }
     $card1.Controls.Add($txtLocalPath)
 
-    # Browse button
-    $btnBrowse = New-StyledButton -Text "Browse..." -X 520 -Y $yPos -Width 90 -Height 28 -OnClick {
+    # Browse button inline with Local Path
+    $browseBtnX = $col2X + 248 + $BTN_GAP
+    $btnBrowse = New-StyledButton -Text "Browse..." `
+        -X $browseBtnX -Y $c1_y_inputs -Width 88 -Height $INPUT_H -OnClick {
         $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
-        $folderDialog.Description = "Select the d3 Projects folder"
+        $folderDialog.Description    = "Select the d3 Projects folder"
         $folderDialog.ShowNewFolderButton = $true
-
         if ($folderDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
             $pathBox = $this.Parent.Controls['txtLocalPath']
             if ($pathBox) {
-                $pathBox.Text = $folderDialog.SelectedPath
+                $pathBox.Text      = $folderDialog.SelectedPath
                 $pathBox.ForeColor = $script:Theme.Text
             }
         }
     }
     $card1.Controls.Add($btnBrowse)
 
-    $yPos += 30
-
-    # -- Current path info --
-    if ($d3ShareActive -and $d3SharePath) {
-        $lblCurrentPath = New-StyledLabel -Text "Current shared path: $d3SharePath" -X 160 -Y $yPos -IsMuted -FontSize 8.5
-        $card1.Controls.Add($lblCurrentPath)
-    }
-
-    $yPos += 30
-
-    # -- Share checkbox --
-    $chkShareEnabled = New-StyledCheckBox -Text "Share d3 Projects folder" -X 15 -Y $yPos
-    $chkShareEnabled.Name = 'chkShareEnabled'
+    # ---- Toggle: Share d3 Projects folder ----
+    $chkShareEnabled = New-StyledCheckBox -Text "Share d3 Projects folder" -X $INNER_PAD -Y $c1_y_toggle
+    $chkShareEnabled.Name    = 'chkShareEnabled'
     $chkShareEnabled.Checked = $d3ShareActive
     $card1.Controls.Add($chkShareEnabled)
 
-    $yPos += 40
-
-    # -- Permissions section --
-    $lblPermSection = New-StyledLabel -Text "Permissions" -X 15 -Y $yPos -IsBold -FontSize 10.5
+    # ---- Permissions section ----
+    $lblPermSection = New-StyledLabel -Text "PERMISSIONS" `
+        -X $INNER_PAD -Y $c1_y_permHeader -IsBold -FontSize 8.5
+    $lblPermSection.ForeColor = $script:Theme.TextMuted
     $card1.Controls.Add($lblPermSection)
-    $yPos += 28
 
-    # Current permissions display with clear permission type labels
-    $permText = "No permissions loaded"
-    if ($d3ShareActive) {
-        try {
-            $perms = Get-SharePermissions -ShareName 'd3 Projects'
-            if ($perms -and $perms.Count -gt 0) {
-                $permEntries = @()
-                foreach ($perm in $perms) {
-                    # Map AccessRight to human-readable label
-                    $accessLabel = switch ($perm.AccessRight) {
-                        'Full'   { 'Full Control' }
-                        'Change' { 'Change (Read/Write)' }
-                        'Read'   { 'Read Only' }
-                        default  { $perm.AccessRight }
-                    }
-                    $controlLabel = if ($perm.AccessControlType -eq 'Deny') { '[DENY]' } else { '' }
-                    $permEntries += "$($perm.AccountName) - $accessLabel $controlLabel".Trim()
-                }
-                $permText = $permEntries -join '  |  '
-            }
-        }
-        catch {
-            $permText = "Unable to retrieve permissions"
-        }
-    }
-
-    $lblCurrentPerms = New-StyledLabel -Text "Current: $permText" -X 15 -Y $yPos -IsSecondary -FontSize 9 -MaxWidth 860
+    # Current permissions summary (read-only, wraps)
+    $lblCurrentPerms = New-StyledLabel -Text "Current: $permText" `
+        -X $INNER_PAD -Y $c1_y_permCurrent -IsSecondary -FontSize 9 -MaxWidth ($CARD_W - ($INNER_PAD * 2) - 8)
     $lblCurrentPerms.Name = 'lblCurrentPerms'
     $card1.Controls.Add($lblCurrentPerms)
-    $yPos += 30
+
+    # Permissions dropdown column labels
+    $lblAcctHdr = New-StyledLabel -Text "Account" -X $INNER_PAD -Y $c1_y_permColHdrs -IsBold -FontSize 9
+    $card1.Controls.Add($lblAcctHdr)
+
+    $acl2X = $INNER_PAD + 270 + $CTRL_GAP
+    $lblAclHdr = New-StyledLabel -Text "Access Level" -X $acl2X -Y $c1_y_permColHdrs -IsBold -FontSize 9
+    $card1.Controls.Add($lblAclHdr)
 
     # Account dropdown
-    $lblAccount = New-StyledLabel -Text "Account:" -X 15 -Y $yPos
-    $card1.Controls.Add($lblAccount)
-
-    $cmbAccount = New-StyledComboBox -X 160 -Y $yPos -Width 200 -Items @('Administrators', 'Everyone', 'SYSTEM', 'Authenticated Users')
-    $cmbAccount.Name = 'cmbAccount'
-    $cmbAccount.SelectedIndex = 0
+    $cmbAccount = New-StyledComboBox -X $INNER_PAD -Y $c1_y_permInputs -Width 270 `
+        -Items @('Administrators', 'Everyone', 'SYSTEM', 'Authenticated Users')
+    $cmbAccount.Name           = 'cmbAccount'
+    $cmbAccount.SelectedIndex  = 0
     $card1.Controls.Add($cmbAccount)
 
-    # Access level dropdown
-    $lblAccess = New-StyledLabel -Text "Access:" -X 380 -Y $yPos
-    $card1.Controls.Add($lblAccess)
-
-    $cmbAccess = New-StyledComboBox -X 450 -Y $yPos -Width 140 -Items @('Full', 'Change', 'Read')
-    $cmbAccess.Name = 'cmbAccess'
+    # Access Level dropdown
+    $cmbAccess = New-StyledComboBox -X $acl2X -Y $c1_y_permInputs -Width 160 `
+        -Items @('Full', 'Change', 'Read')
+    $cmbAccess.Name          = 'cmbAccess'
     $cmbAccess.SelectedIndex = 0
     $card1.Controls.Add($cmbAccess)
 
-    # Update Permissions button
-    $btnUpdatePerms = New-StyledButton -Text "Update Permissions" -X 610 -Y $yPos -Width 150 -Height 28 -OnClick {
-        $card = $this.Parent
-        $shareName = $card.Controls['txtShareName'].Text
+    # Update Permissions button (inline, right of dropdowns)
+    $updBtnX = $acl2X + 160 + $BTN_GAP
+    $btnUpdatePerms = New-StyledButton -Text "Update Permissions" `
+        -X $updBtnX -Y $c1_y_permInputs -Width 178 -Height $INPUT_H -IsPrimary -OnClick {
+        $card     = $this.Parent
+        $shareName = Get-TextBoxValue $card.Controls['txtShareName']
+        if (-not $shareName) { $shareName = 'd3 Projects' }
         $account = $card.Controls['cmbAccount'].SelectedItem
-        $access = $card.Controls['cmbAccess'].SelectedItem
-
-        if (-not $shareName -or $shareName -eq '') {
-            $shareName = 'd3 Projects'
-        }
-        # Use placeholder fallback
-        if ($shareName -eq $card.Controls['txtShareName'].Tag) {
-            $shareName = 'd3 Projects'
-        }
+        $access  = $card.Controls['cmbAccess'].SelectedItem
 
         if (-not $account -or -not $access) {
             [System.Windows.Forms.MessageBox]::Show(
@@ -538,7 +585,6 @@ function New-SMBView {
             return
         }
 
-        # Confirm permission change before applying
         $accessLabel = switch ($access) {
             'Full'   { 'Full Control' }
             'Change' { 'Change (Read/Write)' }
@@ -546,7 +592,7 @@ function New-SMBView {
             default  { $access }
         }
         $confirmPerm = [System.Windows.Forms.MessageBox]::Show(
-            "Are you sure you want to change permissions on '$shareName'?`n`nAccount: $account`nAccess: $accessLabel`n`nThis will revoke existing access for '$account' and grant $accessLabel.",
+            "Change permissions on '$shareName'?`n`nAccount: $account`nAccess:  $accessLabel`n`nExisting access for '$account' will be revoked first.",
             "Confirm Permission Change",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question
@@ -557,32 +603,29 @@ function New-SMBView {
 
         if ($result.Success) {
             [System.Windows.Forms.MessageBox]::Show(
-                $result.Message,
-                "Permissions Updated",
+                $result.Message, "Permissions Updated",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             )
-            # Refresh permissions label with clear type labels
-            $perms = Get-SharePermissions -ShareName $shareName
-            if ($perms -and $perms.Count -gt 0) {
-                $permEntries = @()
-                foreach ($p in $perms) {
-                    $aLabel = switch ($p.AccessRight) {
+            # Refresh live permissions label
+            $refreshed = Get-SharePermissions -ShareName $shareName
+            if ($refreshed -and $refreshed.Count -gt 0) {
+                $entries = foreach ($p in $refreshed) {
+                    $al = switch ($p.AccessRight) {
                         'Full'   { 'Full Control' }
                         'Change' { 'Change (Read/Write)' }
                         'Read'   { 'Read Only' }
                         default  { $p.AccessRight }
                     }
-                    $cLabel = if ($p.AccessControlType -eq 'Deny') { '[DENY]' } else { '' }
-                    $permEntries += "$($p.AccountName) - $aLabel $cLabel".Trim()
+                    $dl = if ($p.AccessControlType -eq 'Deny') { ' [DENY]' } else { '' }
+                    "$($p.AccountName) - $al$dl"
                 }
-                $card.Controls['lblCurrentPerms'].Text = "Current: $($permEntries -join '  |  ')"
+                $card.Controls['lblCurrentPerms'].Text = "Current: $($entries -join '  |  ')"
             }
         }
         else {
             [System.Windows.Forms.MessageBox]::Show(
-                $result.Message,
-                "Permission Error",
+                $result.Message, "Permission Error",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Error
             )
@@ -590,28 +633,31 @@ function New-SMBView {
     }
     $card1.Controls.Add($btnUpdatePerms)
 
-    $yPos += 45
+    # ---- Thin separator line before action buttons ----
+    $separator1 = New-Object System.Windows.Forms.Panel
+    $separator1.Location  = New-Object System.Drawing.Point($INNER_PAD, $c1_y_separator)
+    $separator1.Size      = New-Object System.Drawing.Size(($CARD_W - ($INNER_PAD * 2) - 8), 1)
+    $separator1.BackColor = $script:Theme.Border
+    $card1.Controls.Add($separator1)
 
-    # -- Action buttons row --
-    $btnApplyShare = New-StyledButton -Text "Apply Share Settings" -X 15 -Y $yPos -Width 180 -Height 35 -IsPrimary -OnClick {
-        $card = $this.Parent
-        $shareName = $card.Controls['txtShareName'].Text
-        $localPath = $card.Controls['txtLocalPath'].Text
+    # ---- Primary action buttons row ----
+    $btnApplyShare = New-StyledButton -Text "Apply Share Settings" `
+        -X $INNER_PAD -Y $c1_y_actionBtns -Width 180 -Height $BTN_H -IsPrimary -OnClick {
+        $card        = $this.Parent
+        $shareName   = Get-TextBoxValue $card.Controls['txtShareName']
+        $localPath   = Get-TextBoxValue $card.Controls['txtLocalPath']
         $shareEnabled = $card.Controls['chkShareEnabled'].Checked
-        $account = $card.Controls['cmbAccount'].SelectedItem
-        $access = $card.Controls['cmbAccess'].SelectedItem
+        $account     = $card.Controls['cmbAccount'].SelectedItem
+        $access      = $card.Controls['cmbAccess'].SelectedItem
 
-        # Handle placeholder text fallback
-        if (-not $shareName -or $shareName -eq $card.Controls['txtShareName'].Tag) {
-            $shareName = 'd3 Projects'
-        }
-        if (-not $localPath -or $localPath -eq $card.Controls['txtLocalPath'].Tag) {
-            $localPath = 'D:\d3 Projects'
-        }
+        if (-not $shareName)  { $shareName  = 'd3 Projects'   }
+        if (-not $localPath)  { $localPath  = 'D:\d3 Projects' }
+        if (-not $account)    { $account    = 'Administrators' }
+        if (-not $access)     { $access     = 'Full'           }
 
         if (-not $shareEnabled) {
             [System.Windows.Forms.MessageBox]::Show(
-                "The 'Share d3 Projects folder' checkbox is not checked. Enable it to create the share.",
+                "Enable the 'Share d3 Projects folder' toggle to create the share.",
                 "Share Disabled",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
@@ -619,7 +665,6 @@ function New-SMBView {
             return
         }
 
-        # Validate path format first
         $pathCheck = Test-SharePathFormat -Path $localPath
         if (-not $pathCheck.IsValid) {
             [System.Windows.Forms.MessageBox]::Show(
@@ -631,7 +676,6 @@ function New-SMBView {
             return
         }
 
-        # Validate path exists or offer to create
         if (-not (Test-D3ProjectsPath -Path $localPath)) {
             $createDir = [System.Windows.Forms.MessageBox]::Show(
                 "The path '$localPath' does not exist. Create it now?",
@@ -639,32 +683,23 @@ function New-SMBView {
                 [System.Windows.Forms.MessageBoxButtons]::YesNo,
                 [System.Windows.Forms.MessageBoxIcon]::Question
             )
-            if ($createDir -ne [System.Windows.Forms.DialogResult]::Yes) {
-                return
-            }
+            if ($createDir -ne [System.Windows.Forms.DialogResult]::Yes) { return }
         }
 
-        # Build permissions string
-        if (-not $account) { $account = 'Administrators' }
-        if (-not $access) { $access = 'Full' }
-        $permString = "${account}:${access}"
-
-        $result = New-D3ProjectShare -LocalPath $localPath -ShareName $shareName -Permissions $permString
+        $result = New-D3ProjectShare -LocalPath $localPath -ShareName $shareName `
+            -Permissions "${account}:${access}"
 
         if ($result.Success) {
             [System.Windows.Forms.MessageBox]::Show(
-                $result.Message,
-                "Share Created",
+                $result.Message, "Share Created",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             )
-            # Refresh the view
             New-SMBView -ContentPanel $card.Parent.Parent
         }
         else {
             [System.Windows.Forms.MessageBox]::Show(
-                $result.Message,
-                "Share Error",
+                $result.Message, "Share Error",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Error
             )
@@ -672,77 +707,85 @@ function New-SMBView {
     }
     $card1.Controls.Add($btnApplyShare)
 
-    $btnRemoveShare = New-StyledButton -Text "Remove Share" -X 210 -Y $yPos -Width 140 -Height 35 -IsDestructive -OnClick {
-        $card = $this.Parent
-        $shareName = $card.Controls['txtShareName'].Text
-        if (-not $shareName -or $shareName -eq $card.Controls['txtShareName'].Tag) {
-            $shareName = 'd3 Projects'
-        }
+    $btnRemoveShare = New-StyledButton -Text "Remove Share" `
+        -X ($INNER_PAD + 180 + $BTN_GAP) -Y $c1_y_actionBtns -Width 140 -Height $BTN_H -IsDestructive -OnClick {
+        $card      = $this.Parent
+        $shareName = Get-TextBoxValue $card.Controls['txtShareName']
+        if (-not $shareName) { $shareName = 'd3 Projects' }
 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Are you sure you want to remove the share '$shareName'?`n`nThis will stop all network access to this folder. The local files will not be deleted.",
+            "Remove the share '$shareName'?`n`nNetwork access to this folder will stop. Local files are not deleted.",
             "Confirm Share Removal",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Warning
         )
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
 
-        if ($confirm -eq [System.Windows.Forms.DialogResult]::Yes) {
-            $result = Remove-D3Share -ShareName $shareName
-            if ($result.Success) {
-                [System.Windows.Forms.MessageBox]::Show(
-                    $result.Message,
-                    "Share Removed",
-                    [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Information
-                )
-                # Refresh the view
-                New-SMBView -ContentPanel $card.Parent.Parent
-            }
-            else {
-                [System.Windows.Forms.MessageBox]::Show(
-                    $result.Message,
-                    "Removal Error",
-                    [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Error
-                )
-            }
+        $result = Remove-D3Share -ShareName $shareName
+        if ($result.Success) {
+            [System.Windows.Forms.MessageBox]::Show(
+                $result.Message, "Share Removed",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+            New-SMBView -ContentPanel $card.Parent.Parent
+        }
+        else {
+            [System.Windows.Forms.MessageBox]::Show(
+                $result.Message, "Removal Error",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            )
         }
     }
     $card1.Controls.Add($btnRemoveShare)
 
     $scrollPanel.Controls.Add($card1)
 
-    # ========================================================================
-    # Card 2: Additional Shares
-    # ========================================================================
-    $card2 = New-StyledCard -Title "Additional Shares" -X 20 -Y 570 -Width 900 -Height 360
+    # ======================================================================
+    # CARD 2 -- Additional Shares
+    # ======================================================================
+    #
+    # Layout:
+    #   Y=45   DataGridView (220px tall)
+    #   Y=277  button row: Refresh | Create New | Remove Selected
+    #   card height = 277 + 35 + 20 = 332
+    # ----------------------------------------------------------------------
 
-    # DataGridView showing all system shares
-    $dgv = New-StyledDataGridView -X 15 -Y 45 -Width 870 -Height 220
-    $dgv.Name = 'dgvShares'
+    $dgvH          = 220
+    $c2_y_dgv      = 45
+    $c2_y_btnRow   = $c2_y_dgv + $dgvH + $CTRL_GAP   # 277
+    $c2_height     = $c2_y_btnRow + $BTN_H + $PAGE_PAD # 332
+
+    $card2Y = $card1Y + $c1_height + $CARD_GAP
+    $card2  = New-StyledCard -Title "Additional Shares" `
+        -X $PAGE_PAD -Y $card2Y -Width $CARD_W -Height $c2_height
+
+    # DataGridView
+    $dgv = New-StyledDataGridView -X $INNER_PAD -Y $c2_y_dgv `
+        -Width ($CARD_W - ($INNER_PAD * 2) - 8) -Height $dgvH
+    $dgv.Name     = 'dgvShares'
     $dgv.ReadOnly = $true
 
-    # Define columns
     $colName = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
-    $colName.Name = 'ShareName'
+    $colName.Name       = 'ShareName'
     $colName.HeaderText = 'Name'
     $colName.FillWeight = 30
 
     $colPath = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
-    $colPath.Name = 'SharePath'
+    $colPath.Name       = 'SharePath'
     $colPath.HeaderText = 'Path'
-    $colPath.FillWeight = 50
+    $colPath.FillWeight = 45
 
     $colState = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
-    $colState.Name = 'ShareState'
+    $colState.Name       = 'ShareState'
     $colState.HeaderText = 'State'
-    $colState.FillWeight = 20
+    $colState.FillWeight = 25
 
-    $dgv.Columns.Add($colName) | Out-Null
-    $dgv.Columns.Add($colPath) | Out-Null
+    $dgv.Columns.Add($colName)  | Out-Null
+    $dgv.Columns.Add($colPath)  | Out-Null
     $dgv.Columns.Add($colState) | Out-Null
 
-    # Populate the grid with current shares
     try {
         $allShares = Get-D3ProjectShares
         foreach ($share in $allShares) {
@@ -752,11 +795,25 @@ function New-SMBView {
     catch {
         Write-AppLog -Message "Could not populate share grid: $_" -Level 'WARN'
     }
-
     $card2.Controls.Add($dgv)
 
-    # Button row for Additional Shares card
-    $btnRefresh = New-StyledButton -Text "Refresh" -X 15 -Y 275 -Width 100 -Height 32 -OnClick {
+    # Helper: refresh grid rows (closure captures $dgv by reference)
+    $refreshGrid = {
+        $dgv.Rows.Clear()
+        try {
+            $shares = Get-D3ProjectShares
+            foreach ($s in $shares) {
+                $dgv.Rows.Add($s.Name, $s.Path, $s.ShareState) | Out-Null
+            }
+        }
+        catch {
+            Write-AppLog -Message "Failed to refresh SMB shares: $_" -Level 'WARN'
+        }
+    }
+
+    # Refresh (ghost style -- same as default surface button)
+    $btnRefresh = New-StyledButton -Text "Refresh" `
+        -X $INNER_PAD -Y $c2_y_btnRow -Width 100 -Height $BTN_H -OnClick {
         $card = $this.Parent
         $grid = $card.Controls['dgvShares']
         $grid.Rows.Clear()
@@ -768,8 +825,7 @@ function New-SMBView {
         }
         catch {
             [System.Windows.Forms.MessageBox]::Show(
-                "Failed to refresh shares: $_",
-                "Refresh Error",
+                "Failed to refresh shares: $_", "Refresh Error",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Error
             )
@@ -777,69 +833,58 @@ function New-SMBView {
     }
     $card2.Controls.Add($btnRefresh)
 
-    $btnCreateNew = New-StyledButton -Text "Create New Share" -X 125 -Y 275 -Width 150 -Height 32 -OnClick {
-        # Open a dialog form for creating a new share
+    # Create New (outline -- same surface style, border communicates outline intent)
+    $btnCreateNew = New-StyledButton -Text "Create New" `
+        -X ($INNER_PAD + 100 + $BTN_GAP) -Y $c2_y_btnRow -Width 120 -Height $BTN_H -OnClick {
         $dlg = New-Object System.Windows.Forms.Form
-        $dlg.Text = "Create New SMB Share"
-        $dlg.Size = New-Object System.Drawing.Size(450, 320)
-        $dlg.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterParent
-        $dlg.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
-        $dlg.MaximizeBox = $false
-        $dlg.MinimizeBox = $false
-        $dlg.BackColor = $script:Theme.Background
+        $dlg.Text             = "Create New SMB Share"
+        $dlg.Size             = New-Object System.Drawing.Size(460, 300)
+        $dlg.StartPosition    = [System.Windows.Forms.FormStartPosition]::CenterParent
+        $dlg.FormBorderStyle  = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+        $dlg.MaximizeBox      = $false
+        $dlg.MinimizeBox      = $false
+        $dlg.BackColor        = $script:Theme.Background
 
-        # Share name
-        $lblDlgName = New-StyledLabel -Text "Share Name:" -X 15 -Y 20 -IsBold
-        $dlg.Controls.Add($lblDlgName)
-        $txtDlgName = New-StyledTextBox -X 140 -Y 20 -Width 270 -PlaceholderText "Enter share name"
+        $dlg.Controls.Add((New-StyledLabel -Text "Share Name:"  -X 15 -Y 20  -IsBold))
+        $txtDlgName = New-StyledTextBox -X 140 -Y 20 -Width 280 -PlaceholderText "Enter share name"
         $txtDlgName.Name = 'txtDlgName'
         $dlg.Controls.Add($txtDlgName)
 
-        # Local path
-        $lblDlgPath = New-StyledLabel -Text "Local Path:" -X 15 -Y 65 -IsBold
-        $dlg.Controls.Add($lblDlgPath)
-        $txtDlgPath = New-StyledTextBox -X 140 -Y 65 -Width 200 -PlaceholderText "C:\SharedFolder"
+        $dlg.Controls.Add((New-StyledLabel -Text "Local Path:"  -X 15 -Y 60  -IsBold))
+        $txtDlgPath = New-StyledTextBox -X 140 -Y 60 -Width 200 -PlaceholderText "C:\SharedFolder"
         $txtDlgPath.Name = 'txtDlgPath'
         $dlg.Controls.Add($txtDlgPath)
 
-        $btnDlgBrowse = New-StyledButton -Text "Browse..." -X 350 -Y 65 -Width 70 -Height 28 -OnClick {
+        $btnDlgBrowse = New-StyledButton -Text "Browse..." -X 350 -Y 60 -Width 75 -Height 28 -OnClick {
             $fb = New-Object System.Windows.Forms.FolderBrowserDialog
-            $fb.Description = "Select folder to share"
+            $fb.Description        = "Select folder to share"
             $fb.ShowNewFolderButton = $true
             if ($fb.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-                $this.Parent.Controls['txtDlgPath'].Text = $fb.SelectedPath
+                $this.Parent.Controls['txtDlgPath'].Text      = $fb.SelectedPath
                 $this.Parent.Controls['txtDlgPath'].ForeColor = $script:Theme.Text
             }
         }
         $dlg.Controls.Add($btnDlgBrowse)
 
-        # Account
-        $lblDlgAccount = New-StyledLabel -Text "Account:" -X 15 -Y 110 -IsBold
-        $dlg.Controls.Add($lblDlgAccount)
-        $cmbDlgAccount = New-StyledComboBox -X 140 -Y 110 -Width 200 -Items @('Administrators', 'Everyone', 'SYSTEM', 'Authenticated Users')
-        $cmbDlgAccount.Name = 'cmbDlgAccount'
+        $dlg.Controls.Add((New-StyledLabel -Text "Account:"     -X 15 -Y 100 -IsBold))
+        $cmbDlgAccount = New-StyledComboBox -X 140 -Y 100 -Width 200 `
+            -Items @('Administrators', 'Everyone', 'SYSTEM', 'Authenticated Users')
+        $cmbDlgAccount.Name          = 'cmbDlgAccount'
         $cmbDlgAccount.SelectedIndex = 0
         $dlg.Controls.Add($cmbDlgAccount)
 
-        # Access level
-        $lblDlgAccess = New-StyledLabel -Text "Access Level:" -X 15 -Y 155 -IsBold
-        $dlg.Controls.Add($lblDlgAccess)
-        $cmbDlgAccess = New-StyledComboBox -X 140 -Y 155 -Width 200 -Items @('Full', 'Change', 'Read')
-        $cmbDlgAccess.Name = 'cmbDlgAccess'
+        $dlg.Controls.Add((New-StyledLabel -Text "Access Level:" -X 15 -Y 140 -IsBold))
+        $cmbDlgAccess = New-StyledComboBox -X 140 -Y 140 -Width 200 -Items @('Full', 'Change', 'Read')
+        $cmbDlgAccess.Name          = 'cmbDlgAccess'
         $cmbDlgAccess.SelectedIndex = 0
         $dlg.Controls.Add($cmbDlgAccess)
 
-        # Create button
-        $btnDlgCreate = New-StyledButton -Text "Create Share" -X 140 -Y 210 -Width 140 -Height 35 -IsPrimary -OnClick {
-            $form = $this.Parent
-            $sName = $form.Controls['txtDlgName'].Text
-            $sPath = $form.Controls['txtDlgPath'].Text
+        $btnDlgCreate = New-StyledButton -Text "Create Share" -X 140 -Y 195 -Width 140 -Height $BTN_H -IsPrimary -OnClick {
+            $form     = $this.Parent
+            $sName    = Get-TextBoxValue $form.Controls['txtDlgName']
+            $sPath    = Get-TextBoxValue $form.Controls['txtDlgPath']
             $sAccount = $form.Controls['cmbDlgAccount'].SelectedItem
-            $sAccess = $form.Controls['cmbDlgAccess'].SelectedItem
-
-            # Handle placeholder text
-            if ($sName -eq $form.Controls['txtDlgName'].Tag) { $sName = '' }
-            if ($sPath -eq $form.Controls['txtDlgPath'].Tag) { $sPath = '' }
+            $sAccess  = $form.Controls['cmbDlgAccess'].SelectedItem
 
             if (-not $sName -or -not $sPath) {
                 [System.Windows.Forms.MessageBox]::Show(
@@ -851,7 +896,6 @@ function New-SMBView {
                 return
             }
 
-            # Validate path format before creating
             $pathCheck = Test-SharePathFormat -Path $sPath
             if (-not $pathCheck.IsValid) {
                 [System.Windows.Forms.MessageBox]::Show(
@@ -863,13 +907,12 @@ function New-SMBView {
                 return
             }
 
-            $permString = "${sAccount}:${sAccess}"
-            $result = New-D3ProjectShare -LocalPath $sPath -ShareName $sName -Permissions $permString
+            $result = New-D3ProjectShare -LocalPath $sPath -ShareName $sName `
+                -Permissions "${sAccount}:${sAccess}"
 
             if ($result.Success) {
                 [System.Windows.Forms.MessageBox]::Show(
-                    $result.Message,
-                    "Share Created",
+                    $result.Message, "Share Created",
                     [System.Windows.Forms.MessageBoxButtons]::OK,
                     [System.Windows.Forms.MessageBoxIcon]::Information
                 )
@@ -878,8 +921,7 @@ function New-SMBView {
             }
             else {
                 [System.Windows.Forms.MessageBox]::Show(
-                    $result.Message,
-                    "Error",
+                    $result.Message, "Error",
                     [System.Windows.Forms.MessageBoxButtons]::OK,
                     [System.Windows.Forms.MessageBoxIcon]::Error
                 )
@@ -887,16 +929,15 @@ function New-SMBView {
         }
         $dlg.Controls.Add($btnDlgCreate)
 
-        # Cancel button
-        $btnDlgCancel = New-StyledButton -Text "Cancel" -X 290 -Y 210 -Width 100 -Height 35 -OnClick {
+        $btnDlgCancel = New-StyledButton -Text "Cancel" -X 290 -Y 195 -Width 100 -Height $BTN_H -OnClick {
             $this.Parent.Close()
         }
         $dlg.Controls.Add($btnDlgCancel)
 
-        # Show the dialog; refresh grid if a share was created
+        # Refresh grid after successful creation
         if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
             $parentCard = $this.Parent
-            $grid = $parentCard.Controls['dgvShares']
+            $grid       = $parentCard.Controls['dgvShares']
             $grid.Rows.Clear()
             try {
                 $shares = Get-D3ProjectShares
@@ -911,7 +952,10 @@ function New-SMBView {
     }
     $card2.Controls.Add($btnCreateNew)
 
-    $btnRemoveSelected = New-StyledButton -Text "Remove Selected" -X 285 -Y 275 -Width 150 -Height 32 -IsDestructive -OnClick {
+    # Remove Selected (destructive)
+    $btnRemoveSelected = New-StyledButton -Text "Remove Selected" `
+        -X ($INNER_PAD + 100 + $BTN_GAP + 120 + $BTN_GAP) -Y $c2_y_btnRow `
+        -Width 150 -Height $BTN_H -IsDestructive -OnClick {
         $card = $this.Parent
         $grid = $card.Controls['dgvShares']
 
@@ -926,138 +970,118 @@ function New-SMBView {
         }
 
         $selectedName = $grid.SelectedRows[0].Cells['ShareName'].Value
-
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Are you sure you want to remove the share '$selectedName'?",
+            "Remove the share '$selectedName'?",
             "Confirm Removal",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Warning
         )
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
 
-        if ($confirm -eq [System.Windows.Forms.DialogResult]::Yes) {
-            $result = Remove-D3Share -ShareName $selectedName
-            if ($result.Success) {
-                # Refresh grid
-                $grid.Rows.Clear()
-                try {
-                    $shares = Get-D3ProjectShares
-                    foreach ($s in $shares) {
-                        $grid.Rows.Add($s.Name, $s.Path, $s.ShareState) | Out-Null
-                    }
-                }
-                catch {
-                    Write-AppLog -Message "Failed to refresh SMB shares after removal: $_" -Level 'WARN'
+        $result = Remove-D3Share -ShareName $selectedName
+        if ($result.Success) {
+            $grid.Rows.Clear()
+            try {
+                $shares = Get-D3ProjectShares
+                foreach ($s in $shares) {
+                    $grid.Rows.Add($s.Name, $s.Path, $s.ShareState) | Out-Null
                 }
             }
-            else {
-                [System.Windows.Forms.MessageBox]::Show(
-                    $result.Message,
-                    "Removal Error",
-                    [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Error
-                )
+            catch {
+                Write-AppLog -Message "Failed to refresh SMB shares after removal: $_" -Level 'WARN'
             }
+        }
+        else {
+            [System.Windows.Forms.MessageBox]::Show(
+                $result.Message, "Removal Error",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            )
         }
     }
     $card2.Controls.Add($btnRemoveSelected)
 
     $scrollPanel.Controls.Add($card2)
 
-    # ========================================================================
-    # Card 3: Quick Actions
-    # ========================================================================
-    $card3 = New-StyledCard -Title "Quick Actions" -X 20 -Y 950 -Width 900 -Height 200
+    # ======================================================================
+    # CARD 3 -- Quick Actions
+    # ======================================================================
+    #
+    # Layout:
+    #   Y=45   "UNC Path" field label
+    #   Y=63   read-only monospace UNC path textbox (full width)
+    #   Y=103  button row: Test Share Access | Copy UNC Path
+    #   Y=150  status feedback label (dynamically coloured)
+    #   card height = 150 + 20 + 20 = 190
+    # ----------------------------------------------------------------------
 
-    $hostname = $env:COMPUTERNAME
-    if (-not $hostname) {
-        try { $hostname = [System.Net.Dns]::GetHostName() } catch { $hostname = 'UNKNOWN' }
-    }
+    $c3_y_uncLabel   = 45
+    $c3_y_uncBox     = $c3_y_uncLabel + $LABEL_H + 2   # 65
+    $c3_y_btnRow     = $c3_y_uncBox + $INPUT_H + $CTRL_GAP  # 105
+    $c3_y_status     = $c3_y_btnRow + $BTN_H + $CTRL_GAP    # 152
+    $c3_height       = $c3_y_status + ($LABEL_H * 2) + $PAGE_PAD  # 212
 
-    # Test Share Access button
-    $btnTestAccess = New-StyledButton -Text "Test Share Access" -X 15 -Y 50 -Width 160 -Height 35 -OnClick {
-        $card = $this.Parent
+    $card3Y = $card2Y + $c2_height + $CARD_GAP
+    $card3  = New-StyledCard -Title "Quick Actions" `
+        -X $PAGE_PAD -Y $card3Y -Width $CARD_W -Height $c3_height
+
+    # UNC Path label
+    $lblUncHdr = New-StyledLabel -Text "UNC Path" -X $INNER_PAD -Y $c3_y_uncLabel -IsBold -FontSize 9
+    $card3.Controls.Add($lblUncHdr)
+
+    # Read-only monospace UNC path display box
+    $txtUNC = New-StyledTextBox -X $INNER_PAD -Y $c3_y_uncBox `
+        -Width ($CARD_W - ($INNER_PAD * 2) - 8) -Height $INPUT_H
+    $txtUNC.Text      = $uncPath
+    $txtUNC.ForeColor = $script:Theme.Text
+    $txtUNC.BackColor = $script:Theme.Surface
+    $txtUNC.ReadOnly  = $true
+    $txtUNC.Font      = New-Object System.Drawing.Font('Consolas', 10)
+    $txtUNC.Name      = 'txtUNCPath'
+    $card3.Controls.Add($txtUNC)
+
+    # Test Share Access
+    $btnTestAccess = New-StyledButton -Text "Test Share Access" `
+        -X $INNER_PAD -Y $c3_y_btnRow -Width 170 -Height $BTN_H -OnClick {
+        $card        = $this.Parent
         $statusLabel = $card.Controls['lblQuickStatus']
-        $statusLabel.Text = "Testing share access..."
+        $unc         = $card.Controls['txtUNCPath'].Text
+
+        $statusLabel.Text      = "Testing share access..."
         $statusLabel.ForeColor = $script:Theme.TextSecondary
         $statusLabel.Refresh()
 
-        $hn = $env:COMPUTERNAME
-        if (-not $hn) {
-            try { $hn = [System.Net.Dns]::GetHostName() } catch { $hn = 'UNKNOWN' }
-        }
-        $uncPath = "\\$hn\d3 Projects"
-
         try {
-            if (Test-Path -Path $uncPath -ErrorAction Stop) {
-                $statusLabel.Text = "Share '$uncPath' is accessible."
+            if (Test-Path -Path $unc -ErrorAction Stop) {
+                $statusLabel.Text      = "Share is accessible: $unc"
                 $statusLabel.ForeColor = $script:Theme.Success
             }
             else {
-                $statusLabel.Text = "Share '$uncPath' is NOT accessible."
+                $statusLabel.Text      = "Share is NOT accessible: $unc"
                 $statusLabel.ForeColor = $script:Theme.Error
             }
         }
         catch {
-            $statusLabel.Text = "Error testing share: $_"
+            $statusLabel.Text      = "Error testing share: $_"
             $statusLabel.ForeColor = $script:Theme.Error
         }
     }
     $card3.Controls.Add($btnTestAccess)
 
-    # Open in Explorer button
-    $btnOpenExplorer = New-StyledButton -Text "Open Share in Explorer" -X 190 -Y 50 -Width 180 -Height 35 -OnClick {
+    # Copy UNC Path
+    $btnCopyUNC = New-StyledButton -Text "Copy UNC Path" `
+        -X ($INNER_PAD + 170 + $BTN_GAP) -Y $c3_y_btnRow -Width 150 -Height $BTN_H -OnClick {
+        $card        = $this.Parent
+        $statusLabel = $card.Controls['lblQuickStatus']
+        $unc         = $card.Controls['txtUNCPath'].Text
         try {
-            # Try to find the d3 Projects share path
-            $sharePath = $null
-            try {
-                $shareInfo = Get-SmbShare -Name 'd3 Projects' -ErrorAction Stop
-                $sharePath = $shareInfo.Path
-            }
-            catch {
-                $sharePath = 'D:\d3 Projects'
-            }
-
-            if (Test-Path -Path $sharePath -ErrorAction SilentlyContinue) {
-                Start-Process explorer.exe -ArgumentList $sharePath
-            }
-            else {
-                [System.Windows.Forms.MessageBox]::Show(
-                    "The path '$sharePath' does not exist.",
-                    "Path Not Found",
-                    [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Warning
-                )
-            }
-        }
-        catch {
-            [System.Windows.Forms.MessageBox]::Show(
-                "Failed to open Explorer: $_",
-                "Error",
-                [System.Windows.Forms.MessageBoxButtons]::OK,
-                [System.Windows.Forms.MessageBoxIcon]::Error
-            )
-        }
-    }
-    $card3.Controls.Add($btnOpenExplorer)
-
-    # Copy UNC Path button
-    $btnCopyUNC = New-StyledButton -Text "Copy UNC Path" -X 385 -Y 50 -Width 150 -Height 35 -OnClick {
-        $hn = $env:COMPUTERNAME
-        if (-not $hn) {
-            try { $hn = [System.Net.Dns]::GetHostName() } catch { $hn = 'UNKNOWN' }
-        }
-        $uncPath = "\\$hn\d3 Projects"
-        try {
-            [System.Windows.Forms.Clipboard]::SetText($uncPath)
-            $card = $this.Parent
-            $statusLabel = $card.Controls['lblQuickStatus']
-            $statusLabel.Text = "Copied to clipboard: $uncPath"
+            [System.Windows.Forms.Clipboard]::SetText($unc)
+            $statusLabel.Text      = "Copied to clipboard: $unc"
             $statusLabel.ForeColor = $script:Theme.Success
         }
         catch {
             [System.Windows.Forms.MessageBox]::Show(
-                "Failed to copy to clipboard: $_",
-                "Clipboard Error",
+                "Failed to copy to clipboard: $_", "Clipboard Error",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Error
             )
@@ -1065,14 +1089,18 @@ function New-SMBView {
     }
     $card3.Controls.Add($btnCopyUNC)
 
-    # Status area
-    $lblQuickStatus = New-StyledLabel -Text "UNC Path: \\$hostname\d3 Projects" -X 15 -Y 100 -IsSecondary -FontSize 9 -MaxWidth 860
+    # Status feedback area
+    $lblQuickStatus = New-StyledLabel -Text "" `
+        -X $INNER_PAD -Y $c3_y_status -IsSecondary -FontSize 9 `
+        -MaxWidth ($CARD_W - ($INNER_PAD * 2) - 8)
     $lblQuickStatus.Name = 'lblQuickStatus'
     $card3.Controls.Add($lblQuickStatus)
 
     $scrollPanel.Controls.Add($card3)
 
-    # Add scroll panel to content panel
+    # ------------------------------------------------------------------
+    # Mount scroll panel into the content panel
+    # ------------------------------------------------------------------
     $ContentPanel.Controls.Add($scrollPanel)
     $ContentPanel.ResumeLayout()
 }

@@ -1601,10 +1601,11 @@ function New-DeployView {
     .SYNOPSIS
         Creates the Network Discovery and Deployment view for the DISGUISE BUDDY UI.
     .DESCRIPTION
-        Builds a full panel with three cards:
-          1. Network Scan - subnet/range inputs, scan and quick-scan buttons, progress
-          2. Discovered Servers - DataGridView with server list and actions
-          3. Deploy Configuration - profile selection, credentials, deployment controls
+        Builds a full panel with four cards:
+          1. Network Scan     - subnet/range inputs, scan buttons, progress
+          2. Discovered Servers - DataGridView with server list and deploy controls
+          3. Validation Tools - NIC validation and pre-flight check
+          4. Deploy Configuration - credentials, deploy button, and log
     .PARAMETER ContentPanel
         The parent panel to which all controls will be added.
     #>
@@ -1620,13 +1621,15 @@ function New-DeployView {
     $ContentPanel.SuspendLayout()
 
     # ===================================================================
-    # BackgroundWorker for non-blocking network scan (Task 2)
+    # BackgroundWorker for non-blocking network scan
     # ===================================================================
     $scanWorker = New-Object System.ComponentModel.BackgroundWorker
     $scanWorker.WorkerReportsProgress      = $true
     $scanWorker.WorkerSupportsCancellation = $true
 
-    # Create a scrollable container for the entire view
+    # ===================================================================
+    # Scrollable container -- 24px padding, matches React layout
+    # ===================================================================
     $scrollContainer = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.ClientSize.Width -Height $ContentPanel.ClientSize.Height
     $scrollContainer.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
                               [System.Windows.Forms.AnchorStyles]::Left -bor
@@ -1637,76 +1640,111 @@ function New-DeployView {
     # ===================================================================
     # Section Header
     # ===================================================================
-    $sectionHeader = New-SectionHeader -Text "Network Deploy" -X 20 -Y 10 -Width 900
+    $sectionHeader = New-SectionHeader -Text "Network Deploy" -X 24 -Y 16 -Width 900
 
     $subtitleLabel = New-StyledLabel -Text "Discover disguise servers and push configurations" `
-        -X 20 -Y 48 -FontSize 9 -IsSecondary
+        -X 24 -Y 54 -FontSize 9 -IsSecondary
 
     $scrollContainer.Controls.Add($sectionHeader)
     $scrollContainer.Controls.Add($subtitleLabel)
 
     # ===================================================================
     # Card 1: Network Scan
+    # Card content starts at Y=45 (title) -- controls begin at Y=52 for labels
+    # Controls row: Subnet | Range Start-End | Timeout | [Scan Network]
+    # Second row:   [Quick Scan] [Cancel] [Auto-Discover]
+    # Third row:    progress bar + status text
     # ===================================================================
-    $scanCard = New-StyledCard -Title "Network Scan" -X 20 -Y 80 -Width 900 -Height 180
+    $scanCard = New-StyledCard -Title "Network Scan" -X 24 -Y 88 -Width 900 -Height 215
 
-    # --- Row 1: Subnet, IP range, and timeout inputs ---
-    $lblSubnet = New-StyledLabel -Text "Subnet:" -X 15 -Y 48 -FontSize 9
-    $txtSubnet = New-StyledTextBox -X 75 -Y 45 -Width 120 -PlaceholderText "10.0.0"
+    # -- Row 1 labels (Y=52 sits nicely below the 11pt card title at Y=15) --
+    $lblSubnet  = New-StyledLabel -Text "Subnet"  -X 15 -Y 52 -FontSize 9 -IsMuted
+    $lblRange   = New-StyledLabel -Text "Range"   -X 204 -Y 52 -FontSize 9 -IsMuted
+    $lblTimeout = New-StyledLabel -Text "Timeout" -X 386 -Y 52 -FontSize 9 -IsMuted
+
+    # -- Row 1 inputs (Y=72, height=28) --
+    $txtSubnet = New-StyledTextBox -X 15 -Y 72 -Width 176 -PlaceholderText "192.168.10"
     $txtSubnet.Text = "10.0.0"
     $txtSubnet.ForeColor = $script:Theme.Text
 
-    $lblStartIP = New-StyledLabel -Text "Start:" -X 210 -Y 48 -FontSize 9
-    $txtStartIP = New-StyledTextBox -X 255 -Y 45 -Width 60
+    # Range: Start input, dash separator, End input
+    $txtStartIP = New-StyledTextBox -X 204 -Y 72 -Width 64
     $txtStartIP.Text = "1"
 
-    $lblEndIP = New-StyledLabel -Text "End:" -X 330 -Y 48 -FontSize 9
-    $txtEndIP = New-StyledTextBox -X 370 -Y 45 -Width 60
+    $lblRangeDash = New-StyledLabel -Text "-" -X 275 -Y 79 -FontSize 10 -IsMuted
+
+    $txtEndIP = New-StyledTextBox -X 288 -Y 72 -Width 64
     $txtEndIP.Text = "254"
 
-    $lblTimeout = New-StyledLabel -Text "Timeout (ms):" -X 450 -Y 48 -FontSize 9
-    $txtTimeout = New-StyledTextBox -X 555 -Y 45 -Width 70
-    $txtTimeout.Text = "200"
+    # Timeout combobox
+    $cboTimeout = New-StyledComboBox -X 386 -Y 72 -Width 110 -Items @("100ms","200ms","500ms")
+    $cboTimeout.SelectedIndex = 1   # default: 200ms
 
-    $scanCard.Controls.AddRange(@($lblSubnet, $txtSubnet, $lblStartIP, $txtStartIP,
-                                   $lblEndIP, $txtEndIP, $lblTimeout, $txtTimeout))
+    # Scan Network button -- primary, aligned to same row, bottom-aligned to inputs
+    $btnScanNetwork = New-StyledButton -Text "Scan Network" -X 514 -Y 70 `
+        -Width 150 -Height 35 -IsPrimary
 
-    # --- Row 2: Scan buttons, progress bar, status label, and cancel button ---
-    $btnScanNetwork = New-StyledButton -Text "Scan Network" -X 15 -Y 90 `
-        -Width 140 -Height 35 -IsPrimary
+    $scanCard.Controls.Add($lblSubnet)
+    $scanCard.Controls.Add($lblRange)
+    $scanCard.Controls.Add($lblTimeout)
+    $scanCard.Controls.Add($txtSubnet)
+    $scanCard.Controls.Add($txtStartIP)
+    $scanCard.Controls.Add($lblRangeDash)
+    $scanCard.Controls.Add($txtEndIP)
+    $scanCard.Controls.Add($cboTimeout)
+    $scanCard.Controls.Add($btnScanNetwork)
 
-    $btnQuickScan = New-StyledButton -Text "Quick Scan" -X 170 -Y 90 `
-        -Width 120 -Height 35
+    # -- Row 2: secondary scan buttons (Y=118, 12px below row 1 bottom ~106) --
+    $btnQuickScan = New-StyledButton -Text "Quick Scan" -X 15 -Y 118 -Width 120 -Height 35
 
-    # Cancel button -- only enabled while a background scan is running
-    $btnCancelScan = New-StyledButton -Text "Cancel" -X 305 -Y 90 -Width 80 -Height 35
+    $btnCancelScan = New-StyledButton -Text "Cancel" -X 139 -Y 118 -Width 80 -Height 35
     $btnCancelScan.Enabled = $false
 
-    # Auto-Discover button -- uses DNS-SD / mDNS to find servers advertising _d3api._tcp.local.
-    $btnDNSSD = New-StyledButton -Text "Auto-Discover (DNS-SD)" -X 400 -Y 90 `
-        -Width 185 -Height 35
+    $btnDNSSD = New-StyledButton -Text "Auto-Discover (DNS-SD)" -X 231 -Y 118 -Width 190 -Height 35
 
-    # Progress bar for scan progress (shifted right to accommodate all buttons)
-    $scanProgressBar = New-StyledProgressBar -X 600 -Y 95 -Width 270 -Height 22
+    $scanCard.Controls.Add($btnQuickScan)
+    $scanCard.Controls.Add($btnCancelScan)
+    $scanCard.Controls.Add($btnDNSSD)
 
-    $lblScanStatus = New-StyledLabel -Text "Ready to scan" -X 15 -Y 140 -FontSize 9 -IsMuted
+    # -- Row 3: progress bar + status label (Y=168) --
+    $scanProgressBar = New-StyledProgressBar -X 15 -Y 170 -Width 860 -Height 10
+
+    $lblScanStatus = New-StyledLabel -Text "Ready to scan" -X 15 -Y 186 -FontSize 9 -IsMuted
     $lblScanStatus.AutoSize = $false
-    $lblScanStatus.Width = 870
+    $lblScanStatus.Width = 860
+    $lblScanStatus.Font = New-Object System.Drawing.Font('Consolas', 9)
 
-    $scanCard.Controls.AddRange(@($btnScanNetwork, $btnQuickScan, $btnCancelScan, $btnDNSSD,
-                                   $scanProgressBar, $lblScanStatus))
+    $scanCard.Controls.Add($scanProgressBar)
+    $scanCard.Controls.Add($lblScanStatus)
 
     $scrollContainer.Controls.Add($scanCard)
 
     # ===================================================================
     # Card 2: Discovered Servers
+    # Height: 45 title + 200 grid + 12 gap + 35 buttons + 16 gap + 1 divider +
+    #         16 gap + 35 deploy row + 20 gap + 24 bottom = ~404
     # ===================================================================
-    $serversCard = New-StyledCard -Title "Discovered Servers" -X 20 -Y 270 -Width 900 -Height 280
+    $serversCard = New-StyledCard -Title "Discovered Servers" -X 24 -Y 327 -Width 900 -Height 410
 
-    # DataGridView for the server list
-    $dgvServers = New-StyledDataGridView -X 15 -Y 45 -Width 870 -Height 180
+    # -- Header row: badge + select-all link (Y=13, beside title at Y=15) --
+    $badgeServerCount = New-StatusBadge -Text "0" -X 198 -Y 13 -Type 'Info'
 
-    # Collect profile names once for use in the per-row Profile column
+    $lnkSelectAll = New-StyledLabel -Text "Select all" -X 258 -Y 18 -FontSize 9
+    $lnkSelectAll.ForeColor = $script:Theme.Primary
+    $lnkSelectAll.Cursor = [System.Windows.Forms.Cursors]::Hand
+
+    $lnkDeselectAll = New-StyledLabel -Text "Deselect all" -X 322 -Y 18 -FontSize 9
+    $lnkDeselectAll.ForeColor = $script:Theme.TextMuted
+    $lnkDeselectAll.Cursor = [System.Windows.Forms.Cursors]::Hand
+
+    $serversCard.Controls.Add($badgeServerCount)
+    $serversCard.Controls.Add($lnkSelectAll)
+    $serversCard.Controls.Add($lnkDeselectAll)
+
+    # -- DataGridView (Y=45, height=200) --
+    $dgvServers = New-StyledDataGridView -X 15 -Y 45 -Width 866 -Height 200
+
+    # Collect profile names for the per-row Profile column
     $allProfileNames = @()
     try {
         $allProfileNames = Get-AllProfiles | ForEach-Object { $_.Name }
@@ -1714,17 +1752,17 @@ function New-DeployView {
         Write-AppLog -Message "New-DeployView: Could not pre-load profile names for grid column - $_" -Level 'WARN'
     }
 
-    # Configure columns: Checkbox, IP Address, Hostname, Status, d3 API, Ports, Response Time, Profile
+    # Configure columns individually -- DO NOT use AddRange(@()) (causes type cast error)
     $colSelect = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
     $colSelect.HeaderText = ""
     $colSelect.Name = "Select"
-    $colSelect.Width = 40
+    $colSelect.Width = 36
     $colSelect.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
     $colIP = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colIP.HeaderText = "IP Address"
     $colIP.Name = "IPAddress"
-    $colIP.Width = 110
+    $colIP.Width = 112
     $colIP.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
     $colHostname = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
@@ -1736,13 +1774,13 @@ function New-DeployView {
     $colStatus = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colStatus.HeaderText = "Status"
     $colStatus.Name = "Status"
-    $colStatus.Width = 80
+    $colStatus.Width = 82
     $colStatus.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
     $colAPI = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
-    $colAPI.HeaderText = "d3 API"
+    $colAPI.HeaderText = "API"
     $colAPI.Name = "D3API"
-    $colAPI.Width = 85
+    $colAPI.Width = 80
     $colAPI.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
     $colPorts = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
@@ -1752,43 +1790,39 @@ function New-DeployView {
     $colPorts.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
     $colResponseTime = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
-    $colResponseTime.HeaderText = "ms"
+    $colResponseTime.HeaderText = "Response"
     $colResponseTime.Name = "ResponseTime"
-    $colResponseTime.Width = 55
+    $colResponseTime.Width = 72
     $colResponseTime.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
 
-    # Per-row Profile assignment column (Task 1)
-    # DataGridViewComboBoxColumn lets each row pick its own profile.
     $colProfile = New-Object System.Windows.Forms.DataGridViewComboBoxColumn
     $colProfile.HeaderText = "Profile"
     $colProfile.Name = "Profile"
     $colProfile.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::Fill
-    $colProfile.DisplayStyleForCurrentCellOnly = $true   # show as text in non-focused cells
+    $colProfile.DisplayStyleForCurrentCellOnly = $true
     $colProfile.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    # Add a blank sentinel so rows can have no profile selected
     [void]$colProfile.Items.Add("")
     foreach ($pName in $allProfileNames) {
         [void]$colProfile.Items.Add($pName)
     }
 
-    $dgvServers.Columns.Add($colSelect) | Out-Null
-    $dgvServers.Columns.Add($colIP) | Out-Null
-    $dgvServers.Columns.Add($colHostname) | Out-Null
-    $dgvServers.Columns.Add($colStatus) | Out-Null
-    $dgvServers.Columns.Add($colAPI) | Out-Null
-    $dgvServers.Columns.Add($colPorts) | Out-Null
-    $dgvServers.Columns.Add($colResponseTime) | Out-Null
-    $dgvServers.Columns.Add($colProfile) | Out-Null
+    $dgvServers.Columns.Add($colSelect)      | Out-Null
+    $dgvServers.Columns.Add($colIP)          | Out-Null
+    $dgvServers.Columns.Add($colHostname)    | Out-Null
+    $dgvServers.Columns.Add($colStatus)      | Out-Null
+    $dgvServers.Columns.Add($colAPI)         | Out-Null
+    $dgvServers.Columns.Add($colPorts)       | Out-Null
+    $dgvServers.Columns.Add($colResponseTime)| Out-Null
+    $dgvServers.Columns.Add($colProfile)     | Out-Null
     $dgvServers.ReadOnly = $false
 
-    # Only the Select (checkbox) and Profile (combobox) columns are user-editable
     foreach ($col in $dgvServers.Columns) {
         if ($col.Name -ne "Select" -and $col.Name -ne "Profile") {
             $col.ReadOnly = $true
         }
     }
 
-    # --- Right-click context menu for the grid ---
+    # -- Right-click context menu --
     $contextMenu = New-Object System.Windows.Forms.ContextMenuStrip
 
     $menuViewDetails = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -1801,7 +1835,6 @@ function New-DeployView {
                 $lblScanStatus.Text = "Testing $ip..."
                 $lblScanStatus.ForeColor = $script:Theme.TextSecondary
                 $lblScanStatus.Refresh()
-
                 try {
                     $details = Test-DisguiseServer -IPAddress $ip -TimeoutMs 3000
                     $detailMsg = "Server: $ip`n" +
@@ -1819,7 +1852,6 @@ function New-DeployView {
                         "Error", [System.Windows.Forms.MessageBoxButtons]::OK,
                         [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
                 }
-
                 $lblScanStatus.Text = "Ready"
                 $lblScanStatus.ForeColor = $script:Theme.TextMuted
             }
@@ -1835,7 +1867,6 @@ function New-DeployView {
             if ($ip) {
                 $lblScanStatus.Text = "Testing connection to $ip..."
                 $lblScanStatus.Refresh()
-
                 try {
                     $testResult = Test-DisguiseServer -IPAddress $ip -TimeoutMs 3000
                     $statusText = if ($testResult.IsDisguise) { "Disguise" } elseif ($testResult.Ports.Count -gt 0) { "Online" } else { "Offline" }
@@ -1856,7 +1887,6 @@ function New-DeployView {
         $selectedRow = $dgvServers.CurrentRow
         if ($selectedRow) {
             $ip = $selectedRow.Cells["IPAddress"].Value
-            # Read the profile from this row's per-row Profile cell (Task 1)
             $rowProfileName = $selectedRow.Cells["Profile"].Value
             if ($ip -and -not [string]::IsNullOrWhiteSpace($rowProfileName)) {
                 $confirmResult = [System.Windows.Forms.MessageBox]::Show(
@@ -1871,7 +1901,6 @@ function New-DeployView {
                         if (-not $profileObj) {
                             $txtDeployLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] ERROR: Could not load profile '$rowProfileName'`r`n")
                         } else {
-                            # Build credentials if provided
                             $cred = $null
                             if (-not $chkCurrentCreds.Checked -and $txtUsername.Text -and $txtPassword.Text) {
                                 $secPass = ConvertTo-SecureString $txtPassword.Text -AsPlainText -Force
@@ -1900,41 +1929,40 @@ function New-DeployView {
         }
     })
 
-    $contextMenu.Items.AddRange(@($menuViewDetails, $menuTestConnection, $menuPushProfile))
+    $contextMenu.Items.Add($menuViewDetails)    | Out-Null
+    $contextMenu.Items.Add($menuTestConnection) | Out-Null
+    $contextMenu.Items.Add($menuPushProfile)    | Out-Null
     $dgvServers.ContextMenuStrip = $contextMenu
 
-    # --- Buttons below the grid ---
-    $btnSelectAll = New-StyledButton -Text "Select All" -X 15 -Y 235 -Width 100 -Height 30
-    $btnSelectAll.Add_Click({
-        foreach ($row in $dgvServers.Rows) {
-            $row.Cells["Select"].Value = $true
-        }
-        $selectedCount = $dgvServers.Rows.Count
-        $lblTargetSummary.Text = "$selectedCount server(s) selected"
+    $serversCard.Controls.Add($dgvServers)
+
+    # -- Buttons below grid (Y=257, 12px gap after grid bottom ~245) --
+    $btnSelectAllGrid = New-StyledButton -Text "Select All"      -X 15  -Y 257 -Width 110 -Height 35
+    $btnDeselectAllGrid = New-StyledButton -Text "Clear Selection" -X 139 -Y 257 -Width 130 -Height 35
+    $btnRefreshServers = New-StyledButton -Text "Refresh"         -X 281 -Y 257 -Width 100 -Height 35
+    $btnViewDetails    = New-StyledButton -Text "View Details"    -X 393 -Y 257 -Width 120 -Height 35
+
+    $btnSelectAllGrid.Add_Click({
+        foreach ($row in $dgvServers.Rows) { $row.Cells["Select"].Value = $true }
+        $cnt = $dgvServers.Rows.Count
+        $lblTargetSummary.Text = "$cnt server(s) selected"
+        $badgeServerCount.Tag = "$cnt"
+        $badgeServerCount.Invalidate()
     })
 
-    $btnDeselectAll = New-StyledButton -Text "Deselect All" -X 125 -Y 235 -Width 110 -Height 30
-    $btnDeselectAll.Add_Click({
-        foreach ($row in $dgvServers.Rows) {
-            $row.Cells["Select"].Value = $false
-        }
+    $btnDeselectAllGrid.Add_Click({
+        foreach ($row in $dgvServers.Rows) { $row.Cells["Select"].Value = $false }
         $lblTargetSummary.Text = "0 servers selected"
     })
 
-    $btnRefreshServers = New-StyledButton -Text "Refresh" -X 245 -Y 235 -Width 100 -Height 30
     $btnRefreshServers.Add_Click({
-        # Re-populate the grid from the last cached scan results
         if ($script:AppState.LastScanResults -and $script:AppState.LastScanResults.Count -gt 0) {
             $dgvServers.Rows.Clear()
             foreach ($server in $script:AppState.LastScanResults) {
-                $statusText = if ($server.IsDisguise) { "Disguise" }
-                              elseif ($server.Ports.Count -gt 0) { "Online" }
-                              else { "Unreachable" }
-                $apiText = if ($server.APIVersion) { $server.APIVersion } else { "N/A" }
-                $portsText = if ($server.Ports.Count -gt 0) { $server.Ports -join ", " } else { "None" }
+                $statusText  = if ($server.IsDisguise) { "Disguise" } elseif ($server.Ports.Count -gt 0) { "Online" } else { "Unreachable" }
+                $apiText     = if ($server.APIVersion) { $server.APIVersion } else { "N/A" }
+                $portsText   = if ($server.Ports.Count -gt 0) { $server.Ports -join ", " } else { "None" }
                 $responseText = if ($server.ResponseTimeMs -ge 0) { "$($server.ResponseTimeMs) ms" } else { "N/A" }
-
-                # Profile cell starts blank; columns: Select, IP, Hostname, Status, API, Ports, ResponseTime, Profile
                 [void]$dgvServers.Rows.Add($false, $server.IPAddress, $server.Hostname,
                                             $statusText, $apiText, $portsText, $responseText, "")
             }
@@ -1943,9 +1971,7 @@ function New-DeployView {
         }
     })
 
-    $btnViewDetails = New-StyledButton -Text "View Details" -X 355 -Y 235 -Width 120 -Height 30
     $btnViewDetails.Add_Click({
-        # Trigger the same action as the context menu "View Details"
         $selectedRow = $dgvServers.CurrentRow
         if ($selectedRow) {
             $ip = $selectedRow.Cells["IPAddress"].Value
@@ -1975,44 +2001,36 @@ function New-DeployView {
         }
     })
 
-    $serversCard.Controls.AddRange(@($dgvServers, $btnSelectAll, $btnDeselectAll,
-                                      $btnRefreshServers, $btnViewDetails))
+    # Wire header link-label click events
+    $lnkSelectAll.Add_Click({
+        foreach ($row in $dgvServers.Rows) { $row.Cells["Select"].Value = $true }
+        $cnt = $dgvServers.Rows.Count
+        $lblTargetSummary.Text = "$cnt server(s) selected"
+        $badgeServerCount.Tag = "$cnt"
+        $badgeServerCount.Invalidate()
+    })
+    $lnkDeselectAll.Add_Click({
+        foreach ($row in $dgvServers.Rows) { $row.Cells["Select"].Value = $false }
+        $lblTargetSummary.Text = "0 servers selected"
+    })
 
-    $scrollContainer.Controls.Add($serversCard)
+    $serversCard.Controls.Add($btnSelectAllGrid)
+    $serversCard.Controls.Add($btnDeselectAllGrid)
+    $serversCard.Controls.Add($btnRefreshServers)
+    $serversCard.Controls.Add($btnViewDetails)
 
-    # ===================================================================
-    # Card 3: Validation Tools (NIC Consistency & Pre-Flight Check)
-    # ===================================================================
-    $validationCard = New-StyledCard -Title "Validation Tools" -X 20 -Y 560 -Width 900 -Height 105
+    # -- Divider line between grid buttons and deploy section (Y=304) --
+    $divider = New-Object System.Windows.Forms.Panel
+    $divider.Location = New-Object System.Drawing.Point(15, 304)
+    $divider.Size     = New-Object System.Drawing.Size(866, 1)
+    $divider.BackColor = $script:Theme.Border
+    $serversCard.Controls.Add($divider)
 
-    $btnValidateNIC = New-StyledButton -Text "Validate NIC Names" -X 15 -Y 45 `
-        -Width 180 -Height 35 -IsPrimary
-
-    $btnPreFlight = New-StyledButton -Text "Pre-Flight Check" -X 210 -Y 45 `
-        -Width 170 -Height 35
-
-    $lblValidationStatus = New-StyledLabel -Text "Run validation checks before deployment" `
-        -X 400 -Y 52 -FontSize 9 -IsMuted
-    $lblValidationStatus.AutoSize = $false
-    $lblValidationStatus.Width = 480
-
-    $validationCard.Controls.AddRange(@($btnValidateNIC, $btnPreFlight, $lblValidationStatus))
-    $scrollContainer.Controls.Add($validationCard)
-
-    # ===================================================================
-    # Card 4: Deploy Configuration
-    # ===================================================================
-    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 20 -Y 675 -Width 900 -Height 250
-
-    # --- "Set All To:" bulk profile setter (Task 1)
-    # Selecting a profile here propagates it to every row's Profile cell in one shot.
-    # The per-row Profile column remains the authoritative source for deployment.
-    $lblProfile = New-StyledLabel -Text "Set All To:" -X 15 -Y 48 -FontSize 9
-    # Reuse the already-collected $allProfileNames (gathered when building the grid column)
-    $cboProfiles = New-StyledComboBox -X 100 -Y 45 -Width 230 -Items $allProfileNames
+    # -- Deploy section: profile bulk-setter + selection count + Deploy button (Y=320) --
+    $lblSetAllTo = New-StyledLabel -Text "Set All To:" -X 15 -Y 327 -FontSize 9
+    $cboProfiles = New-StyledComboBox -X 110 -Y 323 -Width 220 -Items $allProfileNames
 
     $cboProfiles.Add_SelectedIndexChanged({
-        # Bulk-set every row's Profile cell to the selected value
         $bulkProfile = $cboProfiles.SelectedItem
         if (-not [string]::IsNullOrWhiteSpace($bulkProfile)) {
             foreach ($row in $dgvServers.Rows) {
@@ -2021,21 +2039,57 @@ function New-DeployView {
         }
     })
 
-    # --- Target summary label ---
-    $lblTargetSummary = New-StyledLabel -Text "0 servers selected" -X 345 -Y 48 -FontSize 9 -IsSecondary
+    $lblTargetSummary = New-StyledLabel -Text "0 servers selected" -X 344 -Y 327 -FontSize 9 -IsSecondary
 
-    $deployCard.Controls.AddRange(@($lblProfile, $cboProfiles, $lblTargetSummary))
+    $btnDeploy = New-StyledButton -Text "Deploy to Selected" -X 676 -Y 321 -Width 190 -Height 35 -IsPrimary
 
-    # --- Credential section ---
-    $lblUsername = New-StyledLabel -Text "Username:" -X 15 -Y 85 -FontSize 9
-    $txtUsername = New-StyledTextBox -X 95 -Y 82 -Width 160
+    $serversCard.Controls.Add($lblSetAllTo)
+    $serversCard.Controls.Add($cboProfiles)
+    $serversCard.Controls.Add($lblTargetSummary)
+    $serversCard.Controls.Add($btnDeploy)
+
+    $scrollContainer.Controls.Add($serversCard)
+
+    # ===================================================================
+    # Card 3: Validation Tools
+    # ===================================================================
+    $validationCard = New-StyledCard -Title "Validation Tools" -X 24 -Y 761 -Width 900 -Height 108
+
+    $btnValidateNIC = New-StyledButton -Text "Validate NIC Names" -X 15 -Y 50 `
+        -Width 180 -Height 35 -IsPrimary
+
+    $btnPreFlight = New-StyledButton -Text "Pre-Flight Check" -X 207 -Y 50 `
+        -Width 160 -Height 35
+
+    $lblValidationStatus = New-StyledLabel -Text "Run validation checks before deployment" `
+        -X 380 -Y 58 -FontSize 9 -IsMuted
+    $lblValidationStatus.AutoSize = $false
+    $lblValidationStatus.Width    = 500
+    $lblValidationStatus.Font     = New-Object System.Drawing.Font('Consolas', 9)
+
+    $validationCard.Controls.Add($btnValidateNIC)
+    $validationCard.Controls.Add($btnPreFlight)
+    $validationCard.Controls.Add($lblValidationStatus)
+    $scrollContainer.Controls.Add($validationCard)
+
+    # ===================================================================
+    # Card 4: Deploy Configuration
+    # Rows: credentials | deploy button + progress | deploy log
+    # Height: 45 title + 16 + 28 inputs + 16 + 35 button + 16 + 150 log + 20 = ~326
+    # ===================================================================
+    $deployCard = New-StyledCard -Title "Deploy Configuration" -X 24 -Y 893 -Width 900 -Height 316
+
+    # -- Credentials row: labels above inputs (Y label=52, Y input=70) --
+    $lblUsernameHdr  = New-StyledLabel -Text "Username" -X 15  -Y 52 -FontSize 9 -IsMuted
+    $lblPasswordHdr  = New-StyledLabel -Text "Password" -X 217 -Y 52 -FontSize 9 -IsMuted
+
+    $txtUsername = New-StyledTextBox -X 15  -Y 72 -Width 194
     $txtUsername.Text = "Administrator"
 
-    $lblPassword = New-StyledLabel -Text "Password:" -X 270 -Y 85 -FontSize 9
-    $txtPassword = New-StyledTextBox -X 345 -Y 82 -Width 160
+    $txtPassword = New-StyledTextBox -X 217 -Y 72 -Width 194
     $txtPassword.UseSystemPasswordChar = $true
 
-    $chkCurrentCreds = New-StyledCheckBox -Text "Use Current Credentials" -X 525 -Y 83
+    $chkCurrentCreds = New-StyledCheckBox -Text "Use Current Credentials" -X 423 -Y 74
     $chkCurrentCreds.Add_CheckedChanged({
         $isChecked = $this.Checked
         $txtUsername.Enabled = -not $isChecked
@@ -2048,33 +2102,42 @@ function New-DeployView {
         }
     })
 
-    $deployCard.Controls.AddRange(@($lblUsername, $txtUsername, $lblPassword, $txtPassword, $chkCurrentCreds))
+    $deployCard.Controls.Add($lblUsernameHdr)
+    $deployCard.Controls.Add($lblPasswordHdr)
+    $deployCard.Controls.Add($txtUsername)
+    $deployCard.Controls.Add($txtPassword)
+    $deployCard.Controls.Add($chkCurrentCreds)
 
-    # --- Deploy button ---
-    $btnDeploy = New-StyledButton -Text "Deploy to Selected Servers" -X 15 -Y 120 `
-        -Width 250 -Height 40 -IsPrimary
+    # -- Deploy button (250px) + progress bar (Y=118) --
+    $btnDeployCard = New-StyledButton -Text "Deploy to Selected Servers" -X 15 -Y 118 `
+        -Width 250 -Height 35 -IsPrimary
 
-    # Deployment progress bar (styled)
-    $deployProgressBar = New-StyledProgressBar -X 280 -Y 125 -Width 580 -Height 22
+    $deployProgressBar = New-StyledProgressBar -X 277 -Y 123 -Width 600 -Height 18
 
-    $deployCard.Controls.AddRange(@($btnDeploy, $deployProgressBar))
+    $deployCard.Controls.Add($btnDeployCard)
+    $deployCard.Controls.Add($deployProgressBar)
 
-    # --- Deployment log (read-only multi-line textbox) ---
+    # -- Deploy log: monospace, 150px tall, read-only (Y=165) --
     $txtDeployLog = New-Object System.Windows.Forms.TextBox
-    $txtDeployLog.Location = New-Object System.Drawing.Point(15, 160)
-    $txtDeployLog.Size = New-Object System.Drawing.Size(870, 75)
-    $txtDeployLog.Multiline = $true
-    $txtDeployLog.ReadOnly = $true
-    $txtDeployLog.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $txtDeployLog.BackColor = $script:Theme.InputBackground
-    $txtDeployLog.ForeColor = $script:Theme.TextSecondary
-    $txtDeployLog.Font = New-Object System.Drawing.Font('Consolas', 10)
-    $txtDeployLog.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $txtDeployLog.Location = New-Object System.Drawing.Point(15, 165)
+    $txtDeployLog.Size     = New-Object System.Drawing.Size(866, 130)
+    $txtDeployLog.Multiline    = $true
+    $txtDeployLog.ReadOnly     = $true
+    $txtDeployLog.ScrollBars   = [System.Windows.Forms.ScrollBars]::Vertical
+    $txtDeployLog.BackColor    = $script:Theme.InputBackground
+    $txtDeployLog.ForeColor    = $script:Theme.TextSecondary
+    $txtDeployLog.Font         = New-Object System.Drawing.Font('Consolas', 9.5)
+    $txtDeployLog.BorderStyle  = [System.Windows.Forms.BorderStyle]::FixedSingle
     $txtDeployLog.Text = "[$(Get-Date -Format 'HH:mm:ss')] Deploy log initialized. Select a profile and target servers to begin.`r`n"
 
     $deployCard.Controls.Add($txtDeployLog)
 
     $scrollContainer.Controls.Add($deployCard)
+
+    # Wire the Deploy button in the deploy card to the same handler as the one in the servers card
+    $btnDeployCard.Add_Click({
+        $btnDeploy.PerformClick()
+    })
 
     # ===================================================================
     # Helper: populate the server grid from a results array
@@ -2333,6 +2396,9 @@ function New-DeployView {
                 $row.Cells["Status"].Style.ForeColor = $script:Theme.Warning
             }
         }
+        # Update the server-count badge in the Discovered Servers card header
+        $badgeServerCount.Tag = "$($dgvServers.Rows.Count)"
+        $badgeServerCount.Invalidate()
     }
 
     # ===================================================================
@@ -2436,7 +2502,11 @@ function New-DeployView {
         # Validate and parse inputs
         try { $startIP = [int]$txtStartIP.Text.Trim() } catch { $startIP = 1 }
         try { $endIP   = [int]$txtEndIP.Text.Trim()   } catch { $endIP   = 254 }
-        try { $timeout = [int]$txtTimeout.Text.Trim() } catch { $timeout = 200 }
+        # Read timeout from combobox -- strip the trailing "ms" suffix
+        try {
+            $timeoutRaw = ($cboTimeout.SelectedItem -as [string]) -replace 'ms',''
+            $timeout = [int]$timeoutRaw.Trim()
+        } catch { $timeout = 200 }
 
         # Clamp timeout to safe bounds (50ms - 5000ms)
         $timeout = [Math]::Min([Math]::Max(50, $timeout), 5000)
@@ -2703,8 +2773,9 @@ function New-DeployView {
             $txtPassword.Text = ''
         }
 
-        # Disable the deploy button during operation
-        $btnDeploy.Enabled = $false
+        # Disable both deploy buttons during operation
+        $btnDeploy.Enabled     = $false
+        $btnDeployCard.Enabled = $false
         $deployProgressBar.Value = 0
 
         $totalServers  = $selectedTargets.Count
@@ -2783,7 +2854,8 @@ function New-DeployView {
                 $script:AppState.LastAppliedProfile = $lastSuccessProfile
             }
         } finally {
-            $btnDeploy.Enabled = $true
+            $btnDeploy.Enabled     = $true
+            $btnDeployCard.Enabled = $true
         }
     })
 
