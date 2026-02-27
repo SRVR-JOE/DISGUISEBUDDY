@@ -24,3 +24,13 @@
 [2026-02-26 20:50:00.011] [WARN] Dashboard: Could not load profiles - The term 'Get-AllProfiles' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
 [2026-02-26 20:50:00.044] [DEBUG] Switched to view: Dashboard
 [2026-02-26 20:50:00.055] [INFO] DISGUISE BUDDY initialized successfully
+[2026-02-26 21:15:09.487] [INFO] DISGUISE BUDDY starting up
+[2026-02-26 21:15:09.693] [DEBUG] Loaded saved theme preference: Dark
+[2026-02-26 21:15:09.852] [DEBUG] Retrieved server hostname: US-W-200322
+[2026-02-26 21:15:13.652] [DEBUG] Switched to view: Dashboard
+[2026-02-26 21:15:13.668] [INFO] DISGUISE BUDDY initialized successfully
+[2026-02-26 21:15:25.707] [WARN] Dashboard: Navigate to Deploy failed - The term 'New-DeployView' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
+[2026-02-26 21:15:30.595] [DEBUG] Switched to view: Network
+[2026-02-26 21:15:33.093] [INFO] Retrieved 4 SMB shares from system.
+[2026-02-26 21:15:33.187] [DEBUG] Switched to view: SMB
+[2026-02-26 21:18:25.255] [INFO] DISGUISE BUDDY shutting down
