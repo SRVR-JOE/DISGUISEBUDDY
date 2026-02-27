@@ -761,7 +761,6 @@ function Apply-FullProfile {
     $failCount = 0
     $skipCount = 0
     $restartNeeded = $false
-    $stepResults = @()
 
     # ================================================================
     # Step 1: Change hostname (if different from current)
@@ -2515,8 +2514,8 @@ function New-ProfilesView {
         [System.Windows.Forms.Panel]$ContentPanel
     )
 
-    $ContentPanel.Controls.Clear()
     $ContentPanel.SuspendLayout()
+    $ContentPanel.Controls.Clear()
 
     # ---- Module-scoped variables for cross-control communication ----
     $script:SelectedProfile = $null
@@ -2811,7 +2810,7 @@ function Refresh-ProfileList {
 
     $profiles = @()
     try {
-        $profiles = Get-AllProfiles
+        $profiles = @(Get-AllProfiles)
     }
     catch {
         Write-AppLog "Failed to load profiles during refresh: $_" -Level 'ERROR'
@@ -2879,8 +2878,8 @@ function Show-EmptyDetailState {
     #>
     if ($null -eq $script:DetailPanel) { return }
 
-    $script:DetailPanel.Controls.Clear()
     $script:DetailPanel.SuspendLayout()
+    $script:DetailPanel.Controls.Clear()
 
     $emptyLabel = New-StyledLabel -Text "Select a profile from the list to view details," `
         -X 30 -Y 180 -IsMuted -FontSize 11
@@ -2904,11 +2903,12 @@ function Update-ProfileDetailPanel {
     #>
     if ($null -eq $script:DetailPanel) { return }
 
-    $script:DetailPanel.Controls.Clear()
     $script:DetailPanel.SuspendLayout()
+    $script:DetailPanel.Controls.Clear()
 
     if ($null -eq $script:SelectedProfile) {
         Show-EmptyDetailState
+        $script:DetailPanel.ResumeLayout()
         return
     }
 
@@ -2970,20 +2970,20 @@ function Update-ProfileDetailPanel {
 
     # ---- Server Name Card ----
     $serverCard = New-StyledCard -Title "Server Name" -X 15 -Y $currentY `
-        -Width $innerWidth -Height 55
-    $serverValueLabel = New-StyledLabel -Text $profileServerName -X 12 -Y 25 -FontSize 11 -IsBold
+        -Width $innerWidth -Height 70
+    $serverValueLabel = New-StyledLabel -Text $profileServerName -X 12 -Y 42 -FontSize 11 -IsBold
     $serverCard.Controls.Add($serverValueLabel)
     $script:DetailPanel.Controls.Add($serverCard)
-    $currentY += 65
+    $currentY += 80
 
     # ---- Network Adapters Summary Card ----
     $adapterCount = $profileAdapters.Count
-    $adapterCardHeight = 30 + ($adapterCount * 24)
+    $adapterCardHeight = 50 + ($adapterCount * 24)
 
     $adapterCard = New-StyledCard -Title "Network Adapters ($adapterCount)" -X 15 -Y $currentY `
         -Width $innerWidth -Height $adapterCardHeight
 
-    $adapterY = 26
+    $adapterY = 42
     foreach ($adapter in $profileAdapters) {
         if ($null -eq $adapter) { continue }
 
@@ -3043,7 +3043,7 @@ function Update-ProfileDetailPanel {
 
     # ---- SMB Settings Summary Card ----
     $smbCard = New-StyledCard -Title "SMB Sharing" -X 15 -Y $currentY `
-        -Width $innerWidth -Height 80
+        -Width $innerWidth -Height 105
 
     $smbShareEnabled = $false
     if ($null -ne $profileSMB -and $profileSMB.PSObject.Properties['ShareD3Projects']) {
@@ -3052,7 +3052,7 @@ function Update-ProfileDetailPanel {
 
     $smbStatus = if ($smbShareEnabled) { "Enabled" } else { "Disabled" }
     $smbStatusType = if ($smbShareEnabled) { "Success" } else { "Warning" }
-    $smbBadge = New-StatusBadge -Text $smbStatus -X 12 -Y 26 -Type $smbStatusType
+    $smbBadge = New-StatusBadge -Text $smbStatus -X 12 -Y 42 -Type $smbStatusType
     $smbCard.Controls.Add($smbBadge)
 
     if ($smbShareEnabled -and $null -ne $profileSMB) {
@@ -3061,11 +3061,11 @@ function Update-ProfileDetailPanel {
         $smbPermissions = if ($profileSMB.PSObject.Properties['SharePermissions']) { $profileSMB.SharePermissions } else { "(Unknown)" }
 
         $shareInfoLabel = New-StyledLabel -Text "Share: $smbShareName  |  Path: $smbProjectsPath" `
-            -X 100 -Y 28 -IsSecondary -FontSize 9
+            -X 100 -Y 43 -IsSecondary -FontSize 9
         $smbCard.Controls.Add($shareInfoLabel)
 
         $permLabel = New-StyledLabel -Text "Permissions: $smbPermissions" `
-            -X 12 -Y 52 -IsMuted -FontSize 8
+            -X 12 -Y 68 -IsMuted -FontSize 8
         $smbCard.Controls.Add($permLabel)
     }
 

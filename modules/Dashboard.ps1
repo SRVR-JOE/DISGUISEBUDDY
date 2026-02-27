@@ -391,14 +391,7 @@ function New-DashboardView {
 
     # --- Card 1: Server Name ---
     $card1 = New-StyledCard -Title "Server Name" -X $cardStartX -Y $cardY `
-        -Width $cardWidth -Height $cardHeight
-
-    # Left accent border - Accent (cyan) for hostname
-    $card1Accent = New-Object System.Windows.Forms.Panel
-    $card1Accent.Location = New-Object System.Drawing.Point(0, 0)
-    $card1Accent.Size = New-Object System.Drawing.Size(4, $cardHeight)
-    $card1Accent.BackColor = $script:Theme.Accent
-    $card1.Controls.Add($card1Accent)
+        -Width $cardWidth -Height $cardHeight -AccentColor $script:Theme.Accent
 
     $hostnameStatusBadge = New-StatusBadge -Text "LIVE" -X 150 -Y 15 -Type 'Success'
     $card1.Controls.Add($hostnameStatusBadge)
@@ -411,14 +404,7 @@ function New-DashboardView {
     # --- Card 2: Active Profile ---
     $card2X = $cardStartX + $cardWidth + $cardSpacing
     $card2 = New-StyledCard -Title "Active Profile" -X $card2X -Y $cardY `
-        -Width $cardWidth -Height $cardHeight
-
-    # Left accent border - Primary (purple) for profile
-    $card2Accent = New-Object System.Windows.Forms.Panel
-    $card2Accent.Location = New-Object System.Drawing.Point(0, 0)
-    $card2Accent.Size = New-Object System.Drawing.Size(4, $cardHeight)
-    $card2Accent.BackColor = $script:Theme.Primary
-    $card2.Controls.Add($card2Accent)
+        -Width $cardWidth -Height $cardHeight -AccentColor $script:Theme.Primary
 
     $profileBadgeType = if ($activeProfile -eq "None") { 'Info' } else { 'Success' }
     $profileBadgeText  = if ($activeProfile -eq "None") { 'NONE' } else { 'ACTIVE' }
@@ -434,14 +420,7 @@ function New-DashboardView {
     # --- Card 3: Network Adapters ---
     $card3X = $card2X + $cardWidth + $cardSpacing
     $card3 = New-StyledCard -Title "Network Adapters" -X $card3X -Y $cardY `
-        -Width $cardWidth -Height $cardHeight
-
-    # Left accent border - Success (green) for adapters
-    $card3Accent = New-Object System.Windows.Forms.Panel
-    $card3Accent.Location = New-Object System.Drawing.Point(0, 0)
-    $card3Accent.Size = New-Object System.Drawing.Size(4, $cardHeight)
-    $card3Accent.BackColor = $script:Theme.Success
-    $card3.Controls.Add($card3Accent)
+        -Width $cardWidth -Height $cardHeight -AccentColor $script:Theme.Success
 
     $adapterBadgeType = if ($adapterCount -eq "N/A") { 'Warning' } else { 'Success' }
     $adapterBadgeText  = if ($adapterCount -eq "N/A") { 'N/A' }    else { 'ACTIVE' }
@@ -457,14 +436,7 @@ function New-DashboardView {
     # --- Card 4: SMB Shares ---
     $card4X = $card3X + $cardWidth + $cardSpacing
     $card4 = New-StyledCard -Title "SMB Shares" -X $card4X -Y $cardY `
-        -Width $cardWidth -Height $cardHeight
-
-    # Left accent border - Warning (orange) for SMB
-    $card4Accent = New-Object System.Windows.Forms.Panel
-    $card4Accent.Location = New-Object System.Drawing.Point(0, 0)
-    $card4Accent.Size = New-Object System.Drawing.Size(4, $cardHeight)
-    $card4Accent.BackColor = $script:Theme.Warning
-    $card4.Controls.Add($card4Accent)
+        -Width $cardWidth -Height $cardHeight -AccentColor $script:Theme.Warning
 
     $shareBadgeType = if ($shareCount -eq "N/A") { 'Warning' } else { 'Info' }
     $shareBadgeText  = if ($shareCount -eq "N/A") { 'N/A' }    else { 'ACTIVE' }
@@ -628,13 +600,12 @@ function New-DashboardView {
                         # Apply-FullProfile shows its own confirmation dialog and results summary
                         $applyResult = Apply-FullProfile -Profile $profileToApply
                         if ($applyResult) {
-                            # LastAppliedProfile is already updated inside Apply-FullProfile on success
                             Write-AppLog -Message "Dashboard: Quick Apply - profile '$targetProfileName' applied successfully" -Level 'INFO'
-                            # Refresh the dashboard to show updated status
-                            Set-ActiveView -ViewName 'Dashboard'
                         } else {
                             Write-AppLog -Message "Dashboard: Quick Apply - profile '$targetProfileName' had errors" -Level 'WARN'
                         }
+                        # Always refresh to show updated status
+                        Set-ActiveView -ViewName 'Dashboard'
                     } else {
                         [System.Windows.Forms.MessageBox]::Show(
                             "Profile '$targetProfileName' could not be loaded.",
@@ -724,7 +695,8 @@ function New-DashboardView {
                     if ($newProfile.NetworkAdapters -and $adapterIndex -lt $newProfile.NetworkAdapters.Count) {
                         $newProfile.NetworkAdapters[$adapterIndex].InterfaceAlias = $adapter.Name
                         $newProfile.NetworkAdapters[$adapterIndex].IPAddress = if ($ipInfo) { $ipInfo.IPAddress } else { '' }
-                        $newProfile.NetworkAdapters[$adapterIndex].SubnetPrefix = if ($ipInfo) { $ipInfo.PrefixLength } else { 24 }
+                        $prefixLen = if ($ipInfo) { $ipInfo.PrefixLength } else { 24 }
+                        $newProfile.NetworkAdapters[$adapterIndex].SubnetMask = Convert-PrefixToSubnetMask -PrefixLength $prefixLen
                     }
                     $adapterIndex++
                 }
@@ -776,11 +748,11 @@ function New-DashboardView {
                 $applyResult = Apply-FullProfile -Profile $profileObj
                 if ($applyResult) {
                     Write-AppLog -Message "Dashboard: Re-applied last profile '$lastProfile' successfully" -Level 'INFO'
-                    # Refresh the dashboard to show updated status
-                    Set-ActiveView -ViewName 'Dashboard'
                 } else {
                     Write-AppLog -Message "Dashboard: Re-apply of '$lastProfile' had errors" -Level 'WARN'
                 }
+                # Always refresh to show updated status
+                Set-ActiveView -ViewName 'Dashboard'
             } else {
                 [System.Windows.Forms.MessageBox]::Show(
                     "Profile '$lastProfile' was not found. It may have been deleted.",

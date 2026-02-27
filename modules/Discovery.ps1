@@ -1627,7 +1627,7 @@ function New-DeployView {
     $scanWorker.WorkerSupportsCancellation = $true
 
     # Create a scrollable container for the entire view
-    $scrollContainer = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
+    $scrollContainer = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.ClientSize.Width -Height $ContentPanel.ClientSize.Height
     $scrollContainer.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
                               [System.Windows.Forms.AnchorStyles]::Left -bor
                               [System.Windows.Forms.AnchorStyles]::Right -bor
@@ -2031,7 +2031,7 @@ function New-DeployView {
 
     $chkCurrentCreds = New-StyledCheckBox -Text "Use Current Credentials" -X 525 -Y 83
     $chkCurrentCreds.Add_CheckedChanged({
-        $isChecked = $chkCurrentCreds.Checked
+        $isChecked = $this.Checked
         $txtUsername.Enabled = -not $isChecked
         $txtPassword.Enabled = -not $isChecked
         if ($isChecked) {
@@ -2828,6 +2828,12 @@ function New-DeployView {
         ScanButton   = $btnScanNetwork
         DeployButton = $btnDeploy
     }
+
+    # Resize handler to keep scroll container matched to content panel
+    $ContentPanel.Add_Resize({
+        $sc = $this.Controls[0]
+        if ($sc) { $sc.Size = $this.ClientSize }
+    })
 
     # Resume layout now that all controls have been added
     $ContentPanel.ResumeLayout($true)

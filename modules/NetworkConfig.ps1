@@ -819,15 +819,18 @@ function New-NetworkView {
             if ($selectedAdapterName -and $selectedAdapterName -ne '(none)') {
                 $adapterObj = $script:DetectedAdapters | Where-Object { $_.Name -eq $selectedAdapterName }
                 if ($adapterObj -and $adapterObj.Status -eq 'Up') {
-                    $statusBadge.Text = ' Connected '
-                    $statusBadge.BackColor = $script:Theme.Success
+                    $statusBadge.Tag = ' Connected '
+                    $statusBadge.AccessibleDescription = "$([System.Drawing.Color]::FromArgb(16,185,129).ToArgb())|$([System.Drawing.Color]::White.ToArgb())"
+                    $statusBadge.Invalidate()
                 } else {
-                    $statusBadge.Text = ' Disconnected '
-                    $statusBadge.BackColor = $script:Theme.Error
+                    $statusBadge.Tag = ' Disconnected '
+                    $statusBadge.AccessibleDescription = "$([System.Drawing.Color]::FromArgb(239,68,68).ToArgb())|$([System.Drawing.Color]::White.ToArgb())"
+                    $statusBadge.Invalidate()
                 }
             } else {
-                $statusBadge.Text = ' No Adapter '
-                $statusBadge.BackColor = $script:Theme.TextMuted
+                $statusBadge.Tag = ' No Adapter '
+                $statusBadge.AccessibleDescription = "$($script:Theme.TextMuted.ToArgb())|$([System.Drawing.Color]::White.ToArgb())"
+                $statusBadge.Invalidate()
             }
         }
 
@@ -964,7 +967,6 @@ function New-NetworkView {
         $btn.Enabled = $true
         $btn.BackColor = $script:Theme.Primary
         $btn.ForeColor = [System.Drawing.Color]::White
-        $btn.Tag = 'Primary'
     }
     $scrollPanel.Controls.Add($btnApplyAll)
 
@@ -1024,7 +1026,6 @@ function New-NetworkView {
         $card.Controls.Add($titleLabel)
 
         $statusBadge = New-StatusBadge -Text ' No Adapter ' -X 320 -Y 12 -Type 'Info'
-        $statusBadge.BackColor = $script:Theme.TextMuted
         $card.Controls.Add($statusBadge)
 
         # ---- Row tracking inside card (compact layout) ----
@@ -1051,15 +1052,18 @@ function New-NetworkView {
             if ($selectedName -and $selectedName -ne '(none)') {
                 $adapterObj = $script:DetectedAdapters | Where-Object { $_.Name -eq $selectedName }
                 if ($adapterObj -and $adapterObj.Status -eq 'Up') {
-                    $badge.Text = ' Connected '
-                    $badge.BackColor = $script:Theme.Success
+                    $badge.Tag = ' Connected '
+                    $badge.AccessibleDescription = "$([System.Drawing.Color]::FromArgb(16,185,129).ToArgb())|$([System.Drawing.Color]::White.ToArgb())"
+                    $badge.Invalidate()
                 } else {
-                    $badge.Text = ' Disconnected '
-                    $badge.BackColor = $script:Theme.Error
+                    $badge.Tag = ' Disconnected '
+                    $badge.AccessibleDescription = "$([System.Drawing.Color]::FromArgb(239,68,68).ToArgb())|$([System.Drawing.Color]::White.ToArgb())"
+                    $badge.Invalidate()
                 }
             } else {
-                $badge.Text = ' No Adapter '
-                $badge.BackColor = $script:Theme.TextMuted
+                $badge.Tag = ' No Adapter '
+                $badge.AccessibleDescription = "$([System.Drawing.Color]::FromArgb(6,182,212).ToArgb())|$([System.Drawing.Color]::White.ToArgb())"
+                $badge.Invalidate()
             }
         })
         $card.Controls.Add($adapterCombo)
@@ -1342,7 +1346,6 @@ function New-NetworkView {
             $btn.Enabled = $true
             $btn.BackColor = $script:Theme.Primary
             $btn.ForeColor = [System.Drawing.Color]::White
-            $btn.Tag = 'Primary'
         }
         $card.Controls.Add($applyBtn)
 

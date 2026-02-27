@@ -34,7 +34,7 @@ function New-StyledButton {
     $button.FlatAppearance.BorderSize = 0
     $button.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
     $button.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $button.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+    $button.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
 
     if ($IsPrimary) {
         $button.BackColor = $script:Theme.Primary
@@ -47,18 +47,15 @@ function New-StyledButton {
         $button.ForeColor = $script:Theme.Text
     }
 
-    # Bug Fix #1: Capture the original BackColor in a closure variable so that
-    # MouseLeave always restores the correct color regardless of what Tag contains.
-    # Previously MouseLeave checked Tag == 'Primary'/'Destructive' to decide the
-    # restore color, but callers (e.g. Dashboard) overwrite Tag with their own data.
-    $origBack = $button.BackColor
+    # Capture style intent for theme-safe MouseLeave restoration
+    $styleIsPrimary = [bool]$IsPrimary
+    $styleIsDestructive = [bool]$IsDestructive
 
     # Hover effects - lighten the button on mouse enter
     $button.Add_MouseEnter({
         if ($this.BackColor -eq $script:Theme.Primary) {
             $this.BackColor = $script:Theme.PrimaryLight
         } elseif ($this.BackColor -eq $script:Theme.Error) {
-            # Lighten the error color slightly for hover
             $r = [Math]::Min(255, $this.BackColor.R + 20)
             $g = [Math]::Min(255, $this.BackColor.G + 20)
             $b = [Math]::Min(255, $this.BackColor.B + 20)
@@ -68,9 +65,11 @@ function New-StyledButton {
         }
     })
 
-    # Restore the original background color captured at creation time
+    # Restore correct theme color based on style intent (survives theme toggles)
     $button.Add_MouseLeave({
-        $this.BackColor = $origBack
+        if ($styleIsPrimary) { $this.BackColor = $script:Theme.Primary }
+        elseif ($styleIsDestructive) { $this.BackColor = $script:Theme.Error }
+        else { $this.BackColor = $script:Theme.Surface }
     }.GetNewClosure())
 
     # Tag is intentionally NOT set here - callers are free to use it for their own data
@@ -543,12 +542,21 @@ function New-StatusBadge {
 
     $badge.Size = New-Object System.Drawing.Size($badgeWidth, $badgeHeight)
 
+    # Store colors in the badge for runtime access (allows post-creation updates)
+    $badge.AccessibleDescription = "$($badgeBackColor.ToArgb())|$($badgeForeColor.ToArgb())"
+
     # Paint handler to draw rounded pill-shaped background and centered text
+    # Reads colors from AccessibleDescription and text from Tag at paint time
     $badge.Add_Paint({
         param($sender, $e)
         $g = $e.Graphics
         $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
         $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+
+        # Read colors from the control (allows post-creation updates)
+        $colorParts = $sender.AccessibleDescription -split '\|'
+        $fillColor = [System.Drawing.Color]::FromArgb([int]$colorParts[0])
+        $textColor = [System.Drawing.Color]::FromArgb([int]$colorParts[1])
 
         $rect = New-Object System.Drawing.Rectangle(0, 0, ($sender.Width - 1), ($sender.Height - 1))
         $radius = $sender.Height  # Full height radius for pill shape
@@ -562,21 +570,23 @@ function New-StatusBadge {
         $path.CloseFigure()
 
         # Fill background
-        $brush = New-Object System.Drawing.SolidBrush($badgeBackColor)
+        $brush = New-Object System.Drawing.SolidBrush($fillColor)
         $g.FillPath($brush, $path)
         $brush.Dispose()
 
         # Draw centered text
-        $textBrush = New-Object System.Drawing.SolidBrush($badgeForeColor)
+        $pFont = New-Object System.Drawing.Font('Segoe UI', 8, [System.Drawing.FontStyle]::Bold)
+        $textBrush = New-Object System.Drawing.SolidBrush($textColor)
         $sf = New-Object System.Drawing.StringFormat
         $sf.Alignment = [System.Drawing.StringAlignment]::Center
         $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
         $textRect = New-Object System.Drawing.RectangleF(0, 0, $sender.Width, $sender.Height)
-        $g.DrawString($sender.Tag, $badgeFont, $textBrush, $textRect, $sf)
+        $g.DrawString($sender.Tag, $pFont, $textBrush, $textRect, $sf)
         $textBrush.Dispose()
+        $pFont.Dispose()
         $sf.Dispose()
         $path.Dispose()
-    }.GetNewClosure())
+    })
 
     # Store the display text in Tag for the paint handler to read
     $badge.Tag = $Text
@@ -725,65 +735,9 @@ function New-StyledProgressBar {
     $progressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
     $progressBar.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 
-    # Use SetStyle to enable custom painting for theme colors
-    # The ProgressBar control does not natively support BackColor/ForeColor well on
-    # all Windows themes, so we use the WinForms workaround of setting the ForeColor
-    # and enabling visual-style override.
-    $progressBar.SetStyle([System.Windows.Forms.ControlStyles]::UserPaint, $true)
-    $progressBar.SetStyle([System.Windows.Forms.ControlStyles]::OptimizedDoubleBuffer, $true)
-
-    # Custom paint to draw a themed progress bar with rounded ends
-    $progressBar.Add_Paint({
-        param($sender, $e)
-        $g = $e.Graphics
-        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-
-        $barRect = New-Object System.Drawing.Rectangle(0, 0, ($sender.Width - 1), ($sender.Height - 1))
-        $radius = [Math]::Min(6, [int]($sender.Height / 2))
-
-        # Draw track background (rounded rectangle)
-        $trackPath = New-Object System.Drawing.Drawing2D.GraphicsPath
-        $trackPath.AddArc($barRect.X, $barRect.Y, $radius * 2, $radius * 2, 180, 90)
-        $trackPath.AddArc(($barRect.Right - $radius * 2), $barRect.Y, $radius * 2, $radius * 2, 270, 90)
-        $trackPath.AddArc(($barRect.Right - $radius * 2), ($barRect.Bottom - $radius * 2), $radius * 2, $radius * 2, 0, 90)
-        $trackPath.AddArc($barRect.X, ($barRect.Bottom - $radius * 2), $radius * 2, $radius * 2, 90, 90)
-        $trackPath.CloseFigure()
-
-        $trackBrush = New-Object System.Drawing.SolidBrush($script:Theme.Surface)
-        $g.FillPath($trackBrush, $trackPath)
-        $trackBrush.Dispose()
-
-        # Draw the filled portion if progress > 0
-        if ($sender.Value -gt 0) {
-            $fraction = $sender.Value / $sender.Maximum
-            $fillWidth = [Math]::Max(($radius * 2), [int]($barRect.Width * $fraction))
-            $fillRect = New-Object System.Drawing.Rectangle(0, 0, $fillWidth, ($sender.Height - 1))
-
-            $fillPath = New-Object System.Drawing.Drawing2D.GraphicsPath
-            $fillPath.AddArc($fillRect.X, $fillRect.Y, $radius * 2, $radius * 2, 180, 90)
-            $fillPath.AddArc(($fillRect.Right - $radius * 2), $fillRect.Y, $radius * 2, $radius * 2, 270, 90)
-            $fillPath.AddArc(($fillRect.Right - $radius * 2), ($fillRect.Bottom - $radius * 2), $radius * 2, $radius * 2, 0, 90)
-            $fillPath.AddArc($fillRect.X, ($fillRect.Bottom - $radius * 2), $radius * 2, $radius * 2, 90, 90)
-            $fillPath.CloseFigure()
-
-            # Gradient fill from Primary to PrimaryLight
-            $fillBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-                $fillRect,
-                $script:Theme.Primary,
-                $script:Theme.PrimaryLight,
-                [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal
-            )
-            $g.FillPath($fillBrush, $fillPath)
-            $fillBrush.Dispose()
-            $fillPath.Dispose()
-        }
-
-        # Draw subtle border around the track
-        $borderPen = New-Object System.Drawing.Pen($script:Theme.Border, 1)
-        $g.DrawPath($borderPen, $trackPath)
-        $borderPen.Dispose()
-        $trackPath.Dispose()
-    })
+    # ProgressBar does not support custom painting (SetStyle is protected, Paint event
+    # is suppressed). Use standard ForeColor for the fill color instead.
+    $progressBar.ForeColor = $script:Theme.Primary
 
     return $progressBar
 }
