@@ -34,3 +34,18 @@
 [2026-02-26 21:15:33.093] [INFO] Retrieved 4 SMB shares from system.
 [2026-02-26 21:15:33.187] [DEBUG] Switched to view: SMB
 [2026-02-26 21:18:25.255] [INFO] DISGUISE BUDDY shutting down
+[2026-02-26 22:02:27.197] [INFO] DISGUISE BUDDY starting up
+[2026-02-26 22:02:27.391] [DEBUG] Loaded saved theme preference: Dark
+[2026-02-26 22:02:27.514] [DEBUG] Retrieved server hostname: US-W-200322
+[2026-02-26 22:02:31.151] [DEBUG] Switched to view: Dashboard
+[2026-02-26 22:02:31.167] [INFO] DISGUISE BUDDY initialized successfully
+[2026-02-26 22:02:47.497] [WARN] Dashboard: Navigate to Deploy failed - The term 'New-DeployView' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
+[2026-02-26 22:02:49.752] [DEBUG] Switched to view: Deploy
+[2026-02-26 22:02:51.252] [DEBUG] Switched to view: Network
+[2026-02-26 22:02:52.911] [INFO] Retrieved 4 SMB shares from system.
+[2026-02-26 22:02:53.018] [DEBUG] Switched to view: SMB
+[2026-02-26 22:02:53.864] [DEBUG] Retrieved system info for 'US-W-200322'.
+[2026-02-26 22:02:54.022] [DEBUG] Switched to view: ServerIdentity
+[2026-02-26 22:02:57.012] [INFO] Retrieved 4 SMB shares from system.
+[2026-02-26 22:02:57.092] [DEBUG] Switched to view: SMB
+[2026-02-26 22:07:20.925] [INFO] DISGUISE BUDDY shutting down
