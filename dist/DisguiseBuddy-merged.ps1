@@ -27,11 +27,11 @@ function Get-AppRootPath {
     return $script:AppRootPath
 }
 
-# Dark theme (default)
+# Dark theme (default) - matches Electron/React UI design system
 $script:DarkTheme = @{
-    Background        = [System.Drawing.ColorTranslator]::FromHtml('#1E1E2E')
-    Surface           = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
-    SurfaceLight      = [System.Drawing.ColorTranslator]::FromHtml('#363650')
+    Background        = [System.Drawing.ColorTranslator]::FromHtml('#0F0F14')
+    Surface           = [System.Drawing.ColorTranslator]::FromHtml('#1A1A24')
+    SurfaceLight      = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
     Primary           = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
     PrimaryLight      = [System.Drawing.ColorTranslator]::FromHtml('#8B5CF6')
     PrimaryDark       = [System.Drawing.ColorTranslator]::FromHtml('#6D28D9')
@@ -45,13 +45,14 @@ $script:DarkTheme = @{
     SuccessBackground = [System.Drawing.ColorTranslator]::FromHtml('#0D3B2E')
     WarningBackground = [System.Drawing.ColorTranslator]::FromHtml('#3B2E0D')
     ErrorBackground   = [System.Drawing.ColorTranslator]::FromHtml('#3B0D0D')
-    Border            = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
-    NavBackground     = [System.Drawing.ColorTranslator]::FromHtml('#16162A')
-    NavHover          = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
+    Border            = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
+    BorderLight       = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
+    NavBackground     = [System.Drawing.ColorTranslator]::FromHtml('#0C0C16')
+    NavHover          = [System.Drawing.ColorTranslator]::FromHtml('#1A1A24')
     NavActive         = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
-    CardBackground    = [System.Drawing.ColorTranslator]::FromHtml('#232338')
-    InputBackground   = [System.Drawing.ColorTranslator]::FromHtml('#1A1A2E')
-    InputBorder       = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
+    CardBackground    = [System.Drawing.ColorTranslator]::FromHtml('#1E1E2E')
+    InputBackground   = [System.Drawing.ColorTranslator]::FromHtml('#1A1A24')
+    InputBorder       = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
     Scrollbar         = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
 }
 
@@ -1539,12 +1540,12 @@ function Save-Profile {
     $safeName = $Profile.Name -replace '[\\/:*?"<>|]', '_'
     $filePath = Join-Path -Path $profilesDir -ChildPath "$safeName.json"
 
-    # Path boundary check — ensure resolved path stays inside profiles directory
+    # Path boundary check -- ensure resolved path stays inside profiles directory
     $resolvedPath = [System.IO.Path]::GetFullPath($filePath)
     $resolvedDir  = [System.IO.Path]::GetFullPath($profilesDir)
     if (-not $resolvedPath.StartsWith($resolvedDir, [StringComparison]::OrdinalIgnoreCase)) {
         Write-AppLog "Save-Profile: Path traversal blocked for '$($Profile.Name)' (resolved to '$resolvedPath')" -Level 'ERROR'
-        throw "Invalid profile name — path traversal detected."
+        throw "Invalid profile name - path traversal detected."
     }
 
     try {
@@ -1575,7 +1576,7 @@ function Remove-Profile {
     $safeName = $Name -replace '[\\/:*?"<>|]', '_'
     $filePath = Join-Path -Path $profilesDir -ChildPath "$safeName.json"
 
-    # Path boundary check — ensure resolved path stays inside profiles directory
+    # Path boundary check -- ensure resolved path stays inside profiles directory
     $resolvedPath = [System.IO.Path]::GetFullPath($filePath)
     $resolvedDir  = [System.IO.Path]::GetFullPath($profilesDir)
     if (-not $resolvedPath.StartsWith($resolvedDir, [StringComparison]::OrdinalIgnoreCase)) {
@@ -1735,7 +1736,8 @@ function Import-ProfileFromFile {
     $schemaResult = Test-ProfileSchema -Profile $importedProfile
     if (-not $schemaResult.IsValid) {
         $errorMsg = "Imported profile failed validation:`n`n" + ($schemaResult.Errors -join "`n")
-        Write-AppLog "Import blocked by schema validation: $($schemaResult.Errors -join '; ')" -Level 'WARN'
+        $validationErrorStr = $schemaResult.Errors -join '; '
+        Write-AppLog "Import blocked by schema validation: $validationErrorStr" -Level 'WARN'
         [System.Windows.Forms.MessageBox]::Show(
             $errorMsg,
             "Profile Validation Failed",
@@ -1800,7 +1802,8 @@ function Apply-FullProfile {
     $schemaResult = Test-ProfileSchema -Profile $Profile
     if (-not $schemaResult.IsValid) {
         $errorMsg = "Profile '$($Profile.Name)' failed schema validation:`n`n" + ($schemaResult.Errors -join "`n")
-        Write-AppLog "Apply-FullProfile blocked by schema validation: $($schemaResult.Errors -join '; ')" -Level 'ERROR'
+        $validationErrorStr = $schemaResult.Errors -join '; '
+        Write-AppLog "Apply-FullProfile blocked by schema validation: $validationErrorStr" -Level 'ERROR'
         [System.Windows.Forms.MessageBox]::Show(
             $errorMsg,
             "Profile Validation Failed",
@@ -2960,7 +2963,8 @@ function Show-BatchProfileWizard {
         and starting IP offset. Generates Director, Actor, and Understudy profiles
         with properly sequenced network adapter IPs and standard SMB settings.
     .OUTPUTS
-        [int] - Number of profiles generated, or 0 if cancelled/failed.
+        System.Int32
+        Number of profiles generated, or 0 if cancelled or failed.
     #>
 
     $form = New-Object System.Windows.Forms.Form
@@ -3345,7 +3349,8 @@ function Show-BatchProfileWizard {
     $generatedCount = $generatedNames.Count
     if ($generatedCount -gt 0) {
         $nameList = $generatedNames -join "`n  "
-        $summaryMsg = "Generated $generatedCount profile$(if ($generatedCount -ne 1) { 's' }):`n`n  $nameList"
+        $plural = if ($generatedCount -ne 1) { 's' } else { '' }
+        $summaryMsg = "Generated $generatedCount profile${plural}:`n`n  $nameList"
         if ($errors.Count -gt 0) {
             $summaryMsg += "`n`nErrors ($($errors.Count)):`n" + ($errors -join "`n")
         }
@@ -3355,7 +3360,8 @@ function Show-BatchProfileWizard {
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Information
         ) | Out-Null
-        Write-AppLog "Batch generated $generatedCount profiles: $($generatedNames -join ', ')" -Level 'INFO'
+        $generatedNameStr = $generatedNames -join ', '
+        Write-AppLog "Batch generated $generatedCount profiles: $generatedNameStr" -Level 'INFO'
     }
     else {
         $errorMsg = "No profiles were generated."
@@ -3368,7 +3374,8 @@ function Show-BatchProfileWizard {
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Error
         ) | Out-Null
-        Write-AppLog "Batch generation failed: $($errors -join '; ')" -Level 'ERROR'
+        $batchErrorStr = $errors -join '; '
+        Write-AppLog "Batch generation failed: $batchErrorStr" -Level 'ERROR'
     }
 
     return $generatedCount
@@ -3430,7 +3437,8 @@ function Export-RigBundle {
 
         [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, $zipPath)
 
-        $successMsg = "Exported $($jsonFiles.Count) profile$(if ($jsonFiles.Count -ne 1) { 's' }) to:`n$zipPath"
+        $exportPlural = if ($jsonFiles.Count -ne 1) { 's' } else { '' }
+        $successMsg = "Exported $($jsonFiles.Count) profile${exportPlural} to:`n$zipPath"
         [System.Windows.Forms.MessageBox]::Show(
             $successMsg,
             "Export Successful",
@@ -3501,7 +3509,7 @@ function Import-RigBundle {
                 if ([string]::IsNullOrWhiteSpace($entry.Name)) { continue }  # skip directory entries
                 $destPath = [System.IO.Path]::GetFullPath((Join-Path $tempDir $entry.FullName))
                 if (-not $destPath.StartsWith($resolvedTempDir, [System.StringComparison]::OrdinalIgnoreCase)) {
-                    Write-AppLog "Import-RigBundle: Zip Slip blocked — '$($entry.FullName)' escapes temp dir. Aborting." -Level 'ERROR'
+                    Write-AppLog "Import-RigBundle: Zip Slip blocked - '$($entry.FullName)' escapes temp dir. Aborting." -Level 'ERROR'
                     return [PSCustomObject]@{ Success = $false; Message = "Archive contains unsafe path: $($entry.FullName)"; ImportedCount = 0; SkippedCount = 0 }
                 }
                 $destDir = [System.IO.Path]::GetDirectoryName($destPath)
@@ -3552,7 +3560,8 @@ function Import-RigBundle {
             # Schema validation
             $schemaResult = Test-ProfileSchema -Profile $importedProfile
             if (-not $schemaResult.IsValid) {
-                $errors += "Skipped '$($importedProfile.Name)': $($schemaResult.Errors -join '; ')"
+                $schemaErrorStr = $schemaResult.Errors -join '; '
+                $errors += "Skipped '$($importedProfile.Name)': $schemaErrorStr"
                 $skippedCount++
                 continue
             }
@@ -3593,7 +3602,8 @@ function Import-RigBundle {
         }
 
         # Show summary
-        $summaryMsg = "Imported $importedCount profile$(if ($importedCount -ne 1) { 's' }), skipped $skippedCount."
+        $importPlural = if ($importedCount -ne 1) { 's' } else { '' }
+        $summaryMsg = "Imported $importedCount profile${importPlural}, skipped $skippedCount."
         if ($errors.Count -gt 0) {
             $summaryMsg += "`n`nDetails:`n" + ($errors -join "`n")
         }
@@ -3980,13 +3990,14 @@ function Refresh-ProfileList {
             }
         }
 
-        $displayText = "$pName|$pDesc|$modifiedStr"
+        $displayText = $pName + '|' + $pDesc + '|' + $modifiedStr
         $script:ProfileListBox.Items.Add($displayText) | Out-Null
     }
 
     # Update the count label
     $count = $profiles.Count
-    $script:ProfileCountLabel.Text = "$count profile$(if ($count -ne 1) { 's' }) saved"
+    $plural = if ($count -ne 1) { 's' } else { '' }
+    $script:ProfileCountLabel.Text = "$count profile$plural saved"
 }
 
 
@@ -4274,7 +4285,7 @@ function Update-ProfileDetailPanel {
     $actionY = $currentY + 46
     $actionX = 15
 
-    # "Apply to This Machine" button — visually distinct from remote deploy buttons
+    # "Apply to This Machine" button -- visually distinct from remote deploy buttons
     $applyBtn = New-StyledButton -Text "Apply to This Machine" -X $actionX -Y $actionY `
         -Width 160 -Height 36 -IsPrimary -OnClick {
         if ($null -eq $script:SelectedProfile) { return }
@@ -6504,7 +6515,9 @@ function New-SMBView {
     $colState.HeaderText = 'State'
     $colState.FillWeight = 20
 
-    $dgv.Columns.AddRange(@($colName, $colPath, $colState))
+    $dgv.Columns.Add($colName) | Out-Null
+    $dgv.Columns.Add($colPath) | Out-Null
+    $dgv.Columns.Add($colState) | Out-Null
 
     # Populate the grid with current shares
     try {
@@ -7528,7 +7541,7 @@ All active d3 sessions will be disconnected.
 # ============================================================
 # MODULE: Discovery.ps1
 # ============================================================
-# Discovery.ps1 - DISGUISE BUDDY Network Discovery and Deployment Module
+﻿# Discovery.ps1 - DISGUISE BUDDY Network Discovery and Deployment Module
 # Provides functions for scanning networks, discovering disguise (d3) media servers,
 # testing connections, retrieving remote server info, and pushing configuration profiles.
 # Also provides the New-DeployView UI function for the Network Deploy panel.
@@ -8253,7 +8266,7 @@ function Push-ProfileToServer {
                     # Create or update the d3 Projects share using actual profile schema fields
                     if ($SMBConfig.ShareD3Projects -eq $true -and $SMBConfig.ShareName -and $SMBConfig.ProjectsPath) {
                         try {
-                            # Validate ProjectsPath — block UNC and system paths
+                            # Validate ProjectsPath -- block UNC and system paths
                             if ($SMBConfig.ProjectsPath -match '^\\\\') {
                                 $results += "ERROR: UNC paths not allowed for ProjectsPath: $($SMBConfig.ProjectsPath)"
                                 return @{ Success = $false; Message = ($results -join '; ') }
@@ -8276,14 +8289,14 @@ function Push-ProfileToServer {
 
                             $existingShare = Get-SmbShare -Name $SMBConfig.ShareName -ErrorAction SilentlyContinue
                             if ($existingShare) {
-                                # Path cannot be changed via Set-SmbShare — remove and recreate if path differs
+                                # Path cannot be changed via Set-SmbShare -- remove and recreate if path differs
                                 if ($existingShare.Path -ne $SMBConfig.ProjectsPath) {
                                     Remove-SmbShare -Name $SMBConfig.ShareName -Force -ErrorAction Stop
                                     $results += "INFO: Removed existing share (path mismatch: '$($existingShare.Path)' vs '$($SMBConfig.ProjectsPath)')"
                                     # Fall through to New-SmbShare below
                                     $existingShare = $null
                                 } else {
-                                    # Path matches — update permissions
+                                    # Path matches -- update permissions
                                     if ($permLevel -ieq 'Full') {
                                         Grant-SmbShareAccess -Name $SMBConfig.ShareName -AccountName $permAccount -AccessRight Full -Force -ErrorAction Stop | Out-Null
                                     } elseif ($permLevel -ieq 'Change') {
@@ -8436,7 +8449,7 @@ function Find-DisguiseServersDNSSD {
           1. Tries Resolve-DnsName (if available on the host) to query the PTR
              record for _d3api._tcp.local. on the local mDNS stack.
 
-          2. Falls back to a raw mDNS multicast query — sends a DNS PTR query
+          2. Falls back to a raw mDNS multicast query -- sends a DNS PTR query
              UDP datagram to the mDNS all-hosts address (224.0.0.251) port 5353
              and collects responses for 3 seconds.
 
@@ -8502,7 +8515,7 @@ function Find-DisguiseServersDNSSD {
                 }
             } catch { }
 
-            # Resolve to IP — try SRV target first, then instance name directly
+            # Resolve to IP -- try SRV target first, then instance name directly
             $ipAddress = $null
             if ($srvHost) { $ipAddress = Resolve-ServiceHostToIP -Hostname $srvHost }
             if (-not $ipAddress) { $ipAddress = Resolve-ServiceHostToIP -Hostname $instanceName }
@@ -8510,7 +8523,7 @@ function Find-DisguiseServersDNSSD {
             if ($ipAddress) {
                 [void]$discovered.Add([PSCustomObject]@{
                     IPAddress      = $ipAddress
-                    Hostname       = if ($srvHost) { $srvHost } else { $instanceName -replace '\._d3api\._tcp\.local\.$', '' }
+                    Hostname       = if ($srvHost) { $srvHost } else { ($instanceName -replace '\._d3api\._tcp\.local\.$', '') }
                     IsDisguise     = $true
                     ResponseTimeMs = 0
                     Ports          = @($srvPort)
@@ -8600,7 +8613,7 @@ function Find-DisguiseServersDNSSD {
                     $anCount = ($responseBytes[4] -shl 8) -bor $responseBytes[5]
                     if ($anCount -eq 0) { continue }
 
-                    # We found a response — the sender IS the mDNS responder and its IP
+                    # We found a response -- the sender IS the mDNS responder and its IP
                     # is captured in $senderIP from the UDP endpoint.
                     # Do a basic hostname resolution from the sender IP.
                     $resolvedHostname = ''
@@ -8623,7 +8636,7 @@ function Find-DisguiseServersDNSSD {
                         Write-AppLog -Message "Find-DisguiseServersDNSSD: Found $senderIP via raw mDNS multicast" -Level 'INFO'
                     }
                 } catch [System.Net.Sockets.SocketException] {
-                    # ReceiveTimeout expired — collection window is done
+                    # ReceiveTimeout expired -- collection window is done
                     break
                 } catch {
                     # Non-fatal parse error on a response packet
@@ -9208,11 +9221,11 @@ function New-DeployView {
     $btnQuickScan = New-StyledButton -Text "Quick Scan" -X 170 -Y 90 `
         -Width 120 -Height 35
 
-    # Cancel button — only enabled while a background scan is running
+    # Cancel button -- only enabled while a background scan is running
     $btnCancelScan = New-StyledButton -Text "Cancel" -X 305 -Y 90 -Width 80 -Height 35
     $btnCancelScan.Enabled = $false
 
-    # Auto-Discover button — uses DNS-SD / mDNS to find servers advertising _d3api._tcp.local.
+    # Auto-Discover button -- uses DNS-SD / mDNS to find servers advertising _d3api._tcp.local.
     $btnDNSSD = New-StyledButton -Text "Auto-Discover (DNS-SD)" -X 400 -Y 90 `
         -Width 185 -Height 35
 
@@ -9301,8 +9314,14 @@ function New-DeployView {
         [void]$colProfile.Items.Add($pName)
     }
 
-    $dgvServers.Columns.AddRange(@($colSelect, $colIP, $colHostname, $colStatus,
-                                    $colAPI, $colPorts, $colResponseTime, $colProfile))
+    $dgvServers.Columns.Add($colSelect) | Out-Null
+    $dgvServers.Columns.Add($colIP) | Out-Null
+    $dgvServers.Columns.Add($colHostname) | Out-Null
+    $dgvServers.Columns.Add($colStatus) | Out-Null
+    $dgvServers.Columns.Add($colAPI) | Out-Null
+    $dgvServers.Columns.Add($colPorts) | Out-Null
+    $dgvServers.Columns.Add($colResponseTime) | Out-Null
+    $dgvServers.Columns.Add($colProfile) | Out-Null
     $dgvServers.ReadOnly = $false
 
     # Only the Select (checkbox) and Profile (combobox) columns are user-editable
@@ -9863,7 +9882,7 @@ function New-DeployView {
     # BackgroundWorker events (Task 2)
     # ===================================================================
 
-    # DoWork — runs on the worker thread.
+    # DoWork -- runs on the worker thread.
     # Arguments passed via RunWorkerAsync are available in $e.Argument.
     $scanWorker.Add_DoWork({
         param($sender, $e)
@@ -9888,7 +9907,7 @@ function New-DeployView {
 
             if ($worker.CancellationPending) {
                 $e.Cancel = $true
-                # Return the local partial results (not shared state — avoids cross-thread race)
+                # Return the local partial results (not shared state -- avoids cross-thread race)
                 $e.Result = $results
             } else {
                 $e.Result = $results
@@ -9899,7 +9918,7 @@ function New-DeployView {
         }
     })
 
-    # ProgressChanged — runs on the UI thread; safe to update controls directly.
+    # ProgressChanged -- runs on the UI thread; safe to update controls directly.
     $scanWorker.Add_ProgressChanged({
         param($sender, $e)
         $pct = [Math]::Min(100, [Math]::Max(0, $e.ProgressPercentage))
@@ -9910,7 +9929,7 @@ function New-DeployView {
         }
     })
 
-    # RunWorkerCompleted — runs on the UI thread after DoWork exits (normally, cancelled, or error).
+    # RunWorkerCompleted -- runs on the UI thread after DoWork exits (normally, cancelled, or error).
     $scanWorker.Add_RunWorkerCompleted({
         param($sender, $e)
 
@@ -9929,7 +9948,7 @@ function New-DeployView {
             # Show any partial results that were collected before cancellation
             if ($e.Result -and $e.Result.Count -gt 0) {
                 & $populateGrid $e.Result
-                $lblScanStatus.Text = "Scan cancelled — showing $($e.Result.Count) partial result(s)."
+                $lblScanStatus.Text = "Scan cancelled -- showing $($e.Result.Count) partial result(s)."
             }
         } elseif ($e.Error) {
             $lblScanStatus.Text      = "Scan failed: $($e.Error.Message)"
@@ -9962,7 +9981,7 @@ function New-DeployView {
         try { $endIP   = [int]$txtEndIP.Text.Trim()   } catch { $endIP   = 254 }
         try { $timeout = [int]$txtTimeout.Text.Trim() } catch { $timeout = 200 }
 
-        # Clamp timeout to safe bounds (50ms – 5000ms)
+        # Clamp timeout to safe bounds (50ms - 5000ms)
         $timeout = [Math]::Min([Math]::Max(50, $timeout), 5000)
 
         if ([string]::IsNullOrWhiteSpace($subnet)) { $subnet = "10.0.0" }
@@ -10107,7 +10126,7 @@ function New-DeployView {
         $btnQuickScan.Enabled   = $false
         $btnDNSSD.Enabled       = $false
 
-        $lblScanStatus.Text     = "Querying DNS-SD for _d3api._tcp.local. — please wait..."
+        $lblScanStatus.Text     = "Querying DNS-SD for _d3api._tcp.local. -- please wait..."
         $lblScanStatus.ForeColor = $script:Theme.Accent
         $lblScanStatus.Refresh()
         $scanProgressBar.Value  = 0
@@ -10864,7 +10883,10 @@ function New-DashboardView {
     $colAdapterStatus.Name = "Status"
     $colAdapterStatus.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::Fill
 
-    $dgvAdapters.Columns.AddRange(@($colDot, $colRole, $colAdapterIP, $colAdapterStatus))
+    $dgvAdapters.Columns.Add($colDot) | Out-Null
+    $dgvAdapters.Columns.Add($colRole) | Out-Null
+    $dgvAdapters.Columns.Add($colAdapterIP) | Out-Null
+    $dgvAdapters.Columns.Add($colAdapterStatus) | Out-Null
     $dgvAdapters.ReadOnly = $true
 
     # Populate adapter rows

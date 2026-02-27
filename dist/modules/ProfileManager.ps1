@@ -395,12 +395,12 @@ function Save-Profile {
     $safeName = $Profile.Name -replace '[\\/:*?"<>|]', '_'
     $filePath = Join-Path -Path $profilesDir -ChildPath "$safeName.json"
 
-    # Path boundary check — ensure resolved path stays inside profiles directory
+    # Path boundary check -- ensure resolved path stays inside profiles directory
     $resolvedPath = [System.IO.Path]::GetFullPath($filePath)
     $resolvedDir  = [System.IO.Path]::GetFullPath($profilesDir)
     if (-not $resolvedPath.StartsWith($resolvedDir, [StringComparison]::OrdinalIgnoreCase)) {
         Write-AppLog "Save-Profile: Path traversal blocked for '$($Profile.Name)' (resolved to '$resolvedPath')" -Level 'ERROR'
-        throw "Invalid profile name — path traversal detected."
+        throw "Invalid profile name - path traversal detected."
     }
 
     try {
@@ -431,7 +431,7 @@ function Remove-Profile {
     $safeName = $Name -replace '[\\/:*?"<>|]', '_'
     $filePath = Join-Path -Path $profilesDir -ChildPath "$safeName.json"
 
-    # Path boundary check — ensure resolved path stays inside profiles directory
+    # Path boundary check -- ensure resolved path stays inside profiles directory
     $resolvedPath = [System.IO.Path]::GetFullPath($filePath)
     $resolvedDir  = [System.IO.Path]::GetFullPath($profilesDir)
     if (-not $resolvedPath.StartsWith($resolvedDir, [StringComparison]::OrdinalIgnoreCase)) {
@@ -591,7 +591,8 @@ function Import-ProfileFromFile {
     $schemaResult = Test-ProfileSchema -Profile $importedProfile
     if (-not $schemaResult.IsValid) {
         $errorMsg = "Imported profile failed validation:`n`n" + ($schemaResult.Errors -join "`n")
-        Write-AppLog "Import blocked by schema validation: $($schemaResult.Errors -join '; ')" -Level 'WARN'
+        $validationErrorStr = $schemaResult.Errors -join '; '
+        Write-AppLog "Import blocked by schema validation: $validationErrorStr" -Level 'WARN'
         [System.Windows.Forms.MessageBox]::Show(
             $errorMsg,
             "Profile Validation Failed",
@@ -656,7 +657,8 @@ function Apply-FullProfile {
     $schemaResult = Test-ProfileSchema -Profile $Profile
     if (-not $schemaResult.IsValid) {
         $errorMsg = "Profile '$($Profile.Name)' failed schema validation:`n`n" + ($schemaResult.Errors -join "`n")
-        Write-AppLog "Apply-FullProfile blocked by schema validation: $($schemaResult.Errors -join '; ')" -Level 'ERROR'
+        $validationErrorStr = $schemaResult.Errors -join '; '
+        Write-AppLog "Apply-FullProfile blocked by schema validation: $validationErrorStr" -Level 'ERROR'
         [System.Windows.Forms.MessageBox]::Show(
             $errorMsg,
             "Profile Validation Failed",
@@ -1816,7 +1818,8 @@ function Show-BatchProfileWizard {
         and starting IP offset. Generates Director, Actor, and Understudy profiles
         with properly sequenced network adapter IPs and standard SMB settings.
     .OUTPUTS
-        [int] - Number of profiles generated, or 0 if cancelled/failed.
+        System.Int32
+        Number of profiles generated, or 0 if cancelled or failed.
     #>
 
     $form = New-Object System.Windows.Forms.Form
@@ -2201,7 +2204,8 @@ function Show-BatchProfileWizard {
     $generatedCount = $generatedNames.Count
     if ($generatedCount -gt 0) {
         $nameList = $generatedNames -join "`n  "
-        $summaryMsg = "Generated $generatedCount profile$(if ($generatedCount -ne 1) { 's' }):`n`n  $nameList"
+        $plural = if ($generatedCount -ne 1) { 's' } else { '' }
+        $summaryMsg = "Generated $generatedCount profile${plural}:`n`n  $nameList"
         if ($errors.Count -gt 0) {
             $summaryMsg += "`n`nErrors ($($errors.Count)):`n" + ($errors -join "`n")
         }
@@ -2211,7 +2215,8 @@ function Show-BatchProfileWizard {
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Information
         ) | Out-Null
-        Write-AppLog "Batch generated $generatedCount profiles: $($generatedNames -join ', ')" -Level 'INFO'
+        $generatedNameStr = $generatedNames -join ', '
+        Write-AppLog "Batch generated $generatedCount profiles: $generatedNameStr" -Level 'INFO'
     }
     else {
         $errorMsg = "No profiles were generated."
@@ -2224,7 +2229,8 @@ function Show-BatchProfileWizard {
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Error
         ) | Out-Null
-        Write-AppLog "Batch generation failed: $($errors -join '; ')" -Level 'ERROR'
+        $batchErrorStr = $errors -join '; '
+        Write-AppLog "Batch generation failed: $batchErrorStr" -Level 'ERROR'
     }
 
     return $generatedCount
@@ -2286,7 +2292,8 @@ function Export-RigBundle {
 
         [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, $zipPath)
 
-        $successMsg = "Exported $($jsonFiles.Count) profile$(if ($jsonFiles.Count -ne 1) { 's' }) to:`n$zipPath"
+        $exportPlural = if ($jsonFiles.Count -ne 1) { 's' } else { '' }
+        $successMsg = "Exported $($jsonFiles.Count) profile${exportPlural} to:`n$zipPath"
         [System.Windows.Forms.MessageBox]::Show(
             $successMsg,
             "Export Successful",
@@ -2357,7 +2364,7 @@ function Import-RigBundle {
                 if ([string]::IsNullOrWhiteSpace($entry.Name)) { continue }  # skip directory entries
                 $destPath = [System.IO.Path]::GetFullPath((Join-Path $tempDir $entry.FullName))
                 if (-not $destPath.StartsWith($resolvedTempDir, [System.StringComparison]::OrdinalIgnoreCase)) {
-                    Write-AppLog "Import-RigBundle: Zip Slip blocked — '$($entry.FullName)' escapes temp dir. Aborting." -Level 'ERROR'
+                    Write-AppLog "Import-RigBundle: Zip Slip blocked - '$($entry.FullName)' escapes temp dir. Aborting." -Level 'ERROR'
                     return [PSCustomObject]@{ Success = $false; Message = "Archive contains unsafe path: $($entry.FullName)"; ImportedCount = 0; SkippedCount = 0 }
                 }
                 $destDir = [System.IO.Path]::GetDirectoryName($destPath)
@@ -2408,7 +2415,8 @@ function Import-RigBundle {
             # Schema validation
             $schemaResult = Test-ProfileSchema -Profile $importedProfile
             if (-not $schemaResult.IsValid) {
-                $errors += "Skipped '$($importedProfile.Name)': $($schemaResult.Errors -join '; ')"
+                $schemaErrorStr = $schemaResult.Errors -join '; '
+                $errors += "Skipped '$($importedProfile.Name)': $schemaErrorStr"
                 $skippedCount++
                 continue
             }
@@ -2449,7 +2457,8 @@ function Import-RigBundle {
         }
 
         # Show summary
-        $summaryMsg = "Imported $importedCount profile$(if ($importedCount -ne 1) { 's' }), skipped $skippedCount."
+        $importPlural = if ($importedCount -ne 1) { 's' } else { '' }
+        $summaryMsg = "Imported $importedCount profile${importPlural}, skipped $skippedCount."
         if ($errors.Count -gt 0) {
             $summaryMsg += "`n`nDetails:`n" + ($errors -join "`n")
         }
@@ -2836,13 +2845,14 @@ function Refresh-ProfileList {
             }
         }
 
-        $displayText = "$pName|$pDesc|$modifiedStr"
+        $displayText = $pName + '|' + $pDesc + '|' + $modifiedStr
         $script:ProfileListBox.Items.Add($displayText) | Out-Null
     }
 
     # Update the count label
     $count = $profiles.Count
-    $script:ProfileCountLabel.Text = "$count profile$(if ($count -ne 1) { 's' }) saved"
+    $plural = if ($count -ne 1) { 's' } else { '' }
+    $script:ProfileCountLabel.Text = "$count profile$plural saved"
 }
 
 
@@ -3130,7 +3140,7 @@ function Update-ProfileDetailPanel {
     $actionY = $currentY + 46
     $actionX = 15
 
-    # "Apply to This Machine" button — visually distinct from remote deploy buttons
+    # "Apply to This Machine" button -- visually distinct from remote deploy buttons
     $applyBtn = New-StyledButton -Text "Apply to This Machine" -X $actionX -Y $actionY `
         -Width 160 -Height 36 -IsPrimary -OnClick {
         if ($null -eq $script:SelectedProfile) { return }

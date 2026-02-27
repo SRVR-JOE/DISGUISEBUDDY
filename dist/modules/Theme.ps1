@@ -11,11 +11,11 @@ function Get-AppRootPath {
     return $script:AppRootPath
 }
 
-# Dark theme (default)
+# Dark theme (default) - matches Electron/React UI design system
 $script:DarkTheme = @{
-    Background        = [System.Drawing.ColorTranslator]::FromHtml('#1E1E2E')
-    Surface           = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
-    SurfaceLight      = [System.Drawing.ColorTranslator]::FromHtml('#363650')
+    Background        = [System.Drawing.ColorTranslator]::FromHtml('#0F0F14')
+    Surface           = [System.Drawing.ColorTranslator]::FromHtml('#1A1A24')
+    SurfaceLight      = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
     Primary           = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
     PrimaryLight      = [System.Drawing.ColorTranslator]::FromHtml('#8B5CF6')
     PrimaryDark       = [System.Drawing.ColorTranslator]::FromHtml('#6D28D9')
@@ -29,13 +29,14 @@ $script:DarkTheme = @{
     SuccessBackground = [System.Drawing.ColorTranslator]::FromHtml('#0D3B2E')
     WarningBackground = [System.Drawing.ColorTranslator]::FromHtml('#3B2E0D')
     ErrorBackground   = [System.Drawing.ColorTranslator]::FromHtml('#3B0D0D')
-    Border            = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
-    NavBackground     = [System.Drawing.ColorTranslator]::FromHtml('#16162A')
-    NavHover          = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
+    Border            = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
+    BorderLight       = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
+    NavBackground     = [System.Drawing.ColorTranslator]::FromHtml('#0C0C16')
+    NavHover          = [System.Drawing.ColorTranslator]::FromHtml('#1A1A24')
     NavActive         = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
-    CardBackground    = [System.Drawing.ColorTranslator]::FromHtml('#232338')
-    InputBackground   = [System.Drawing.ColorTranslator]::FromHtml('#1A1A2E')
-    InputBorder       = [System.Drawing.ColorTranslator]::FromHtml('#3F3F5C')
+    CardBackground    = [System.Drawing.ColorTranslator]::FromHtml('#1E1E2E')
+    InputBackground   = [System.Drawing.ColorTranslator]::FromHtml('#1A1A24')
+    InputBorder       = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
     Scrollbar         = [System.Drawing.ColorTranslator]::FromHtml('#2A2A3C')
 }
 

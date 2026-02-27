@@ -1,4 +1,4 @@
-# Discovery.ps1 - DISGUISE BUDDY Network Discovery and Deployment Module
+﻿# Discovery.ps1 - DISGUISE BUDDY Network Discovery and Deployment Module
 # Provides functions for scanning networks, discovering disguise (d3) media servers,
 # testing connections, retrieving remote server info, and pushing configuration profiles.
 # Also provides the New-DeployView UI function for the Network Deploy panel.
@@ -723,7 +723,7 @@ function Push-ProfileToServer {
                     # Create or update the d3 Projects share using actual profile schema fields
                     if ($SMBConfig.ShareD3Projects -eq $true -and $SMBConfig.ShareName -and $SMBConfig.ProjectsPath) {
                         try {
-                            # Validate ProjectsPath — block UNC and system paths
+                            # Validate ProjectsPath -- block UNC and system paths
                             if ($SMBConfig.ProjectsPath -match '^\\\\') {
                                 $results += "ERROR: UNC paths not allowed for ProjectsPath: $($SMBConfig.ProjectsPath)"
                                 return @{ Success = $false; Message = ($results -join '; ') }
@@ -746,14 +746,14 @@ function Push-ProfileToServer {
 
                             $existingShare = Get-SmbShare -Name $SMBConfig.ShareName -ErrorAction SilentlyContinue
                             if ($existingShare) {
-                                # Path cannot be changed via Set-SmbShare — remove and recreate if path differs
+                                # Path cannot be changed via Set-SmbShare -- remove and recreate if path differs
                                 if ($existingShare.Path -ne $SMBConfig.ProjectsPath) {
                                     Remove-SmbShare -Name $SMBConfig.ShareName -Force -ErrorAction Stop
                                     $results += "INFO: Removed existing share (path mismatch: '$($existingShare.Path)' vs '$($SMBConfig.ProjectsPath)')"
                                     # Fall through to New-SmbShare below
                                     $existingShare = $null
                                 } else {
-                                    # Path matches — update permissions
+                                    # Path matches -- update permissions
                                     if ($permLevel -ieq 'Full') {
                                         Grant-SmbShareAccess -Name $SMBConfig.ShareName -AccountName $permAccount -AccessRight Full -Force -ErrorAction Stop | Out-Null
                                     } elseif ($permLevel -ieq 'Change') {
@@ -906,7 +906,7 @@ function Find-DisguiseServersDNSSD {
           1. Tries Resolve-DnsName (if available on the host) to query the PTR
              record for _d3api._tcp.local. on the local mDNS stack.
 
-          2. Falls back to a raw mDNS multicast query — sends a DNS PTR query
+          2. Falls back to a raw mDNS multicast query -- sends a DNS PTR query
              UDP datagram to the mDNS all-hosts address (224.0.0.251) port 5353
              and collects responses for 3 seconds.
 
@@ -972,7 +972,7 @@ function Find-DisguiseServersDNSSD {
                 }
             } catch { }
 
-            # Resolve to IP — try SRV target first, then instance name directly
+            # Resolve to IP -- try SRV target first, then instance name directly
             $ipAddress = $null
             if ($srvHost) { $ipAddress = Resolve-ServiceHostToIP -Hostname $srvHost }
             if (-not $ipAddress) { $ipAddress = Resolve-ServiceHostToIP -Hostname $instanceName }
@@ -980,7 +980,7 @@ function Find-DisguiseServersDNSSD {
             if ($ipAddress) {
                 [void]$discovered.Add([PSCustomObject]@{
                     IPAddress      = $ipAddress
-                    Hostname       = if ($srvHost) { $srvHost } else { $instanceName -replace '\._d3api\._tcp\.local\.$', '' }
+                    Hostname       = if ($srvHost) { $srvHost } else { ($instanceName -replace '\._d3api\._tcp\.local\.$', '') }
                     IsDisguise     = $true
                     ResponseTimeMs = 0
                     Ports          = @($srvPort)
@@ -1070,7 +1070,7 @@ function Find-DisguiseServersDNSSD {
                     $anCount = ($responseBytes[4] -shl 8) -bor $responseBytes[5]
                     if ($anCount -eq 0) { continue }
 
-                    # We found a response — the sender IS the mDNS responder and its IP
+                    # We found a response -- the sender IS the mDNS responder and its IP
                     # is captured in $senderIP from the UDP endpoint.
                     # Do a basic hostname resolution from the sender IP.
                     $resolvedHostname = ''
@@ -1093,7 +1093,7 @@ function Find-DisguiseServersDNSSD {
                         Write-AppLog -Message "Find-DisguiseServersDNSSD: Found $senderIP via raw mDNS multicast" -Level 'INFO'
                     }
                 } catch [System.Net.Sockets.SocketException] {
-                    # ReceiveTimeout expired — collection window is done
+                    # ReceiveTimeout expired -- collection window is done
                     break
                 } catch {
                     # Non-fatal parse error on a response packet
@@ -1678,11 +1678,11 @@ function New-DeployView {
     $btnQuickScan = New-StyledButton -Text "Quick Scan" -X 170 -Y 90 `
         -Width 120 -Height 35
 
-    # Cancel button — only enabled while a background scan is running
+    # Cancel button -- only enabled while a background scan is running
     $btnCancelScan = New-StyledButton -Text "Cancel" -X 305 -Y 90 -Width 80 -Height 35
     $btnCancelScan.Enabled = $false
 
-    # Auto-Discover button — uses DNS-SD / mDNS to find servers advertising _d3api._tcp.local.
+    # Auto-Discover button -- uses DNS-SD / mDNS to find servers advertising _d3api._tcp.local.
     $btnDNSSD = New-StyledButton -Text "Auto-Discover (DNS-SD)" -X 400 -Y 90 `
         -Width 185 -Height 35
 
@@ -1771,8 +1771,14 @@ function New-DeployView {
         [void]$colProfile.Items.Add($pName)
     }
 
-    $dgvServers.Columns.AddRange(@($colSelect, $colIP, $colHostname, $colStatus,
-                                    $colAPI, $colPorts, $colResponseTime, $colProfile))
+    $dgvServers.Columns.Add($colSelect) | Out-Null
+    $dgvServers.Columns.Add($colIP) | Out-Null
+    $dgvServers.Columns.Add($colHostname) | Out-Null
+    $dgvServers.Columns.Add($colStatus) | Out-Null
+    $dgvServers.Columns.Add($colAPI) | Out-Null
+    $dgvServers.Columns.Add($colPorts) | Out-Null
+    $dgvServers.Columns.Add($colResponseTime) | Out-Null
+    $dgvServers.Columns.Add($colProfile) | Out-Null
     $dgvServers.ReadOnly = $false
 
     # Only the Select (checkbox) and Profile (combobox) columns are user-editable
@@ -2333,7 +2339,7 @@ function New-DeployView {
     # BackgroundWorker events (Task 2)
     # ===================================================================
 
-    # DoWork — runs on the worker thread.
+    # DoWork -- runs on the worker thread.
     # Arguments passed via RunWorkerAsync are available in $e.Argument.
     $scanWorker.Add_DoWork({
         param($sender, $e)
@@ -2358,7 +2364,7 @@ function New-DeployView {
 
             if ($worker.CancellationPending) {
                 $e.Cancel = $true
-                # Return the local partial results (not shared state — avoids cross-thread race)
+                # Return the local partial results (not shared state -- avoids cross-thread race)
                 $e.Result = $results
             } else {
                 $e.Result = $results
@@ -2369,7 +2375,7 @@ function New-DeployView {
         }
     })
 
-    # ProgressChanged — runs on the UI thread; safe to update controls directly.
+    # ProgressChanged -- runs on the UI thread; safe to update controls directly.
     $scanWorker.Add_ProgressChanged({
         param($sender, $e)
         $pct = [Math]::Min(100, [Math]::Max(0, $e.ProgressPercentage))
@@ -2380,7 +2386,7 @@ function New-DeployView {
         }
     })
 
-    # RunWorkerCompleted — runs on the UI thread after DoWork exits (normally, cancelled, or error).
+    # RunWorkerCompleted -- runs on the UI thread after DoWork exits (normally, cancelled, or error).
     $scanWorker.Add_RunWorkerCompleted({
         param($sender, $e)
 
@@ -2399,7 +2405,7 @@ function New-DeployView {
             # Show any partial results that were collected before cancellation
             if ($e.Result -and $e.Result.Count -gt 0) {
                 & $populateGrid $e.Result
-                $lblScanStatus.Text = "Scan cancelled — showing $($e.Result.Count) partial result(s)."
+                $lblScanStatus.Text = "Scan cancelled -- showing $($e.Result.Count) partial result(s)."
             }
         } elseif ($e.Error) {
             $lblScanStatus.Text      = "Scan failed: $($e.Error.Message)"
@@ -2432,7 +2438,7 @@ function New-DeployView {
         try { $endIP   = [int]$txtEndIP.Text.Trim()   } catch { $endIP   = 254 }
         try { $timeout = [int]$txtTimeout.Text.Trim() } catch { $timeout = 200 }
 
-        # Clamp timeout to safe bounds (50ms – 5000ms)
+        # Clamp timeout to safe bounds (50ms - 5000ms)
         $timeout = [Math]::Min([Math]::Max(50, $timeout), 5000)
 
         if ([string]::IsNullOrWhiteSpace($subnet)) { $subnet = "10.0.0" }
@@ -2577,7 +2583,7 @@ function New-DeployView {
         $btnQuickScan.Enabled   = $false
         $btnDNSSD.Enabled       = $false
 
-        $lblScanStatus.Text     = "Querying DNS-SD for _d3api._tcp.local. — please wait..."
+        $lblScanStatus.Text     = "Querying DNS-SD for _d3api._tcp.local. -- please wait..."
         $lblScanStatus.ForeColor = $script:Theme.Accent
         $lblScanStatus.Refresh()
         $scanProgressBar.Value  = 0

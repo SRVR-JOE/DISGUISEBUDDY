@@ -738,7 +738,9 @@ function New-SMBView {
     $colState.HeaderText = 'State'
     $colState.FillWeight = 20
 
-    $dgv.Columns.AddRange(@($colName, $colPath, $colState))
+    $dgv.Columns.Add($colName) | Out-Null
+    $dgv.Columns.Add($colPath) | Out-Null
+    $dgv.Columns.Add($colState) | Out-Null
 
     # Populate the grid with current shares
     try {
