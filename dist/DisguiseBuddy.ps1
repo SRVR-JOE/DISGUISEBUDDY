@@ -191,7 +191,7 @@ $navPanel.Controls.Add($navBottomPanel)
 $contentPanel = New-Object System.Windows.Forms.Panel
 $contentPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
 $contentPanel.BackColor = $script:Theme.Background
-$contentPanel.Padding = New-Object System.Windows.Forms.Padding(20)
+$contentPanel.Padding = New-Object System.Windows.Forms.Padding(0)
 
 # ============================================================================
 # NAVIGATION BUTTON CREATION
@@ -290,24 +290,19 @@ function Set-ActiveView {
     # Update state
     $script:AppState.CurrentView = $ViewName
 
-    # Load the requested view into the content panel
+    # Load the requested view directly into the content panel.
+    # Each view creates its own scroll panel internally -- do NOT add
+    # another wrapper here (nested AutoScroll panels fight each other).
     $contentPanel.SuspendLayout()
     $contentPanel.Controls.Clear()
 
-    # Create an inner panel that respects padding
-    $innerPanel = New-Object System.Windows.Forms.Panel
-    $innerPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-    $innerPanel.BackColor = $script:Theme.Background
-    $innerPanel.AutoScroll = $true
-    $contentPanel.Controls.Add($innerPanel)
-
     switch ($ViewName) {
-        'Dashboard'      { New-DashboardView -ContentPanel $innerPanel }
-        'Profiles'       { New-ProfilesView -ContentPanel $innerPanel }
-        'Network'        { New-NetworkView -ContentPanel $innerPanel }
-        'SMB'            { New-SMBView -ContentPanel $innerPanel }
-        'ServerIdentity' { New-ServerIdentityView -ContentPanel $innerPanel }
-        'Deploy'         { New-DeployView -ContentPanel $innerPanel }
+        'Dashboard'      { New-DashboardView -ContentPanel $contentPanel }
+        'Profiles'       { New-ProfilesView -ContentPanel $contentPanel }
+        'Network'        { New-NetworkView -ContentPanel $contentPanel }
+        'SMB'            { New-SMBView -ContentPanel $contentPanel }
+        'ServerIdentity' { New-ServerIdentityView -ContentPanel $contentPanel }
+        'Deploy'         { New-DeployView -ContentPanel $contentPanel }
     }
 
     $contentPanel.ResumeLayout()

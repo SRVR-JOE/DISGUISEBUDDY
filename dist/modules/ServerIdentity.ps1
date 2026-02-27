@@ -236,7 +236,7 @@ function New-ServerIdentityView {
     $scrollPanel = New-ScrollPanel -X 0 -Y 0 -Width $ContentPanel.Width -Height $ContentPanel.Height
 
     # ---- Page header (24px padding) ----
-    $header = New-SectionHeader -Text "Server Identity" -X 24 -Y 16 -Width 880
+    $header = New-SectionHeader -Text "Server Identity" -X 24 -Y 16 -Width 900
     $scrollPanel.Controls.Add($header)
 
     $subtitle = New-StyledLabel -Text "Manage server hostname and system identification" -X 24 -Y 58 -IsSecondary -FontSize 9.5
@@ -249,7 +249,7 @@ function New-ServerIdentityView {
     # Card 1: Current Identity  (purple left-accent border, matching React)
     # ========================================================================
     # Header area height ~90px, divider, info grid ~120px, total ~230px
-    $card1 = New-StyledCard -Title "Current Identity" -X 24 -Y 90 -Width 880 -Height 310 `
+    $card1 = New-StyledCard -Title "Current Identity" -X 24 -Y 90 -Width 900 -Height 310 `
                             -AccentColor $script:Theme.Primary
 
     # Domain / Workgroup status badge -- top-right of card
@@ -296,7 +296,7 @@ function New-ServerIdentityView {
     # Divider line between header area and info grid
     $divider = New-Object System.Windows.Forms.Panel
     $divider.Location = New-Object System.Drawing.Point(15, 105)
-    $divider.Size = New-Object System.Drawing.Size(840, 1)
+    $divider.Size = New-Object System.Drawing.Size(860, 1)
     $divider.BackColor = $script:Theme.Border
     $card1.Controls.Add($divider)
 
@@ -375,14 +375,14 @@ function New-ServerIdentityView {
     # ========================================================================
     # Dynamic height: warning(60) + current host row(50) + input row(55)
     #   + validation(28) + preview(118 when visible) + button(60) + padding = ~460
-    $card2 = New-StyledCard -Title "Change Hostname" -X 24 -Y 426 -Width 880 -Height 470
+    $card2 = New-StyledCard -Title "Change Hostname" -X 24 -Y 426 -Width 900 -Height 470
 
     $yPos = 48
 
     # --- Warning banner: semi-transparent WarningBackground + 4px left amber accent ---
     $warningPanel = New-Object System.Windows.Forms.Panel
     $warningPanel.Location = New-Object System.Drawing.Point(15, $yPos)
-    $warningPanel.Size = New-Object System.Drawing.Size(840, 56)
+    $warningPanel.Size = New-Object System.Drawing.Size(860, 56)
     $warningPanel.BackColor = $script:Theme.WarningBackground
     $card2.Controls.Add($warningPanel)
 
@@ -498,7 +498,7 @@ function New-ServerIdentityView {
     $pnlPreview = New-Object System.Windows.Forms.Panel
     $pnlPreview.Name = 'pnlPreview'
     $pnlPreview.Location = New-Object System.Drawing.Point(15, $yPos)
-    $pnlPreview.Size = New-Object System.Drawing.Size(840, 110)
+    $pnlPreview.Size = New-Object System.Drawing.Size(860, 110)
     $pnlPreview.BackColor = $script:Theme.Surface
     $pnlPreview.Visible = $false
 
@@ -763,7 +763,7 @@ All active d3 sessions will be disconnected.
     # Card 3: Naming Conventions  (no accent)
     # ========================================================================
     # 7 guidelines at ~26px each + header area ~120px = ~302px
-    $card3 = New-StyledCard -Title "Naming Conventions" -X 24 -Y 920 -Width 880 -Height 350
+    $card3 = New-StyledCard -Title "Naming Conventions" -X 24 -Y 920 -Width 900 -Height 350
 
     $yPos = 48
 
@@ -863,7 +863,7 @@ All active d3 sessions will be disconnected.
     # Separator between examples and guidelines
     $sep2 = New-Object System.Windows.Forms.Panel
     $sep2.Location = New-Object System.Drawing.Point(19, $yPos)
-    $sep2.Size = New-Object System.Drawing.Size(836, 1)
+    $sep2.Size = New-Object System.Drawing.Size(856, 1)
     $sep2.BackColor = $script:Theme.Border
     $card3.Controls.Add($sep2)
 
@@ -912,8 +912,8 @@ All active d3 sessions will be disconnected.
         $guideLabel.Text = $guideline
         $guideLabel.Location = New-Object System.Drawing.Point(34, $yPos)
         $guideLabel.AutoSize = $false
-        $guideLabel.Width = 820
-        $guideLabel.MaximumSize = New-Object System.Drawing.Size(820, 0)
+        $guideLabel.Width = 840
+        $guideLabel.MaximumSize = New-Object System.Drawing.Size(840, 0)
         $guideLabel.AutoSize = $true
         $guideLabel.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
         $guideLabel.ForeColor = $script:Theme.TextSecondary
