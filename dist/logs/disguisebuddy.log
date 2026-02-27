@@ -49,3 +49,16 @@
 [2026-02-26 22:02:57.012] [INFO] Retrieved 4 SMB shares from system.
 [2026-02-26 22:02:57.092] [DEBUG] Switched to view: SMB
 [2026-02-26 22:07:20.925] [INFO] DISGUISE BUDDY shutting down
+[2026-02-26 22:12:23.559] [INFO] DISGUISE BUDDY starting up
+[2026-02-26 22:12:23.750] [DEBUG] Loaded saved theme preference: Dark
+[2026-02-26 22:12:23.861] [DEBUG] Retrieved server hostname: US-W-200322
+[2026-02-26 22:12:27.406] [DEBUG] Switched to view: Dashboard
+[2026-02-26 22:12:27.415] [INFO] DISGUISE BUDDY initialized successfully
+[2026-02-26 22:12:44.008] [INFO] Retrieved 4 SMB shares from system.
+[2026-02-26 22:12:44.113] [DEBUG] Switched to view: SMB
+[2026-02-26 22:12:47.629] [DEBUG] Retrieved system info for 'US-W-200322'.
+[2026-02-26 22:12:47.740] [DEBUG] Switched to view: ServerIdentity
+[2026-02-26 22:12:58.902] [DEBUG] Switched to view: Deploy
+[2026-02-26 22:13:01.150] [DEBUG] Switched to view: Deploy
+[2026-02-26 22:13:03.134] [DEBUG] Switched to view: Network
+[2026-02-26 22:13:16.382] [INFO] DISGUISE BUDDY shutting down
