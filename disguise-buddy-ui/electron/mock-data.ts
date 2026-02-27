@@ -137,7 +137,18 @@ function loadProfilesFromDisk(): Profile[] {
 // In-memory stores so mutation endpoints (save, delete, configure) are reflected
 // within the same server session. Profiles are seeded from the real JSON files.
 
-let mockProfiles: Profile[] = loadProfilesFromDisk()
+// Sort: Director first, then Actors numerically, then Understudies numerically
+let mockProfiles: Profile[] = loadProfilesFromDisk().sort((a, b) => {
+  const order = (name: string) => {
+    if (name.startsWith('Director')) return 0
+    if (name.startsWith('Actor')) return 1
+    if (name.startsWith('Understudy')) return 2
+    return 3
+  }
+  const oa = order(a.Name), ob = order(b.Name)
+  if (oa !== ob) return oa - ob
+  return a.Name.localeCompare(b.Name, undefined, { numeric: true })
+})
 
 // Default adapters come from Director profile (or a sensible fallback)
 const directorProfile = mockProfiles.find(p => p.Name === 'Director')

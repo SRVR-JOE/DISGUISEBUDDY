@@ -125,6 +125,12 @@ app.get('/api/dashboard', (_req: Request, res: Response) => {
   res.json(getDashboard())
 })
 
+// ─── Discovery (fleet list) ──────────────────────────────────────────────────
+
+app.get('/api/discovery', (_req: Request, res: Response) => {
+  res.json(getDiscovery())
+})
+
 // ─── SSE: Network scan ────────────────────────────────────────────────────────
 // Query params: subnet, start, end
 // Simulates a progressive subnet scan over ~3 seconds, emitting discovered servers.

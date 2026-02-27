@@ -5,6 +5,7 @@ import type {
   SmbShare,
   IdentityInfo,
   DashboardData,
+  DiscoveredServer,
 } from '@/lib/types'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -115,6 +116,11 @@ export const api = {
   // Dashboard
   getDashboard(): Promise<DashboardData> {
     return get<DashboardData>('/api/dashboard')
+  },
+
+  // Discovery (fleet list)
+  getDiscovery(): Promise<DiscoveredServer[]> {
+    return get<DiscoveredServer[]>('/api/discovery')
   },
 
   // SSE — Network scan
