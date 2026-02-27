@@ -1,0 +1,681 @@
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\ProfileManager.ps1:403 char:41
++         throw "Invalid profile name â€” path traversal detected."
++                                         ~~~~
+Unexpected token 'path' in expression or statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\ProfileManager.ps1:594 char:104
++ ...  schema validation: $($schemaResult.Errors -join '; ')" -Level 'WARN'
++                                                                     ~~~~~
+Unexpected token 'WARN'
+        [System.Windows.Forms.MessageBox]::Show(
+            $errorMsg,
+            "Profile Validation Failed",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return $null
+    }
+    # Update timestamps for the import
+    $importedProfile.Modified = (Get-Date).ToString('o')
+    # Save the imported profile
+    try {
+        Save-Profile -Profile $importedProfile
+        Write-AppLog "Imported profile '$($importedProfile.Name)' from '$($openDialog.FileName)'" -Level 'INFO'
+        [System.Windows.Forms.MessageBox]::Show(
+            "Profile '$($importedProfile.Name)' imported successfully.",
+            "Import Successful",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+        return $importedProfile
+    }
+    catch {
+        Write-AppLog "Failed to save imported profile: $_" -Level 'ERROR'
+        [System.Windows.Forms.MessageBox]::Show(
+            "Failed to save imported profile:`n$_",
+            "Import Error",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+        return $null
+    }
+}
+function Apply-FullProfile {
+    <#
+    .SYNOPSIS
+        Applies all settings from a profile to the local machine.
+    .DESCRIPTION
+        Shows a confirmation dialog listing all changes, then applies:
+        1. Hostname change via Set-ServerHostname (if different from current)
+        2. Network adapter configuration via Set-AdapterStaticIP / Set-AdapterDHCP
+        3. SMB share creation via New-D3ProjectShare (if enabled)
+        Each step is wrapped in error handling so one failure does not block
+        the remaining steps. A results summary dialog is shown after all
+        steps complete. If the hostname was changed, the user is prompted
+        to restart.
+    .PARAMETER Profile
+        The profile object to apply.
+    .OUTPUTS
+        [bool] - $true if all steps succeeded (or were skipped), $false if any failed.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$Profile
+    )
+    # Validate profile schema before proceeding
+    $schemaResult = Test-ProfileSchema -Profile $Profile
+    if (-not $schemaResult.IsValid) {
+        $errorMsg = "Profile '$($Profile.Name)' failed schema validation:`n`n" + ($schemaResult.Errors -join "`n")
+        Write-AppLog "Apply-FullProfile blocked by schema validation: $($schemaResult.Errors -join '' in expression or
+statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\ProfileManager.ps1:659 char:115
++ ... schema validation: $($schemaResult.Errors -join '; ')" -Level 'ERROR'
++                                                                    ~~~~~~
+Unexpected token 'ERROR'
+        [System.Windows.Forms.MessageBox]::Show(
+            $errorMsg,
+            "Profile Validation Failed",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+        return $false
+    }
+    # Build a summary of all changes that would be applied
+    $changesList = [System.Text.StringBuilder]::new()
+    [void]$changesList.AppendLine("The following settings will be applied from profile '$($Profile.Name)':")
+    [void]$changesList.AppendLine("")
+    # Server name
+    $summaryServerName = if ($Profile.PSObject.Properties['ServerName'] -and $Profile.ServerName) {
+$Profile.ServerName } else { "(Not set)" }
+    [void]$changesList.AppendLine("SERVER NAME:")
+    [void]$changesList.AppendLine("  Hostname: $summaryServerName")
+    [void]$changesList.AppendLine("")
+    # Network adapters
+    [void]$changesList.AppendLine("NETWORK ADAPTERS:")
+    $summaryAdapters = @()
+    if ($Profile.PSObject.Properties['NetworkAdapters'] -and $null -ne $Profile.NetworkAdapters) {
+        $summaryAdapters = @($Profile.NetworkAdapters)
+    }
+    if ($summaryAdapters.Count -eq 0) {
+        [void]$changesList.AppendLine("  (No adapters defined)")
+    }
+    foreach ($adapter in $summaryAdapters) {
+        if ($null -eq $adapter) { continue }
+        $sAdIndex = if ($adapter.PSObject.Properties['Index']) { $adapter.Index } else { "?" }
+        $sAdDisplayName = if ($adapter.PSObject.Properties['DisplayName']) { $adapter.DisplayName } else { "Unknown" }
+        $sAdRole = if ($adapter.PSObject.Properties['Role']) { $adapter.Role } else { "Unknown" }
+        $sAdEnabled = if ($adapter.PSObject.Properties['Enabled']) { $adapter.Enabled } else { $true }
+        $sAdDHCP = if ($adapter.PSObject.Properties['DHCP']) { $adapter.DHCP } else { $false }
+        $sAdIP = if ($adapter.PSObject.Properties['IPAddress']) { $adapter.IPAddress } else { "" }
+        $sAdSubnet = if ($adapter.PSObject.Properties['SubnetMask']) { $adapter.SubnetMask } else { "" }
+        $sAdGateway = if ($adapter.PSObject.Properties['Gateway']) { $adapter.Gateway } else { "" }
+        $sAdDNS1 = if ($adapter.PSObject.Properties['DNS1']) { $adapter.DNS1 } else { "" }
+        $sAdDNS2 = if ($adapter.PSObject.Properties['DNS2']) { $adapter.DNS2 } else { "" }
+        if ($sAdEnabled) {
+            $ipInfo = if ($sAdDHCP) { "DHCP" } else { "$sAdIP / $sAdSubnet" }
+            [void]$changesList.AppendLine("  [$sAdIndex] $sAdDisplayName ($sAdRole): $ipInfo")
+            if ($sAdGateway) {
+                [void]$changesList.AppendLine("       Gateway: $sAdGateway")
+            }
+            if ($sAdDNS1) {
+                $dnsStr = $sAdDNS1
+                if ($sAdDNS2) { $dnsStr += ", $sAdDNS2" }
+                [void]$changesList.AppendLine("       DNS: $dnsStr")
+            }
+        }
+        else {
+            [void]$changesList.AppendLine("  [$sAdIndex] $sAdDisplayName ($sAdRole): DISABLED")
+        }
+    }
+    [void]$changesList.AppendLine("")
+    # SMB settings
+    [void]$changesList.AppendLine("SMB SHARING:")
+    $summarySMBEnabled = $Profile.PSObject.Properties['SMBSettings'] -and
+                         $null -ne $Profile.SMBSettings -and
+                         $Profile.SMBSettings.PSObject.Properties['ShareD3Projects'] -and
+                         $Profile.SMBSettings.ShareD3Projects
+    if ($summarySMBEnabled) {
+        $sSmbShareName = if ($Profile.SMBSettings.PSObject.Properties['ShareName']) { $Profile.SMBSettings.ShareName }
+else { "(Unknown)" }
+        $sSmbPath = if ($Profile.SMBSettings.PSObject.Properties['ProjectsPath']) { $Profile.SMBSettings.ProjectsPath
+} else { "(Unknown)" }
+        $sSmbPerms = if ($Profile.SMBSettings.PSObject.Properties['SharePermissions']) {
+$Profile.SMBSettings.SharePermissions } else { "(Unknown)" }
+        [void]$changesList.AppendLine("  Share Name: $sSmbShareName")
+        [void]$changesList.AppendLine("  Path: $sSmbPath")
+        [void]$changesList.AppendLine("  Permissions: $sSmbPerms")
+    }
+    else {
+        [void]$changesList.AppendLine("  d3 Projects sharing: Disabled")
+    }
+    [void]$changesList.AppendLine("")
+    [void]$changesList.AppendLine("WARNING: This will modify system network and sharing settings.")
+    [void]$changesList.AppendLine("Ensure you have reviewed all values before proceeding.")
+    # Show confirmation dialog
+    $confirmResult = [System.Windows.Forms.MessageBox]::Show(
+        $changesList.ToString(),
+        "Confirm Profile Application - $($Profile.Name)",
+        [System.Windows.Forms.MessageBoxButtons]::OKCancel,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    )
+    if ($confirmResult -ne [System.Windows.Forms.DialogResult]::OK) {
+        Write-AppLog "User cancelled profile application for '$($Profile.Name)'" -Level 'INFO'
+        return $false
+    }
+    # ---- Execute profile application ----
+    Write-AppLog "=== PROFILE APPLICATION START: '$($Profile.Name)' ===" -Level 'INFO'
+    $results = [System.Text.StringBuilder]::new()
+    $successCount = 0
+    $failCount = 0
+    $skipCount = 0
+    $restartNeeded = $false
+    # ================================================================
+    # Step 1: Change hostname (if different from current)
+    # ================================================================
+    try {
+        if ($Profile.PSObject.Properties['ServerName'] -and $Profile.ServerName -and $Profile.ServerName -ne
+$env:COMPUTERNAME) {
+            Write-AppLog "Applying hostname change: '$env:COMPUTERNAME' -> '$($Profile.ServerName)'" -Level 'INFO'
+            $hostnameResult = Set-ServerHostname -NewName $Profile.ServerName
+            if ($hostnameResult.Success) {
+                $successCount++
+                $restartNeeded = $hostnameResult.RestartRequired
+                [void]$results.AppendLine("[OK] Hostname: $($hostnameResult.Message)")
+                Write-AppLog "Hostname change succeeded: $($hostnameResult.Message)" -Level 'INFO'
+            }
+            else {
+                $failCount++
+                [void]$results.AppendLine("[FAIL] Hostname: $($hostnameResult.Message)")
+                Write-AppLog "Hostname change failed: $($hostnameResult.Message)" -Level 'ERROR'
+            }
+        }
+        else {
+            $skipCount++
+            [void]$results.AppendLine("[SKIP] Hostname: Already set to '$($Profile.ServerName)'")
+            Write-AppLog "Hostname unchanged (already '$($Profile.ServerName)')" -Level 'INFO'
+        }
+    }
+    catch {
+        $failCount++
+        [void]$results.AppendLine("[FAIL] Hostname: Unexpected error - $_")
+        Write-AppLog "Hostname change error: $_" -Level 'ERROR'
+    }
+    # ================================================================
+    # Step 2: Configure network adapters
+    # ================================================================
+    $adaptersToApply = @()
+    if ($Profile.PSObject.Properties['NetworkAdapters'] -and $null -ne $Profile.NetworkAdapters) {
+        $adaptersToApply = @($Profile.NetworkAdapters)
+    }
+    if ($adaptersToApply.Count -eq 0) {
+        $skipCount++
+        [void]$results.AppendLine("[SKIP] Network Adapters: No adapters defined in profile")
+        Write-AppLog "No NetworkAdapters defined in profile - skipping network config" -Level 'WARN'
+    }
+    foreach ($adapter in $adaptersToApply) {
+        if ($null -eq $adapter) {
+            $skipCount++
+            [void]$results.AppendLine("[SKIP] Network Adapter: Null adapter entry in profile")
+            continue
+        }
+        $adIndex = if ($adapter.PSObject.Properties['Index']) { $adapter.Index } else { "?" }
+        $adDisplayName = if ($adapter.PSObject.Properties['DisplayName']) { $adapter.DisplayName } else { "Unknown" }
+        $adRole = if ($adapter.PSObject.Properties['Role']) { $adapter.Role } else { "Unknown" }
+        $adapterLabel = "[$adIndex] $adDisplayName ($adRole)"
+        try {
+            $adEnabled = if ($adapter.PSObject.Properties['Enabled']) { $adapter.Enabled } else { $true }
+            if (-not $adEnabled) {
+                $skipCount++
+                [void]$results.AppendLine("[SKIP] $adapterLabel : Disabled in profile")
+                Write-AppLog "Skipping adapter $adapterLabel - disabled in profile" -Level 'INFO'
+                continue
+            }
+            $adapterName = if ($adapter.PSObject.Properties['AdapterName']) { $adapter.AdapterName } else { "" }
+            if ([string]::IsNullOrWhiteSpace($adapterName)) {
+                $skipCount++
+                [void]$results.AppendLine("[SKIP] $adapterLabel : No physical adapter assigned")
+                Write-AppLog "Skipping adapter $adapterLabel - no AdapterName set" -Level 'WARN'
+                continue
+            }
+            $adDHCP = if ($adapter.PSObject.Properties['DHCP']) { $adapter.DHCP } else { $false }
+            if ($adDHCP) {
+                Write-AppLog "Setting adapter '$adapterName' ($adapterLabel) to DHCP" -Level 'INFO'
+                $adapterResult = Set-AdapterDHCP -AdapterName $adapterName
+            }
+            else {
+                $adIP = if ($adapter.PSObject.Properties['IPAddress']) { $adapter.IPAddress } else { "" }
+                $adSubnet = if ($adapter.PSObject.Properties['SubnetMask']) { $adapter.SubnetMask } else { "" }
+                $adGateway = if ($adapter.PSObject.Properties['Gateway']) { $adapter.Gateway } else { "" }
+                $adDNS1 = if ($adapter.PSObject.Properties['DNS1']) { $adapter.DNS1 } else { "" }
+                $adDNS2 = if ($adapter.PSObject.Properties['DNS2']) { $adapter.DNS2 } else { "" }
+                Write-AppLog "Setting adapter '$adapterName' ($adapterLabel) to static IP=$adIP" -Level 'INFO'
+                $adapterResult = Set-AdapterStaticIP -AdapterName $adapterName `
+                    -IPAddress $adIP `
+                    -SubnetMask $adSubnet `
+                    -Gateway $adGateway `
+                    -DNS1 $adDNS1 `
+                    -DNS2 $adDNS2
+            }
+            if ($adapterResult.Success) {
+                $successCount++
+                [void]$results.AppendLine("[OK] $adapterLabel : $($adapterResult.Message)")
+                Write-AppLog "Adapter $adapterLabel succeeded: $($adapterResult.Message)" -Level 'INFO'
+            }
+            else {
+                $failCount++
+                [void]$results.AppendLine("[FAIL] $adapterLabel : $($adapterResult.Message)")
+                Write-AppLog "Adapter $adapterLabel failed: $($adapterResult.Message)" -Level 'ERROR'
+            }
+        }
+        catch {
+            $failCount++
+            [void]$results.AppendLine("[FAIL] $adapterLabel : Unexpected error - $_")
+            Write-AppLog "Adapter $adapterLabel error: $_" -Level 'ERROR'
+        }
+    }
+    # ================================================================
+    # Step 3: Configure SMB sharing
+    # ================================================================
+    try {
+        $applySMB = $Profile.PSObject.Properties['SMBSettings'] -and
+                    $null -ne $Profile.SMBSettings -and
+                    $Profile.SMBSettings.PSObject.Properties['ShareD3Projects'] -and
+                    $Profile.SMBSettings.ShareD3Projects
+        if ($applySMB) {
+            $smbShareName = if ($Profile.SMBSettings.PSObject.Properties['ShareName']) {
+$Profile.SMBSettings.ShareName } else { "d3 Projects" }
+            $smbLocalPath = if ($Profile.SMBSettings.PSObject.Properties['ProjectsPath']) {
+$Profile.SMBSettings.ProjectsPath } else { "D:\d3 Projects" }
+            $smbPerms = if ($Profile.SMBSettings.PSObject.Properties['SharePermissions']) {
+$Profile.SMBSettings.SharePermissions } else { "Administrators:Full" }
+            Write-AppLog "Creating SMB share '$smbShareName' at '$smbLocalPath'" -Level 'INFO'
+            $smbResult = New-D3ProjectShare `
+                -LocalPath $smbLocalPath `
+                -ShareName $smbShareName `
+                -Permissions $smbPerms
+            if ($smbResult.Success) {
+                $successCount++
+                [void]$results.AppendLine("[OK] SMB Share: $($smbResult.Message)")
+                Write-AppLog "SMB share creation succeeded: $($smbResult.Message)" -Level 'INFO'
+            }
+            else {
+                $failCount++
+                [void]$results.AppendLine("[FAIL] SMB Share: $($smbResult.Message)")
+                Write-AppLog "SMB share creation failed: $($smbResult.Message)" -Level 'ERROR'
+            }
+        }
+        else {
+            $skipCount++
+            [void]$results.AppendLine("[SKIP] SMB Share: Disabled in profile")
+            Write-AppLog "SMB sharing disabled in profile - skipping" -Level 'INFO'
+        }
+    }
+    catch {
+        $failCount++
+        [void]$results.AppendLine("[FAIL] SMB Share: Unexpected error - $_")
+        Write-AppLog "SMB share error: $_" -Level 'ERROR'
+    }
+    # ================================================================
+    # Step 4: Update AppState (only on full success)
+    # ================================================================
+    if ($failCount -eq 0) {
+        $script:AppState.LastAppliedProfile = $Profile.Name
+        Write-AppLog "Updated LastAppliedProfile to '$($Profile.Name)'" -Level 'INFO'
+    } else {
+        Write-AppLog "Profile '$($Profile.Name)' applied with $failCount failure(s). LastAppliedProfile NOT updated."
+-Level 'WARN'
+    }
+    Write-AppLog "=== PROFILE APPLICATION END: '$($Profile.Name)' ===" -Level 'INFO'
+    # ================================================================
+    # Show results summary dialog
+    # ================================================================
+    $summaryText = [System.Text.StringBuilder]::new()
+    [void]$summaryText.AppendLine("Profile '$($Profile.Name)' application results:")
+    [void]$summaryText.AppendLine("")
+    [void]$summaryText.AppendLine("  Succeeded: $successCount")
+    [void]$summaryText.AppendLine("  Failed:    $failCount")
+    [void]$summaryText.AppendLine("  Skipped:   $skipCount")
+    [void]$summaryText.AppendLine("")
+    [void]$summaryText.AppendLine("Details:")
+    [void]$summaryText.AppendLine($results.ToString())
+    $summaryIcon = if ($failCount -gt 0) {
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    }
+    else {
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    }
+    [System.Windows.Forms.MessageBox]::Show(
+        $summaryText.ToString(),
+        "Profile Application Results - $($Profile.Name)",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        $summaryIcon
+    ) | Out-Null
+    # ================================================================
+    # If hostname was changed, prompt for restart
+    # ================================================================
+    if ($restartNeeded) {
+        $restartChoice = [System.Windows.Forms.MessageBox]::Show(
+            "Hostname was changed. A restart is required for the new hostname to take effect.`n`nRestart now?",
+            "Restart Required",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+        if ($restartChoice -eq [System.Windows.Forms.DialogResult]::Yes) {
+            Write-AppLog "User chose to restart after hostname change" -Level 'INFO'
+            try {
+                Restart-Computer -Force
+            }
+            catch {
+                Write-AppLog "Failed to initiate restart: $_" -Level 'ERROR'
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Failed to initiate restart: $_`n`nPlease restart manually.",
+                    "Restart Failed",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Error
+                ) | Out-Null
+            }
+        }
+        else {
+            Write-AppLog "User deferred restart after hostname change" -Level 'INFO'
+        }
+    }
+    return ($failCount -eq 0)
+}
+function Get-CurrentSystemProfile {
+    <#
+    .SYNOPSIS
+        Captures the current system settings into a profile object.
+    .DESCRIPTION
+        Reads the current hostname, network adapter configurations, and SMB
+        shares from the local machine and assembles them into a profile object
+        matching the standard schema.
+    .OUTPUTS
+        [PSCustomObject] - A profile object populated with current system values.
+    #>
+    $now = (Get-Date).ToString('o')
+    $currentHostname = $env:COMPUTERNAME
+    # Build network adapters array from the system
+    $adapters = @()
+    # Define the expected adapter roles and their indices
+    $roleDefinitions = @(
+        @{ Index = 0; Role = "d3Net";    DisplayName = "d3 Network" },
+        @{ Index = 1; Role = "Media";    DisplayName = "Media Network" },
+        @{ Index = 2; Role = "sACN";     DisplayName = "Lighting (sACN/Art-Net)" },
+        @{ Index = 3; Role = "NDI";      DisplayName = "NDI Video" },
+        @{ Index = 4; Role = "Control";  DisplayName = "Control (OSC/Automation)" },
+        @{ Index = 5; Role = "100G"; DisplayName = "Internet / Management" }
+    )
+    # Try to read physical network adapters from the system
+    $systemAdapters = @()
+    try {
+        # Get-NetAdapter is available on Windows; gracefully handle if unavailable
+        $systemAdapters = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+            Where-Object { $_.Status -ne 'Not' in expression or statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\ProfileManager.ps1:1140 char:62
++         Write-AppLog "Unable to read SMB shares: $_" -Level 'WARN'
++                                                              ~~~~~
+Unexpected token 'WARN'
+    }
+    # Assemble the full profile object
+    $capturedProfile = [PSCustomObject]@{
+        Name            = "Captured - $currentHostname - $(Get-Date -Format 'yyyy-MM-dd')"
+        Description     = "System capture from $currentHostname on $(Get-Date -Format 'yyyy-MM-dd' in expression or
+statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\ProfileManager.ps1:1819 char:16
++         [int] - Number of profiles generated, or 0 if cancelled/faile ...
++                ~
+Missing expression after unary operator '-'.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\ProfileManager.ps1:1819 char:17
++         [int] - Number of profiles generated, or 0 if cancelled/faile ...
++                 ~~~~~~
+Unexpected token 'Number' in expression or statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\ProfileManager.ps1:2839 char:32
++         $displayText = "$pName|$pDesc|$modifiedStr"
++                                ~~~~~~
+Expressions are only allowed as the first element of a pipeline.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\ProfileManager.ps1:2839 char:39
++         $displayText = "$pName|$pDesc|$modifiedStr"
++                                       ~~~~~~~~~~~~
+Expressions are only allowed as the first element of a pipeline.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\ProfileManager.ps1:2839 char:51
++         $displayText = "$pName|$pDesc|$modifiedStr"
++                                                   ~
+Unexpected token '"
+        $script:ProfileListBox.Items.Add($displayText) | Out-Null
+    }
+    # Update the count label
+    $count = $profiles.Count
+    $script:ProfileCountLabel.Text = "' in expression or statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\ProfileManager.ps1:2845 char:39
++     $script:ProfileCountLabel.Text = "$count profile$(if ($count -ne  ...
++                                       ~~~~~~
+Unexpected token '$count' in expression or statement.
+Not all parse errors were reported.  Correct the reported errors and try again.
+    + CategoryInfo          : ParserError: (:) [], ParseException
+    + FullyQualifiedErrorId : UnexpectedToken
+
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Discovery.ps1:983 char:121
++ ... Host } else { $instanceName -replace '\._d3api\._tcp\.local\.$', '' }
++                                                                    ~
+Unexpected token ',' in expression or statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Discovery.ps1:983 char:121
++ ... Host } else { $instanceName -replace '\._d3api\._tcp\.local\.$', '' }
++                                                                    ~
+Missing argument in parameter list.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Discovery.ps1:2402 char:59
++ ...             $lblScanStatus.Text = "Scan cancelled â€” showing $($e.Re ...
++                                                           ~~~~~~~
+Unexpected token 'showing' in expression or statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Discovery.ps1:2400 char:55
++             if ($e.Result -and $e.Result.Count -gt 0) {
++                                                       ~
+Missing closing '}' in statement block or type definition.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Discovery.ps1:2393 char:27
++         if ($e.Cancelled) {
++                           ~
+Missing closing '}' in statement block or type definition.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Discovery.ps1:2384 char:40
++     $scanWorker.Add_RunWorkerCompleted({
++                                        ~
+Missing closing '}' in statement block or type definition.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Discovery.ps1:2478 char:6
++     })
++      ~
+Unexpected token ')' in expression or statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Discovery.ps1:2580 char:79
++ ... Text     = "Querying DNS-SD for _d3api._tcp.local. â€” please wait... ...
++                                                            ~~~~~~
+Unexpected token 'please' in expression or statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Discovery.ps1:2621 char:87
++ ... us.Text = "DNS-SD found $newCount server(s) ($mergedCount new). Grid  ...
++                                                               ~~~
+Unexpected token 'new' in expression or statement.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Discovery.ps1:2621 char:86
++ ... Status.Text = "DNS-SD found $newCount server(s) ($mergedCount new). G ...
++                                                                  ~
+Missing closing ')' in expression.
+Not all parse errors were reported.  Correct the reported errors and try again.
+    + CategoryInfo          : ParserError: (:) [], ParseException
+    + FullyQualifiedErrorId : UnexpectedToken
+
+Cannot convert argument "dataGridViewColumns", with value: "System.Object[]", for "AddRange" to type
+"System.Windows.Forms.DataGridViewColumn": "Cannot convert the "System.Object[]" value of type "System.Object[]" to
+type "System.Windows.Forms.DataGridViewColumn"."
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:493 char:5
++     $dgvAdapters.Columns.AddRange(@($colDot, $colRole, $colAdapterIP, ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodException
+    + FullyQualifiedErrorId : MethodArgumentConversionInvalidCastArgument
+
+Exception calling "Add" with "4" argument(s): "No row can be added to a DataGridView control that does not have
+columns. Columns must be added first."
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:499 char:9
++         $rowIndex = $dgvAdapters.Rows.Add($dotChar, $adapter.Role, $a ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : InvalidOperationException
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:511 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.ForeCol ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:512 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.Font =  ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:518 char:13
++             $dgvAdapters.Rows[$rowIndex].Cells["Status"].Style.ForeCo ...
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Exception calling "Add" with "4" argument(s): "No row can be added to a DataGridView control that does not have
+columns. Columns must be added first."
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:499 char:9
++         $rowIndex = $dgvAdapters.Rows.Add($dotChar, $adapter.Role, $a ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : InvalidOperationException
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:511 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.ForeCol ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:512 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.Font =  ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:518 char:13
++             $dgvAdapters.Rows[$rowIndex].Cells["Status"].Style.ForeCo ...
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Exception calling "Add" with "4" argument(s): "No row can be added to a DataGridView control that does not have
+columns. Columns must be added first."
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:499 char:9
++         $rowIndex = $dgvAdapters.Rows.Add($dotChar, $adapter.Role, $a ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : InvalidOperationException
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:511 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.ForeCol ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:512 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.Font =  ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:520 char:13
++             $dgvAdapters.Rows[$rowIndex].Cells["Status"].Style.ForeCo ...
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Exception calling "Add" with "4" argument(s): "No row can be added to a DataGridView control that does not have
+columns. Columns must be added first."
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:499 char:9
++         $rowIndex = $dgvAdapters.Rows.Add($dotChar, $adapter.Role, $a ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : InvalidOperationException
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:511 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.ForeCol ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:512 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.Font =  ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:520 char:13
++             $dgvAdapters.Rows[$rowIndex].Cells["Status"].Style.ForeCo ...
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Exception calling "Add" with "4" argument(s): "No row can be added to a DataGridView control that does not have
+columns. Columns must be added first."
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:499 char:9
++         $rowIndex = $dgvAdapters.Rows.Add($dotChar, $adapter.Role, $a ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : InvalidOperationException
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:511 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.ForeCol ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:512 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.Font =  ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:520 char:13
++             $dgvAdapters.Rows[$rowIndex].Cells["Status"].Style.ForeCo ...
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Exception calling "Add" with "4" argument(s): "No row can be added to a DataGridView control that does not have
+columns. Columns must be added first."
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:499 char:9
++         $rowIndex = $dgvAdapters.Rows.Add($dotChar, $adapter.Role, $a ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : InvalidOperationException
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:511 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.ForeCol ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:512 char:9
++         $dgvAdapters.Rows[$rowIndex].Cells["StatusDot"].Style.Font =  ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
+
+Index operation failed; the array index evaluated to null.
+At C:\Users\Joseph.Bradley\Documents\GitHub\DISGUISEBUDDY\dist\modules\Dashboard.ps1:518 char:13
++             $dgvAdapters.Rows[$rowIndex].Cells["Status"].Style.ForeCo ...
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NullArrayIndex
