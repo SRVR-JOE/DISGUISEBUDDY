@@ -13,7 +13,7 @@
  */
 
 import net from 'net'
-import { runPowerShell, delay, ensureWinRMReady } from './utils.js'
+import { runPowerShell, delay, ensureWinRMReady, enableWinRMViaDCOM } from './utils.js'
 
 // -- Public types -------------------------------------------------------------
 
@@ -146,17 +146,15 @@ async function runLiveDeploy(
 
   await ensureWinRMReady(targetIP)
 
-  // Step 2: Test WinRM connectivity
+  // Step 2: Test WinRM connectivity (with DCOM bootstrap fallback)
   step('connect', `Testing WinRM connectivity to ${targetIP}...`)
   if (isCancelled()) return
 
-  let wsmanResult: Awaited<ReturnType<typeof runPowerShell>>
-  try {
-    const authArg = credential ? ' -Authentication Negotiate' : ''
-    wsmanResult = await runPowerShell(
-      `Test-WSMan -ComputerName ${targetIP}${credArg}${authArg} -ErrorAction Stop`
-    )
-  } catch (spawnErr: unknown) {
+  const authArg = credential ? ' -Authentication Negotiate' : ''
+
+  let wsmanResult = await runPowerShell(
+    `Test-WSMan -ComputerName ${targetIP}${credArg}${authArg} -ErrorAction Stop`
+  ).catch((spawnErr: unknown) => {
     const msg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr)
     if (msg.includes('ENOENT') || msg.includes('spawn')) {
       throw new Error(
@@ -164,12 +162,52 @@ async function runLiveDeploy(
       )
     }
     throw spawnErr
-  }
+  })
+
+  // If WinRM is not reachable, attempt DCOM bootstrap before giving up
   if (wsmanResult.exitCode !== 0) {
-    throw new Error(
-      `Cannot reach ${targetIP} via WinRM: ${wsmanResult.stderr || wsmanResult.stdout}`
-    )
+    step('connect', 'WinRM not available — enabling via DCOM...')
+    console.log('[deployer] WinRM not available, attempting DCOM bootstrap...')
+
+    const dcomResult = await enableWinRMViaDCOM(targetIP, credential)
+    if (!dcomResult.success) {
+      throw new Error(`Cannot enable WinRM on ${targetIP}: ${dcomResult.message}`)
+    }
+
+    // Give the WinRM service time to initialise before the first retry
+    step('connect', 'Waiting for WinRM service to start...')
+    await delay(8000)
+
+    let winrmReady = false
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      if (isCancelled()) return
+
+      try {
+        wsmanResult = await runPowerShell(
+          `Test-WSMan -ComputerName ${targetIP}${credArg}${authArg} -ErrorAction Stop`
+        )
+        if (wsmanResult.exitCode === 0) {
+          winrmReady = true
+          console.log(`[deployer] WinRM became available after attempt ${attempt}`)
+          break
+        }
+      } catch {
+        // Swallow — we will retry
+      }
+
+      console.log(`[deployer] WinRM retry ${attempt}/6 — not yet ready`)
+      if (attempt < 6) await delay(5000)
+    }
+
+    if (!winrmReady) {
+      throw new Error(
+        `WinRM did not become available on ${targetIP} after DCOM bootstrap (waited ~38s)`
+      )
+    }
   }
+
+  // WinRM is confirmed working at this point
+  step('connect', `WinRM connected to ${targetIP}`)
 
   // Step 3: Set hostname
   step('hostname', `Setting hostname to "${profile.ServerName}"...`)

@@ -156,6 +156,84 @@ export async function ensureWinRMReady(targetIP: string): Promise<WinRMReadyResu
   return { success: true, message: messages.join('; ') }
 }
 
+// -- DCOM WinRM bootstrap -----------------------------------------------------
+
+export interface DCOMBootstrapResult {
+  success: boolean
+  message: string
+}
+
+/**
+ * Uses DCOM/WMI (port 135, available by default on Windows) to remotely
+ * enable WinRM on a target machine that does not yet have it configured.
+ *
+ * Strategy:
+ *   1. Creates a CIM session to the remote machine using the DCOM protocol
+ *   2. Uses Win32_Process.Create to launch a PowerShell process on the remote
+ *      machine that calls Enable-PSRemoting, opens the firewall, and sets
+ *      TrustedHosts
+ *   3. Returns success if stdout contains "DCOM_BOOTSTRAP_OK"
+ *
+ * The entire bootstrap script runs locally — it creates a CIM session outward
+ * to the target IP.  No .ps1 file is written to disk.
+ */
+export async function enableWinRMViaDCOM(
+  targetIP: string,
+  credential?: { username: string; password: string },
+): Promise<DCOMBootstrapResult> {
+  const username = credential?.username ?? 'd3'
+  const password = credential?.password ?? 'disguise'
+
+  // Escape values for embedding inside a double-quoted PowerShell string.
+  // Backtick escapes the special characters PowerShell interprets inside "…".
+  const escapedIP = targetIP.replace(/[`"$]/g, '`$&')
+  const escapedUser = username.replace(/[`"$]/g, '`$&')
+  const escapedPass = password.replace(/[`"$]/g, '`$&')
+
+  // The remote-side command to be base64-encoded and executed via Win32_Process.
+  // This runs *on the target machine* — no credential expansion needed here.
+  const remoteCmd = [
+    'Enable-PSRemoting -Force -SkipNetworkProfileCheck',
+    'Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force',
+    'New-NetFirewallRule -DisplayName "WinRM HTTP" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue',
+  ].join('; ')
+
+  const psScript = `
+$ErrorActionPreference = "Stop"
+$securePassword = ConvertTo-SecureString "${escapedPass}" -AsPlainText -Force
+$credential = New-Object System.Management.Automation.PSCredential("${escapedIP}\\${escapedUser}", $securePassword)
+$cimOptions = New-CimSessionOption -Protocol Dcom
+$cimSession = New-CimSession -ComputerName "${escapedIP}" -Credential $credential -SessionOption $cimOptions -ErrorAction Stop
+$enableScript = '${remoteCmd.replace(/'/g, "''")}'
+$encodedScript = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($enableScript))
+$result = Invoke-CimMethod -CimSession $cimSession -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine="powershell.exe -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedScript"}
+if ($result.ReturnValue -ne 0) { throw "Win32_Process.Create failed with return code: $($result.ReturnValue)" }
+Remove-CimSession $cimSession
+Write-Output "DCOM_BOOTSTRAP_OK"
+`.trim()
+
+  console.log(`[utils] Attempting DCOM WinRM bootstrap for ${targetIP}...`)
+
+  try {
+    const result = await runPowerShell(psScript)
+
+    if (result.exitCode === 0 && result.stdout.includes('DCOM_BOOTSTRAP_OK')) {
+      const msg = `DCOM bootstrap succeeded for ${targetIP}`
+      console.log(`[utils] ${msg}`)
+      return { success: true, message: msg }
+    }
+
+    const errDetail = result.stderr || result.stdout || `exit code ${result.exitCode}`
+    const msg = `DCOM bootstrap failed for ${targetIP}: ${errDetail}`
+    console.error(`[utils] ${msg}`)
+    return { success: false, message: msg }
+  } catch (err) {
+    const msg = `DCOM bootstrap threw for ${targetIP}: ${err instanceof Error ? err.message : String(err)}`
+    console.error(`[utils] ${msg}`)
+    return { success: false, message: msg }
+  }
+}
+
 // -- Timing helper ------------------------------------------------------------
 
 export function delay(ms: number): Promise<void> {
