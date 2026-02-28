@@ -54,24 +54,6 @@ export interface IdentityInfo {
   Model: string
 }
 
-// ─── Dashboard ───────────────────────────────────────────────────────────────
-
-export interface DashboardData {
-  activeProfile: string
-  adapterCount: string
-  shareCount: string
-  hostname: string
-  adapterSummary: AdapterSummaryRow[]
-}
-
-export interface AdapterSummaryRow {
-  role: string
-  displayName: string
-  ip: string
-  status: string
-  color: string
-}
-
 // ─── Generic result ──────────────────────────────────────────────────────────
 
 export interface Result {
@@ -88,6 +70,16 @@ export interface DiscoveredServer {
   ResponseTimeMs: number
   Ports: number[]
   APIVersion: string
+}
+
+// ─── Network interface for NIC selection ─────────────────────────────────────
+
+export interface NetworkInterface {
+  name: string       // e.g., "Ethernet 2", "Wi-Fi"
+  address: string    // e.g., "192.168.10.100"
+  netmask: string    // e.g., "255.255.255.0"
+  mac: string        // MAC address
+  cidr: string       // e.g., "192.168.10.100/24"
 }
 
 // ─── Software installation ────────────────────────────────────────────────────

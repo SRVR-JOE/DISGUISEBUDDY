@@ -143,9 +143,20 @@ async function runLiveDeploy(
   step('connect', `Testing WinRM connectivity to ${targetIP}...`)
   if (isCancelled()) return
 
-  const wsmanResult = await runPowerShell(
-    `Test-WSMan -ComputerName ${targetIP}${credArg} -ErrorAction Stop`
-  )
+  let wsmanResult: Awaited<ReturnType<typeof runPowerShell>>
+  try {
+    wsmanResult = await runPowerShell(
+      `Test-WSMan -ComputerName ${targetIP}${credArg} -ErrorAction Stop`
+    )
+  } catch (spawnErr: unknown) {
+    const msg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr)
+    if (msg.includes('ENOENT') || msg.includes('spawn')) {
+      throw new Error(
+        'PowerShell is not available. Profile deployment requires Windows with PowerShell and WinRM configured.'
+      )
+    }
+    throw spawnErr
+  }
   if (wsmanResult.exitCode !== 0) {
     throw new Error(
       `Cannot reach ${targetIP} via WinRM: ${wsmanResult.stderr || wsmanResult.stdout}`

@@ -1,304 +1,374 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Users, Network, Server, Send, RefreshCw } from 'lucide-react'
+import { Radio, Send, Wifi, Monitor, RefreshCw, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
-import type { DashboardData, DiscoveredServer, Profile } from '@/lib/types'
-import {
-  GlassCard,
-  SectionHeader,
-  Badge,
-  Button,
-} from '@/components/ui'
-import { ServerTile } from '@/components/deploy/ServerTile'
+import type { DiscoveredServer, Profile, NetworkInterface } from '@/lib/types'
+import { GlassCard, SectionHeader, Badge, Button } from '@/components/ui'
 
-// -- Props --------------------------------------------------------------------
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-interface DashboardPageProps {
-  onViewChange: (view: string) => void
-}
+type DeployStatus = 'idle' | 'deploying' | 'done' | 'error'
 
-// -- Deploy progress per-server -----------------------------------------------
-
-interface ServerDeployState {
-  status: 'pending' | 'deploying' | 'done' | 'error'
+interface RowDeployState {
+  status: DeployStatus
   progress: number
   message: string
 }
 
-// -- Inline select (matches project design language) --------------------------
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function deriveSubnet(address: string): string {
+  // "192.168.10.100" → "192.168.10"
+  const parts = address.split('.')
+  if (parts.length === 4) return parts.slice(0, 3).join('.')
+  return address
+}
+
+// ─── Inline Select ────────────────────────────────────────────────────────────
 
 interface SelectProps {
   value: string
   onChange: (value: string) => void
   options: { label: string; value: string }[]
   disabled?: boolean
+  className?: string
   'aria-label'?: string
 }
 
-function Select({ value, onChange, options, disabled = false, 'aria-label': ariaLabel }: SelectProps) {
+function Select({
+  value,
+  onChange,
+  options,
+  disabled = false,
+  className = '',
+  'aria-label': ariaLabel,
+}: SelectProps) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      aria-label={ariaLabel}
-      className={[
-        'px-3 py-2 rounded-lg text-sm transition-colors duration-150 outline-none',
-        'bg-surface border border-border text-text',
-        'focus:border-primary focus:ring-1 focus:ring-primary/30',
-        'appearance-none cursor-pointer',
-        disabled ? 'opacity-50 cursor-not-allowed' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
-  )
-}
-
-// -- Deploy progress bar ------------------------------------------------------
-
-interface DeployProgressRowProps {
-  ip: string
-  hostname: string
-  state: ServerDeployState
-}
-
-function DeployProgressRow({ ip, hostname, state }: DeployProgressRowProps) {
-  const statusColors: Record<ServerDeployState['status'], string> = {
-    pending: 'bg-textMuted',
-    deploying: 'bg-primary',
-    done: 'bg-success',
-    error: 'bg-error',
-  }
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-mono text-xs text-textSecondary shrink-0">{ip}</span>
-          <span className="text-xs text-textMuted truncate">{hostname || 'Unknown'}</span>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {state.message && (
-            <span className="text-xs text-textMuted">{state.message}</span>
-          )}
-          <Badge
-            variant={
-              state.status === 'done'
-                ? 'success'
-                : state.status === 'error'
-                  ? 'error'
-                  : state.status === 'deploying'
-                    ? 'info'
-                    : 'neutral'
-            }
-          >
-            {state.status}
-          </Badge>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div className="w-full h-1 bg-surface rounded-full overflow-hidden">
-        <motion.div
-          className={`h-full rounded-full ${statusColors[state.status]}`}
-          initial={{ width: 0 }}
-          animate={{ width: `${state.progress}%` }}
-          transition={{ duration: 0.4, ease: 'easeOut' }}
-        />
-      </div>
-    </div>
-  )
-}
-
-// -- Skeleton -----------------------------------------------------------------
-
-function SkeletonBlock({ className = '' }: { className?: string }) {
-  return (
-    <div
-      className={`bg-surface/50 animate-pulse rounded-lg ${className}`}
-      aria-hidden="true"
-    />
-  )
-}
-
-function DashboardSkeleton() {
-  return (
-    <div className="flex flex-col gap-6" aria-label="Loading dashboard..." aria-busy="true">
-      {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-4">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="glass-card p-5 flex flex-col gap-3">
-            <SkeletonBlock className="w-8 h-8" />
-            <SkeletonBlock className="w-16 h-7" />
-            <SkeletonBlock className="w-24 h-3.5" />
-          </div>
+    <div className={`relative inline-flex items-center ${className}`}>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        className={[
+          'w-full appearance-none pl-3 pr-8 py-2 rounded-lg text-sm outline-none transition-colors duration-150',
+          'bg-surface border border-border text-text',
+          'focus:border-primary focus:ring-1 focus:ring-primary/30',
+          disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
         ))}
-      </div>
-      {/* Server grid */}
-      <div className="glass-card p-5 flex flex-col gap-3">
-        <SkeletonBlock className="w-40 h-5 mb-2" />
-        <div className="grid grid-cols-3 gap-3">
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <SkeletonBlock key={i} className="w-full h-36" />
-          ))}
-        </div>
-      </div>
+      </select>
+      <ChevronDown
+        size={14}
+        className="pointer-events-none absolute right-2.5 text-textMuted"
+        aria-hidden="true"
+      />
     </div>
   )
 }
 
-// -- Stat card ----------------------------------------------------------------
+// ─── Row deploy status pill ───────────────────────────────────────────────────
 
-interface StatCardProps {
-  icon: React.ReactNode
-  value: string
-  label: string
-  accent: string
+function DeployStatusPill({ state }: { state: RowDeployState }) {
+  if (state.status === 'idle') return null
+
+  const variant =
+    state.status === 'done'
+      ? 'success'
+      : state.status === 'error'
+        ? 'error'
+        : 'info'
+
+  const label =
+    state.status === 'deploying'
+      ? state.message || 'Deploying...'
+      : state.status === 'done'
+        ? 'Done'
+        : 'Failed'
+
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <div className="flex items-center gap-2">
+        <Badge variant={variant} pulse={state.status === 'deploying'}>
+          {label}
+        </Badge>
+      </div>
+      {state.status === 'deploying' && (
+        <div className="h-1 w-24 bg-surface rounded-full overflow-hidden">
+          <motion.div
+            className="h-full rounded-full bg-primary"
+            animate={{ width: `${state.progress}%` }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Server row ───────────────────────────────────────────────────────────────
+
+interface ServerRowProps {
+  server: DiscoveredServer
+  profiles: Profile[]
+  selectedProfile: string
+  onProfileChange: (profileName: string) => void
+  onDeploy: () => void
+  deployState: RowDeployState
   index: number
 }
 
-function StatCard({ icon, value, label, accent, index }: StatCardProps) {
+function ServerRow({
+  server,
+  profiles,
+  selectedProfile,
+  onProfileChange,
+  onDeploy,
+  deployState,
+  index,
+}: ServerRowProps) {
+  const isDeploying = deployState.status === 'deploying'
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
+    <motion.tr
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: 'easeOut', delay: index * 0.1 }}
+      transition={{ duration: 0.25, ease: 'easeOut', delay: index * 0.06 }}
+      className="border-b border-border/60 last:border-0 hover:bg-surface/40 transition-colors duration-100"
     >
-      <GlassCard accent={accent} className="h-full">
-        <div className="flex flex-col gap-3">
-          <div
-            className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-            style={{ backgroundColor: `${accent}22` }}
-            aria-hidden="true"
+      {/* IP Address */}
+      <td className="px-4 py-3">
+        <span className="font-mono text-sm text-text">{server.IPAddress}</span>
+      </td>
+
+      {/* Hostname */}
+      <td className="px-4 py-3">
+        <span className="text-sm text-textSecondary">
+          {server.Hostname || <span className="text-textMuted italic">unknown</span>}
+        </span>
+      </td>
+
+      {/* Type */}
+      <td className="px-4 py-3">
+        {server.IsDisguise ? (
+          <Badge variant="success">disguise</Badge>
+        ) : (
+          <Badge variant="neutral">other</Badge>
+        )}
+      </td>
+
+      {/* Response time */}
+      <td className="px-4 py-3">
+        <span className="text-sm text-textSecondary font-mono">
+          {server.ResponseTimeMs}
+          <span className="text-textMuted ml-0.5 font-sans">ms</span>
+        </span>
+      </td>
+
+      {/* Profile dropdown */}
+      <td className="px-4 py-3">
+        <Select
+          value={selectedProfile}
+          onChange={onProfileChange}
+          options={
+            profiles.length === 0
+              ? [{ label: 'No profiles', value: '' }]
+              : profiles.map((p) => ({ label: p.Name, value: p.Name }))
+          }
+          disabled={profiles.length === 0 || isDeploying}
+          aria-label={`Profile for ${server.IPAddress}`}
+          className="w-44"
+        />
+      </td>
+
+      {/* Deploy status + button */}
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <AnimatePresence>
+            {deployState.status !== 'idle' && (
+              <motion.div
+                key="status"
+                initial={{ opacity: 0, x: -6 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -6 }}
+                transition={{ duration: 0.2 }}
+              >
+                <DeployStatusPill state={deployState} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <Button
+            variant={deployState.status === 'done' ? 'ghost' : 'primary'}
+            size="sm"
+            onClick={onDeploy}
+            disabled={!selectedProfile || isDeploying || profiles.length === 0}
+            loading={isDeploying}
           >
-            <span style={{ color: accent }}>{icon}</span>
-          </div>
-          <p
-            className="text-2xl font-bold text-text leading-none tracking-tight truncate"
-            title={value}
-          >
-            {value}
-          </p>
-          <p className="text-xs text-textMuted font-medium uppercase tracking-wider">
-            {label}
-          </p>
+            <Send size={12} className="shrink-0" />
+            {deployState.status === 'done' ? 'Re-deploy' : 'Deploy'}
+          </Button>
         </div>
-      </GlassCard>
-    </motion.div>
+      </td>
+    </motion.tr>
   )
 }
 
-// -- Page ---------------------------------------------------------------------
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
-export function DashboardPage({ onViewChange }: DashboardPageProps) {
-  // -- Dashboard stats
-  const [dashData, setDashData] = useState<DashboardData | null>(null)
+export function DashboardPage() {
+  // NICs
+  const [nics, setNics] = useState<NetworkInterface[]>([])
+  const [selectedNic, setSelectedNic] = useState('')
+  const [nicsLoading, setNicsLoading] = useState(true)
 
-  // -- Server fleet
-  const [servers, setServers] = useState<DiscoveredServer[]>([])
-  const [selectedIPs, setSelectedIPs] = useState<Set<string>>(new Set())
-
-  // -- Profiles
+  // Profiles
   const [profiles, setProfiles] = useState<Profile[]>([])
-  const [selectedProfile, setSelectedProfile] = useState('')
-  const [profilesLoading, setProfilesLoading] = useState(true)
 
-  // -- Deploy
-  const [deploying, setDeploying] = useState(false)
-  const [deployStates, setDeployStates] = useState<Record<string, ServerDeployState>>({})
+  // Per-row profile selections: ip → profileName
+  const [rowProfiles, setRowProfiles] = useState<Record<string, string>>({})
 
-  // -- Loading
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  // Scan state
+  const [scanning, setScanning] = useState(false)
+  const [scanProgress, setScanProgress] = useState(0)
+  const [servers, setServers] = useState<DiscoveredServer[]>([])
+  const [hasScanned, setHasScanned] = useState(false)
 
-  // Ref for deploy completion tracking
-  const completedRef = useRef(0)
+  // Per-row deploy states: ip → RowDeployState
+  const [deployStates, setDeployStates] = useState<Record<string, RowDeployState>>({})
 
-  // -- Load all data on mount
+  // Refs to keep EventSource handles so we can close them on unmount
+  const scanEsRef = useRef<EventSource | null>(null)
+  const deployEsRefs = useRef<Record<string, EventSource>>({})
+
+  // Derived
+  const selectedNicObj = nics.find((n) => n.name === selectedNic) ?? null
+  const subnet = selectedNicObj ? deriveSubnet(selectedNicObj.address) : ''
+
+  // ── Load NICs and profiles on mount ────────────────────────────────────────
+
   useEffect(() => {
     Promise.all([
-      api.getDashboard(),
-      api.getDiscovery(),
+      api.getNics(),
       api.getProfiles(),
     ])
-      .then(([dash, disc, profs]) => {
-        setDashData(dash)
-        setServers(disc)
-        setProfiles(profs)
-        if (profs.length > 0) setSelectedProfile(profs[0].Name)
+      .then(([nicList, profileList]) => {
+        setNics(nicList)
+        if (nicList.length > 0) setSelectedNic(nicList[0].name)
+        setProfiles(profileList)
       })
-      .catch(() => toast.error('Failed to load dashboard data'))
-      .finally(() => {
-        setLoading(false)
-        setProfilesLoading(false)
-      })
+      .catch(() => toast.error('Failed to load network interfaces'))
+      .finally(() => setNicsLoading(false))
+
+    return () => {
+      scanEsRef.current?.close()
+      Object.values(deployEsRefs.current).forEach((es) => es.close())
+    }
   }, [])
 
-  // -- Refresh fleet
-  const refreshFleet = useCallback(() => {
-    setRefreshing(true)
-    Promise.all([api.getDashboard(), api.getDiscovery()])
-      .then(([dash, disc]) => {
-        setDashData(dash)
-        setServers(disc)
-        toast.success(`Fleet refreshed: ${disc.length} servers`)
-      })
-      .catch(() => toast.error('Failed to refresh'))
-      .finally(() => setRefreshing(false))
-  }, [])
+  // ── Sync rowProfiles when new servers are discovered ───────────────────────
 
-  // -- Server selection
-  const toggleServer = useCallback((ip: string) => {
-    setSelectedIPs((prev) => {
-      const next = new Set(prev)
-      if (next.has(ip)) next.delete(ip)
-      else next.add(ip)
-      return next
+  const defaultProfile = profiles[0]?.Name ?? ''
+
+  const addServerToState = useCallback(
+    (server: DiscoveredServer) => {
+      setServers((prev) => {
+        if (prev.some((s) => s.IPAddress === server.IPAddress)) return prev
+        return [...prev, server]
+      })
+      setRowProfiles((prev) => ({
+        ...prev,
+        [server.IPAddress]: prev[server.IPAddress] ?? defaultProfile,
+      }))
+      setDeployStates((prev) => ({
+        ...prev,
+        [server.IPAddress]: prev[server.IPAddress] ?? { status: 'idle', progress: 0, message: '' },
+      }))
+    },
+    [defaultProfile],
+  )
+
+  // ── Scan ───────────────────────────────────────────────────────────────────
+
+  const startScan = useCallback(() => {
+    if (!subnet || scanning) return
+
+    // Close any existing scan stream
+    scanEsRef.current?.close()
+
+    setScanning(true)
+    setScanProgress(0)
+    setServers([])
+    setHasScanned(false)
+    setRowProfiles({})
+    setDeployStates({})
+
+    const es = api.scanNetwork(subnet, 1, 254)
+    scanEsRef.current = es
+
+    es.addEventListener('progress', (e: MessageEvent) => {
+      const data = JSON.parse(e.data) as { percent?: number }
+      if (typeof data.percent === 'number') setScanProgress(data.percent)
     })
-  }, [])
 
-  const selectAll = useCallback(() => {
-    if (selectedIPs.size === servers.length) {
-      setSelectedIPs(new Set())
-    } else {
-      setSelectedIPs(new Set(servers.map((s) => s.IPAddress)))
+    es.addEventListener('discovered', (e: MessageEvent) => {
+      const server = JSON.parse(e.data) as DiscoveredServer
+      addServerToState(server)
+    })
+
+    es.addEventListener('complete', () => {
+      es.close()
+      scanEsRef.current = null
+      setScanning(false)
+      setHasScanned(true)
+      setScanProgress(100)
+      toast.success(`Scan complete`)
+    })
+
+    es.onerror = () => {
+      es.close()
+      scanEsRef.current = null
+      setScanning(false)
+      setHasScanned(true)
+      toast.error('Scan failed')
     }
-  }, [selectedIPs.size, servers])
+  }, [subnet, scanning, addServerToState])
 
-  // -- Deploy
-  const startDeploy = useCallback(() => {
-    if (selectedIPs.size === 0 || !selectedProfile) return
+  // ── Per-row deploy ─────────────────────────────────────────────────────────
 
-    const targets = servers.filter((s) => selectedIPs.has(s.IPAddress))
-    const initialStates: Record<string, ServerDeployState> = {}
-    for (const s of targets) {
-      initialStates[s.IPAddress] = { status: 'pending', progress: 0, message: '' }
-    }
-    setDeployStates(initialStates)
-    setDeploying(true)
-    completedRef.current = 0
+  const deployToServer = useCallback(
+    (server: DiscoveredServer) => {
+      const profileName = rowProfiles[server.IPAddress] ?? defaultProfile
+      if (!profileName) return
 
-    const total = targets.length
+      // Close any existing stream for this IP
+      deployEsRefs.current[server.IPAddress]?.close()
 
-    for (const server of targets) {
       setDeployStates((prev) => ({
         ...prev,
         [server.IPAddress]: { status: 'deploying', progress: 0, message: 'Starting...' },
       }))
 
-      const es = api.deployProfile(server.IPAddress, selectedProfile)
+      const es = api.deployProfile(server.IPAddress, profileName)
+      deployEsRefs.current[server.IPAddress] = es
 
       es.addEventListener('progress', (e: MessageEvent) => {
-        const data = JSON.parse(e.data) as { stepNumber?: number; total?: number; message?: string }
-        const pct = data.stepNumber && data.total ? Math.round((data.stepNumber / data.total) * 100) : 0
+        const data = JSON.parse(e.data) as {
+          stepNumber?: number
+          total?: number
+          message?: string
+        }
+        const pct =
+          data.stepNumber != null && data.total
+            ? Math.round((data.stepNumber / data.total) * 100)
+            : 0
         setDeployStates((prev) => ({
           ...prev,
           [server.IPAddress]: {
@@ -311,17 +381,34 @@ export function DashboardPage({ onViewChange }: DashboardPageProps) {
 
       es.addEventListener('complete', () => {
         es.close()
+        delete deployEsRefs.current[server.IPAddress]
         setDeployStates((prev) => ({
           ...prev,
           [server.IPAddress]: { status: 'done', progress: 100, message: 'Done' },
         }))
         toast.success(`Deployed to ${server.Hostname || server.IPAddress}`)
-        completedRef.current++
-        if (completedRef.current === total) setDeploying(false)
+      })
+
+      es.addEventListener('error', (e: MessageEvent) => {
+        const data = JSON.parse(e.data) as { message?: string }
+        es.close()
+        delete deployEsRefs.current[server.IPAddress]
+        setDeployStates((prev) => ({
+          ...prev,
+          [server.IPAddress]: {
+            status: 'error',
+            progress: prev[server.IPAddress]?.progress ?? 0,
+            message: data.message ?? 'Failed',
+          },
+        }))
+        toast.error(
+          `Deploy failed for ${server.Hostname || server.IPAddress}${data.message ? `: ${data.message}` : ''}`,
+        )
       })
 
       es.onerror = () => {
         es.close()
+        delete deployEsRefs.current[server.IPAddress]
         setDeployStates((prev) => ({
           ...prev,
           [server.IPAddress]: {
@@ -331,217 +418,239 @@ export function DashboardPage({ onViewChange }: DashboardPageProps) {
           },
         }))
         toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}`)
-        completedRef.current++
-        if (completedRef.current === total) setDeploying(false)
       }
-    }
-  }, [selectedIPs, selectedProfile, servers])
+    },
+    [rowProfiles, defaultProfile],
+  )
 
-  // -- Derived
-  const selectedServers = servers.filter((s) => selectedIPs.has(s.IPAddress))
-  const canDeploy = selectedIPs.size > 0 && !!selectedProfile && !deploying
-  const hasDeployProgress = Object.keys(deployStates).length > 0
+  // ── Mass deploy ─────────────────────────────────────────────────────────────
+
+  const deployAllServers = useCallback(() => {
+    servers.forEach((server) => {
+      const profileName = rowProfiles[server.IPAddress] ?? defaultProfile
+      if (!profileName) return
+      deployToServer(server)
+    })
+  }, [servers, rowProfiles, defaultProfile, deployToServer])
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const nicOptions = nicsLoading
+    ? [{ label: 'Loading...', value: '' }]
+    : nics.length === 0
+      ? [{ label: 'No interfaces found', value: '' }]
+      : nics.map((n) => ({
+          label: `${n.name} — ${n.address}`,
+          value: n.name,
+        }))
+
+  const disguiseCount = servers.filter((s) => s.IsDisguise).length
+
+  const anyDeploying = Object.values(deployStates).some((s) => s.status === 'deploying')
+
+  const deployableCount = servers.filter((server) => {
+    const profileName = rowProfiles[server.IPAddress] ?? defaultProfile
+    return !!profileName
+  }).length
 
   return (
     <div className="p-6 flex flex-col gap-6">
       <SectionHeader
         title="Dashboard"
-        subtitle="Fleet overview and profile deployment"
+        subtitle="Scan your network and deploy profiles to discovered servers"
       />
 
-      {loading || dashData === null ? (
-        <DashboardSkeleton />
-      ) : (
-        <>
-          {/* -- Stat cards row -- */}
-          <div className="grid grid-cols-3 gap-4">
-            <StatCard
-              icon={<Users size={18} />}
-              value={dashData.activeProfile}
-              label="Active Profile"
-              accent="#7C3AED"
-              index={0}
-            />
-            <StatCard
-              icon={<Network size={18} />}
-              value={dashData.adapterCount}
-              label="Network Adapters"
-              accent="#10B981"
-              index={1}
-            />
-            <StatCard
-              icon={<Server size={18} />}
-              value={`${servers.length} Server${servers.length !== 1 ? 's' : ''}`}
-              label="Fleet Size"
-              accent="#3B82F6"
-              index={2}
-            />
+      {/* ── Toolbar ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: 'easeOut' }}
+      >
+        <GlassCard>
+          <div className="flex flex-wrap items-end gap-4">
+            {/* NIC selector */}
+            <div className="flex flex-col gap-1.5 flex-1 min-w-56">
+              <label className="text-xs font-semibold text-textSecondary uppercase tracking-wider flex items-center gap-1.5">
+                <Wifi size={12} aria-hidden="true" />
+                Network Interface
+              </label>
+              <Select
+                value={selectedNic}
+                onChange={setSelectedNic}
+                options={nicOptions}
+                disabled={nicsLoading || scanning}
+                aria-label="Select network interface"
+              />
+            </div>
+
+            {/* Subnet preview */}
+            {subnet && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold text-textSecondary uppercase tracking-wider">
+                  Subnet
+                </span>
+                <span className="font-mono text-sm text-textSecondary px-3 py-2 rounded-lg bg-surface border border-border">
+                  {subnet}.1–254
+                </span>
+              </div>
+            )}
+
+            {/* Scan button */}
+            <Button
+              variant="primary"
+              onClick={startScan}
+              disabled={!subnet || scanning || nicsLoading}
+              loading={scanning}
+              className="self-end"
+            >
+              <Radio size={14} className="shrink-0" />
+              {scanning ? 'Scanning...' : 'Scan Network'}
+            </Button>
           </div>
 
-          {/* -- Server Fleet -- */}
+          {/* Scan progress bar */}
+          <AnimatePresence>
+            {scanning && (
+              <motion.div
+                key="scan-progress"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden mt-4"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-1.5 bg-surface rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full rounded-full bg-primary"
+                      animate={{ width: `${scanProgress}%` }}
+                      transition={{ duration: 0.5, ease: 'easeOut' }}
+                    />
+                  </div>
+                  <span className="text-xs text-textMuted font-mono shrink-0 w-10 text-right">
+                    {scanProgress}%
+                  </span>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </GlassCard>
+      </motion.div>
+
+      {/* ── Results table ── */}
+      <AnimatePresence>
+        {(hasScanned || servers.length > 0) && (
           <motion.div
+            key="results"
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: 'easeOut', delay: 0.35 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
           >
             <GlassCard>
-              {/* Card header */}
-              <div className="flex items-center justify-between gap-4 mb-5 pb-4 border-b border-border">
+              {/* Table header */}
+              <div className="flex items-center justify-between gap-4 mb-4 pb-4 border-b border-border">
                 <div className="flex items-center gap-3">
-                  <h3 className="text-text font-bold text-sm tracking-wide">
-                    Media Servers
-                  </h3>
-                  <Badge variant={servers.length > 0 ? 'info' : 'neutral'}>
-                    {servers.length}
-                  </Badge>
+                  <h3 className="text-text font-bold text-sm tracking-wide">Discovered Servers</h3>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={servers.length > 0 ? 'info' : 'neutral'}>
+                      {servers.length} found
+                    </Badge>
+                    {disguiseCount > 0 && (
+                      <Badge variant="success">{disguiseCount} disguise</Badge>
+                    )}
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  {servers.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={selectAll}
-                      className="text-xs text-textMuted hover:text-textSecondary transition-colors duration-150 cursor-pointer select-none"
-                    >
-                      {selectedIPs.size === servers.length ? 'Deselect all' : 'Select all'}
-                    </button>
+                {/* Re-scan shortcut + Deploy All */}
+                <div className="flex items-center gap-2">
+                  {hasScanned && !scanning && (
+                    <Button variant="ghost" size="sm" onClick={startScan} disabled={!subnet}>
+                      <RefreshCw size={13} />
+                      Re-scan
+                    </Button>
                   )}
                   <Button
-                    variant="ghost"
-                    onClick={refreshFleet}
-                    disabled={refreshing}
-                    loading={refreshing}
+                    variant="primary"
+                    size="sm"
+                    onClick={deployAllServers}
+                    disabled={
+                      servers.length === 0 ||
+                      profiles.length === 0 ||
+                      anyDeploying ||
+                      deployableCount === 0
+                    }
+                    loading={anyDeploying}
                   >
-                    <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-                    Refresh
+                    <Send size={13} className="shrink-0" />
+                    Deploy All ({deployableCount})
                   </Button>
                 </div>
               </div>
 
               {/* Empty state */}
-              {servers.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-10 gap-3">
-                  <Server size={32} className="text-textMuted" aria-hidden="true" />
-                  <p className="text-textMuted text-sm">No servers discovered</p>
+              {servers.length === 0 && hasScanned && !scanning && (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <Monitor size={32} className="text-textMuted" aria-hidden="true" />
+                  <p className="text-textMuted text-sm">No servers found on {subnet}.0/24</p>
                   <p className="text-textMuted/60 text-xs">
-                    Check your network configuration or run a network scan
+                    Check your network interface selection and try again
                   </p>
-                  <Button
-                    variant="outline"
-                    onClick={() => onViewChange('deploy')}
-                    className="mt-2"
-                  >
-                    Go to Network Scan
-                  </Button>
                 </div>
               )}
 
-              {/* Server grid */}
+              {/* Table */}
               {servers.length > 0 && (
-                <div
-                  className="grid grid-cols-3 gap-3"
-                  role="group"
-                  aria-label="Media servers"
-                >
-                  {servers.map((server, i) => (
-                    <ServerTile
-                      key={server.IPAddress}
-                      server={server}
-                      selected={selectedIPs.has(server.IPAddress)}
-                      onSelect={() => toggleServer(server.IPAddress)}
-                      index={i}
-                    />
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-border">
+                        {[
+                          'IP Address',
+                          'Hostname',
+                          'Type',
+                          'Response',
+                          'Profile',
+                          'Action',
+                        ].map((col) => (
+                          <th
+                            key={col}
+                            className="px-4 py-2.5 text-xs font-semibold text-textMuted uppercase tracking-wider whitespace-nowrap"
+                          >
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {servers.map((server, i) => (
+                        <ServerRow
+                          key={server.IPAddress}
+                          server={server}
+                          profiles={profiles}
+                          selectedProfile={rowProfiles[server.IPAddress] ?? defaultProfile}
+                          onProfileChange={(name) =>
+                            setRowProfiles((prev) => ({ ...prev, [server.IPAddress]: name }))
+                          }
+                          onDeploy={() => deployToServer(server)}
+                          deployState={
+                            deployStates[server.IPAddress] ?? {
+                              status: 'idle',
+                              progress: 0,
+                              message: '',
+                            }
+                          }
+                          index={i}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-
-              {/* -- Deploy section -- */}
-              {servers.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.3, delay: 0.2 }}
-                  className="mt-6 pt-5 border-t border-border flex flex-col gap-4"
-                >
-                  {/* Profile selector + deploy button */}
-                  <div className="flex flex-wrap items-end gap-3">
-                    {/* Profile dropdown */}
-                    <div className="flex flex-col gap-1.5 flex-1 min-w-48">
-                      <span className="text-textSecondary font-medium text-sm">Profile</span>
-                      <Select
-                        value={selectedProfile}
-                        onChange={setSelectedProfile}
-                        options={
-                          profilesLoading
-                            ? [{ label: 'Loading...', value: '' }]
-                            : profiles.length === 0
-                              ? [{ label: 'No profiles', value: '' }]
-                              : profiles.map((p) => ({ label: p.Name, value: p.Name }))
-                        }
-                        disabled={profilesLoading || deploying}
-                        aria-label="Select profile"
-                      />
-                    </div>
-
-                    {/* Selection summary */}
-                    <div className="flex items-center gap-2 self-end pb-2">
-                      <span className="text-textMuted text-sm">
-                        {selectedIPs.size > 0
-                          ? `${selectedIPs.size} server${selectedIPs.size === 1 ? '' : 's'} selected`
-                          : 'No servers selected'}
-                      </span>
-                    </div>
-
-                    {/* Deploy button */}
-                    <Button
-                      variant="primary"
-                      onClick={startDeploy}
-                      disabled={!canDeploy}
-                      loading={deploying}
-                      className="self-end"
-                    >
-                      <Send size={14} className="shrink-0" />
-                      {deploying ? 'Deploying...' : 'Deploy to Selected'}
-                    </Button>
-                  </div>
-
-                  {/* Per-server deploy progress */}
-                  <AnimatePresence>
-                    {hasDeployProgress && (
-                      <motion.div
-                        key="deploy-progress"
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.25, ease: 'easeInOut' }}
-                        className="overflow-hidden"
-                      >
-                        <div className="flex flex-col gap-3 p-4 bg-surface/40 rounded-lg border border-border">
-                          <h4 className="text-xs font-semibold text-textSecondary uppercase tracking-wider">
-                            Deploy Progress
-                          </h4>
-                          {selectedServers.map((server) => {
-                            const state = deployStates[server.IPAddress]
-                            if (!state) return null
-                            return (
-                              <DeployProgressRow
-                                key={server.IPAddress}
-                                ip={server.IPAddress}
-                                hostname={server.Hostname}
-                                state={state}
-                              />
-                            )
-                          })}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
               )}
             </GlassCard>
           </motion.div>
-        </>
-      )}
+        )}
+      </AnimatePresence>
     </div>
   )
 }

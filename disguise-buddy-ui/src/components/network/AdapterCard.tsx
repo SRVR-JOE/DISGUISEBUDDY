@@ -2,7 +2,6 @@ import { useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { api } from '@/lib/api'
 import type { AdapterConfig } from '@/lib/types'
 import {
   GlassCard,
@@ -100,15 +99,11 @@ export function AdapterCard({ adapter, onUpdate, animationDelay = 0 }: AdapterCa
     if (hasErrors) return
     setApplying(true)
     try {
-      const result = await api.configureAdapter(draft.Index, draft)
-      if (result.success) {
-        onUpdate(draft)
-        setShowSuccess(true)
-        setTimeout(() => setShowSuccess(false), 2000)
-        toast.success(`Adapter ${draft.DisplayName} configured`)
-      } else {
-        toast.error(result.message || 'Configuration failed')
-      }
+      // Adapter configuration is now handled through profile deployment
+      onUpdate(draft)
+      setShowSuccess(true)
+      setTimeout(() => setShowSuccess(false), 2000)
+      toast.success(`Adapter ${draft.DisplayName} updated locally`)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       toast.error(`Failed to configure adapter: ${message}`)

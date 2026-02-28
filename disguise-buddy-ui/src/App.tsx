@@ -36,7 +36,7 @@ export default function App(): React.ReactElement {
 
   function renderPage() {
     switch (activeView) {
-      case 'dashboard': return <DashboardPage onViewChange={setActiveView} />
+      case 'dashboard': return <DashboardPage />
       case 'profiles':  return <ProfilesPage />
       case 'network':   return <NetworkPage />
       case 'smb':       return <SMBPage />
@@ -44,7 +44,7 @@ export default function App(): React.ReactElement {
       case 'deploy':    return <DeployPage />
       case 'software':  return <SoftwarePage />
       case 'terminal':  return <TerminalPage />
-      default:          return <DashboardPage onViewChange={setActiveView} />
+      default:          return <DashboardPage />
     }
   }
 

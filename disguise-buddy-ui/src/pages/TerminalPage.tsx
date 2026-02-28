@@ -85,7 +85,7 @@ const QUICK_ACTIONS: { label: string; command: string; isPing?: boolean }[] = [
 
 export function TerminalPage() {
   // ── Server list ─────────────────────────────────────────────────────────────
-  const [servers, setServers] = useState<DiscoveredServer[]>([])
+  const [servers] = useState<DiscoveredServer[]>([])
   const [serversLoading, setServersLoading] = useState(true)
   const [refreshingServers, setRefreshingServers] = useState(false)
 
@@ -111,13 +111,9 @@ export function TerminalPage() {
   // ── Active SSE ref ───────────────────────────────────────────────────────────
   const esRef = useRef<EventSource | null>(null)
 
-  // ── Load servers on mount ───────────────────────────────────────────────────
+  // ── No auto-discovery — user must scan from Dashboard first ──────────────────
   useEffect(() => {
-    api
-      .getDiscovery()
-      .then((disc) => setServers(disc))
-      .catch(() => toast.error('Failed to load server list'))
-      .finally(() => setServersLoading(false))
+    setServersLoading(false)
   }, [])
 
   // ── Auto-scroll to bottom whenever lines update ──────────────────────────────
@@ -153,14 +149,8 @@ export function TerminalPage() {
   // ── Refresh server list ──────────────────────────────────────────────────────
   const refreshServers = useCallback(() => {
     setRefreshingServers(true)
-    api
-      .getDiscovery()
-      .then((disc) => {
-        setServers(disc)
-        toast.success(`Fleet refreshed: ${disc.length} server${disc.length === 1 ? '' : 's'}`)
-      })
-      .catch(() => toast.error('Failed to refresh servers'))
-      .finally(() => setRefreshingServers(false))
+    toast('Scan for servers on the Dashboard page first', { icon: 'i' })
+    setRefreshingServers(false)
   }, [])
 
   // ── Clear terminal ────────────────────────────────────────────────────────────

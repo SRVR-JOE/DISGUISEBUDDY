@@ -62,6 +62,36 @@ export function runPowerShell(command: string): Promise<PowerShellResult> {
   })
 }
 
+// -- PowerShell availability check --------------------------------------------
+
+/**
+ * Checks whether `powershell.exe` is available on this system.
+ *
+ * Spawns `powershell.exe -NoProfile -Command "exit 0"` and resolves to `true`
+ * if the process exits successfully, or `false` if the spawn fails (ENOENT on
+ * macOS/Linux) or times out.
+ */
+export function isPowerShellAvailable(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], {
+        windowsHide: true,
+        timeout: 5000,
+      })
+
+      child.on('error', () => {
+        resolve(false)
+      })
+
+      child.on('close', (code) => {
+        resolve(code === 0)
+      })
+    } catch {
+      resolve(false)
+    }
+  })
+}
+
 // -- Timing helper ------------------------------------------------------------
 
 export function delay(ms: number): Promise<void> {

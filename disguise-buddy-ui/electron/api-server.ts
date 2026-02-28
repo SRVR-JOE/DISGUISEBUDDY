@@ -4,22 +4,14 @@ import type { Request, Response } from 'express'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import {
-  getAdapters,
-  configureAdapter,
   getProfiles,
   saveProfile,
-  applyProfile,
   deleteProfile,
-  getSmb,
-  createShare,
-  deleteShare,
-  getIdentity,
-  setHostname,
-  getDashboard,
-  getDiscovery,
+  getNetworkInterfaces,
 } from './mock-data.js'
 import { scanNetwork } from './services/scanner.js'
 import { deployProfile } from './services/deployer.js'
+import { isPowerShellAvailable } from './services/utils.js'
 import { installSoftware, getPackages, addPackage, removePackage } from './services/installer.js'
 import { executeRemote, executeLocal, pingHost } from './services/terminal.js'
 
@@ -54,22 +46,6 @@ function sseHeaders(res: Response): void {
   res.flushHeaders()
 }
 
-// ─── Adapters ─────────────────────────────────────────────────────────────────
-
-app.get('/api/adapters', (_req: Request, res: Response) => {
-  res.json(getAdapters())
-})
-
-app.post('/api/adapters/:index/configure', (req: Request, res: Response) => {
-  const index = parseInt(param(req.params.index), 10)
-  if (isNaN(index)) {
-    res.status(400).json({ success: false, message: 'Invalid adapter index' })
-    return
-  }
-  const result = configureAdapter(index, req.body as Record<string, unknown>)
-  res.status(result.success ? 200 : 400).json(result)
-})
-
 // ─── Profiles ─────────────────────────────────────────────────────────────────
 
 app.get('/api/profiles', (_req: Request, res: Response) => {
@@ -87,8 +63,13 @@ app.post('/api/profiles', (req: Request, res: Response) => {
 })
 
 app.post('/api/profiles/:name/apply', (req: Request, res: Response) => {
-  const result = applyProfile(decodeURIComponent(param(req.params.name)))
-  res.status(result.success ? 200 : 404).json(result)
+  const name = decodeURIComponent(param(req.params.name))
+  const profile = getProfiles().find(p => p.Name === name)
+  if (!profile) {
+    res.status(404).json({ success: false, message: `Profile "${name}" not found` })
+    return
+  }
+  res.json({ success: true, message: `Profile "${name}" found`, profile })
 })
 
 app.delete('/api/profiles/:name', (req: Request, res: Response) => {
@@ -96,53 +77,10 @@ app.delete('/api/profiles/:name', (req: Request, res: Response) => {
   res.status(result.success ? 200 : 404).json(result)
 })
 
-// ─── SMB ──────────────────────────────────────────────────────────────────────
+// ─── Network interfaces (local host NICs) ─────────────────────────────────────
 
-app.get('/api/smb', (_req: Request, res: Response) => {
-  res.json(getSmb())
-})
-
-app.post('/api/smb/shares', (req: Request, res: Response) => {
-  const share = req.body
-  if (!share || !share.Name || !share.Path) {
-    res.status(400).json({ success: false, message: 'Share must have Name and Path' })
-    return
-  }
-  const result = createShare(share)
-  res.status(result.success ? 200 : 400).json(result)
-})
-
-app.delete('/api/smb/shares/:name', (req: Request, res: Response) => {
-  const result = deleteShare(decodeURIComponent(param(req.params.name)))
-  res.status(result.success ? 200 : 404).json(result)
-})
-
-// ─── Identity ─────────────────────────────────────────────────────────────────
-
-app.get('/api/identity', (_req: Request, res: Response) => {
-  res.json(getIdentity())
-})
-
-app.post('/api/identity', (req: Request, res: Response) => {
-  const { hostname } = req.body as { hostname?: string }
-  if (!hostname) {
-    res.status(400).json({ success: false, message: 'hostname is required' })
-    return
-  }
-  const result = setHostname(hostname)
-  res.status(result.success ? 200 : 400).json(result)
-})
-
-// ─── Dashboard ────────────────────────────────────────────────────────────────
-
-app.get('/api/dashboard', (_req: Request, res: Response) => {
-  res.json(getDashboard())
-})
-
-// ─── Discovery (fleet list) ──────────────────────────────────────────────────
-
-app.get('/api/discovery', (_req: Request, res: Response) => {
-  res.json(getDiscovery())
+app.get('/api/nics', (_req: Request, res: Response) => {
+  res.json(getNetworkInterfaces())
 })
 
 // ─── SSE: Network scan ────────────────────────────────────────────────────────
@@ -178,17 +116,30 @@ app.get('/api/scan', (req: Request, res: Response) => {
 // ─── SSE: Profile deployment ──────────────────────────────────────────────────
 // Query params: server, profile
 
-app.get('/api/deploy', (req: Request, res: Response) => {
+app.get('/api/deploy', async (req: Request, res: Response) => {
   sseHeaders(res)
 
   const server = (req.query.server as string) || ''
   const profileName = (req.query.profile as string) || ''
 
+  console.log(`[deploy] Starting deployment: server=${server}, profile=${profileName}`)
+
   const profiles = getProfiles()
   const profile = profiles.find(p => p.Name === profileName)
 
   if (!profile) {
+    console.error(`[deploy] Profile "${profileName}" not found`)
     sendSse(res, 'error', { message: `Profile "${profileName}" not found` })
+    res.end()
+    return
+  }
+
+  // Pre-flight check: is PowerShell available on this OS?
+  const psAvailable = await isPowerShellAvailable()
+  if (!psAvailable) {
+    const msg = 'PowerShell is not available. Profile deployment requires Windows with PowerShell and WinRM configured.'
+    console.error(`[deploy] ${msg}`)
+    sendSse(res, 'error', { message: msg })
     res.end()
     return
   }
@@ -196,12 +147,17 @@ app.get('/api/deploy', (req: Request, res: Response) => {
   const { cancel } = deployProfile(
     { targetIP: server, profile },
     {
-      onStep: (step) => sendSse(res, 'progress', step),
+      onStep: (step) => {
+        console.log(`[deploy] ${server}: Step ${step.stepNumber}/${step.total} — ${step.message}`)
+        sendSse(res, 'progress', step)
+      },
       onComplete: (result) => {
+        console.log(`[deploy] ${server}: Complete — ${result.message}`)
         sendSse(res, 'complete', result)
         res.end()
       },
       onError: (err) => {
+        console.error(`[deploy] ${server}: Error — ${err.message}`)
         sendSse(res, 'error', { message: err.message })
         res.end()
       },

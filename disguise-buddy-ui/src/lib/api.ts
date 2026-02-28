@@ -1,11 +1,7 @@
 import type {
-  AdapterConfig,
   Profile,
   Result,
-  SmbShare,
-  IdentityInfo,
-  DashboardData,
-  DiscoveredServer,
+  NetworkInterface,
   SoftwarePackage,
 } from '@/lib/types'
 
@@ -66,13 +62,9 @@ function openEventSource(path: string): EventSource {
 // ─── API client ───────────────────────────────────────────────────────────────
 
 export const api = {
-  // Adapters
-  getAdapters(): Promise<AdapterConfig[]> {
-    return get<AdapterConfig[]>('/api/adapters')
-  },
-
-  configureAdapter(index: number, config: Partial<AdapterConfig>): Promise<Result> {
-    return post<Result>(`/api/adapters/${index}/configure`, config)
+  // Network interfaces (for NIC selection)
+  getNics(): Promise<NetworkInterface[]> {
+    return get<NetworkInterface[]>('/api/nics')
   },
 
   // Profiles
@@ -90,38 +82,6 @@ export const api = {
 
   deleteProfile(name: string): Promise<Result> {
     return del<Result>(`/api/profiles/${encodeURIComponent(name)}`)
-  },
-
-  // SMB
-  getSmb(): Promise<SmbShare[]> {
-    return get<SmbShare[]>('/api/smb')
-  },
-
-  createShare(share: Omit<SmbShare, 'ShareState'>): Promise<Result> {
-    return post<Result>('/api/smb/shares', share)
-  },
-
-  deleteShare(name: string): Promise<Result> {
-    return del<Result>(`/api/smb/shares/${encodeURIComponent(name)}`)
-  },
-
-  // Identity
-  getIdentity(): Promise<IdentityInfo> {
-    return get<IdentityInfo>('/api/identity')
-  },
-
-  setHostname(name: string): Promise<Result> {
-    return post<Result>('/api/identity', { hostname: name })
-  },
-
-  // Dashboard
-  getDashboard(): Promise<DashboardData> {
-    return get<DashboardData>('/api/dashboard')
-  },
-
-  // Discovery (fleet list)
-  getDiscovery(): Promise<DiscoveredServer[]> {
-    return get<DiscoveredServer[]>('/api/discovery')
   },
 
   // SSE — Network scan

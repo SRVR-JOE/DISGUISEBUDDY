@@ -469,7 +469,7 @@ export function SoftwarePage() {
   const [addingSoftware, setAddingSoftware] = useState(false)
 
   // ── Servers state ────────────────────────────────────────────────────────────
-  const [servers, setServers] = useState<DiscoveredServer[]>([])
+  const [servers] = useState<DiscoveredServer[]>([])
   const [serversLoading, setServersLoading] = useState(true)
   const [selectedServerIPs, setSelectedServerIPs] = useState<Set<string>>(new Set())
   const [refreshingServers, setRefreshingServers] = useState(false)
@@ -483,14 +483,13 @@ export function SoftwarePage() {
 
   // ── Load packages and servers on mount ──────────────────────────────────────
   useEffect(() => {
-    Promise.all([api.getSoftware(), api.getDiscovery()])
-      .then(([pkgs, disc]) => {
+    api.getSoftware()
+      .then((pkgs) => {
         setPackages(pkgs)
-        setServers(disc)
       })
       .catch((err: Error) => {
         setPackagesError(err.message)
-        toast.error('Failed to load data')
+        toast.error('Failed to load software packages')
       })
       .finally(() => {
         setPackagesLoading(false)
@@ -501,14 +500,9 @@ export function SoftwarePage() {
   // ── Refresh servers ──────────────────────────────────────────────────────────
   const refreshServers = useCallback(() => {
     setRefreshingServers(true)
-    api
-      .getDiscovery()
-      .then((disc) => {
-        setServers(disc)
-        toast.success(`Fleet refreshed: ${disc.length} server${disc.length === 1 ? '' : 's'}`)
-      })
-      .catch(() => toast.error('Failed to refresh servers'))
-      .finally(() => setRefreshingServers(false))
+    // Servers must be discovered via the Dashboard scan - no static discovery endpoint
+    toast('Scan for servers on the Dashboard page first', { icon: 'i' })
+    setRefreshingServers(false)
   }, [])
 
   // ── Package selection ────────────────────────────────────────────────────────
