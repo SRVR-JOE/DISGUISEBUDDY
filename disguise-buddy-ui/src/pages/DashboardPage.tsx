@@ -241,6 +241,10 @@ export function DashboardPage() {
   const [servers, setServers] = useState<DiscoveredServer[]>([])
   const [hasScanned, setHasScanned] = useState(false)
 
+  // Credentials
+  const [credUser, setCredUser] = useState('disguise')
+  const [credPass, setCredPass] = useState('d3')
+
   // Per-row deploy states: ip → RowDeployState
   const [deployStates, setDeployStates] = useState<Record<string, RowDeployState>>({})
 
@@ -356,7 +360,7 @@ export function DashboardPage() {
         [server.IPAddress]: { status: 'deploying', progress: 0, message: 'Starting...' },
       }))
 
-      const es = api.deployProfile(server.IPAddress, profileName)
+      const es = api.deployProfile(server.IPAddress, profileName, credUser, credPass)
       deployEsRefs.current[server.IPAddress] = es
 
       es.addEventListener('progress', (e: MessageEvent) => {
@@ -420,7 +424,7 @@ export function DashboardPage() {
         toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}`)
       }
     },
-    [rowProfiles, defaultProfile],
+    [rowProfiles, defaultProfile, credUser, credPass],
   )
 
   // ── Mass deploy ─────────────────────────────────────────────────────────────
@@ -506,6 +510,34 @@ export function DashboardPage() {
               <Radio size={14} className="shrink-0" />
               {scanning ? 'Scanning...' : 'Scan Network'}
             </Button>
+          </div>
+
+          {/* Credentials row */}
+          <div className="flex flex-wrap items-end gap-4 pt-3 border-t border-border/50">
+            <div className="flex flex-col gap-1.5 flex-1 min-w-40">
+              <label className="text-xs font-semibold text-textSecondary uppercase tracking-wider">
+                Username
+              </label>
+              <input
+                type="text"
+                value={credUser}
+                onChange={(e) => setCredUser(e.target.value)}
+                placeholder="Administrator"
+                className="w-full px-3 py-2 rounded-lg text-sm bg-surface border border-border text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors duration-150"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5 flex-1 min-w-40">
+              <label className="text-xs font-semibold text-textSecondary uppercase tracking-wider">
+                Password
+              </label>
+              <input
+                type="password"
+                value={credPass}
+                onChange={(e) => setCredPass(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-3 py-2 rounded-lg text-sm bg-surface border border-border text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors duration-150"
+              />
+            </div>
           </div>
 
           {/* Scan progress bar */}

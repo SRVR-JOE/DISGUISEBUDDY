@@ -13,7 +13,7 @@
  */
 
 import net from 'net'
-import { runPowerShell, delay } from './utils.js'
+import { runPowerShell, delay, ensureWinRMReady } from './utils.js'
 
 // -- Public types -------------------------------------------------------------
 
@@ -84,6 +84,7 @@ export interface DeployCallbacks {
 // -- Step definitions ---------------------------------------------------------
 
 const STEPS = [
+  'setup',
   'connect',
   'hostname',
   'network',
@@ -139,7 +140,13 @@ async function runLiveDeploy(
     callbacks.onStep({ step: id, message, stepNumber, total })
   }
 
-  // Step 1: Test WinRM connectivity
+  // Step 1: Configure local WinRM prerequisites (best-effort, non-fatal)
+  step('setup', 'Configuring WinRM prerequisites...')
+  if (isCancelled()) return
+
+  await ensureWinRMReady(targetIP)
+
+  // Step 2: Test WinRM connectivity
   step('connect', `Testing WinRM connectivity to ${targetIP}...`)
   if (isCancelled()) return
 
@@ -163,7 +170,7 @@ async function runLiveDeploy(
     )
   }
 
-  // Step 2: Set hostname
+  // Step 3: Set hostname
   step('hostname', `Setting hostname to "${profile.ServerName}"...`)
   if (isCancelled()) return
 
@@ -175,7 +182,7 @@ async function runLiveDeploy(
     throw new Error(`Hostname rename failed: ${renameResult.stderr || renameResult.stdout}`)
   }
 
-  // Step 3: Configure network adapters
+  // Step 4: Configure network adapters
   const enabledAdapters = profile.NetworkAdapters.filter((a) => a.Enabled)
   step('network', `Configuring ${enabledAdapters.length} network adapter(s)...`)
   if (isCancelled()) return
@@ -197,7 +204,7 @@ async function runLiveDeploy(
     }
   }
 
-  // Step 4: Configure SMB shares
+  // Step 5: Configure SMB shares
   step('smb', 'Configuring SMB shares...')
   if (isCancelled()) return
 
@@ -211,7 +218,7 @@ async function runLiveDeploy(
     }
   }
 
-  // Step 5: Verify
+  // Step 6: Verify
   step('verify', `Verifying ${targetIP} is still reachable...`)
   if (isCancelled()) return
 

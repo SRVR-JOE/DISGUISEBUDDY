@@ -97,8 +97,10 @@ export const api = {
 
   // SSE — Profile deployment
   // Returns an EventSource. Caller is responsible for attaching handlers and closing it.
-  deployProfile(server: string, profileName: string): EventSource {
+  deployProfile(server: string, profileName: string, credUser?: string, credPass?: string): EventSource {
     const params = new URLSearchParams({ server, profile: profileName })
+    if (credUser) params.set('credential_user', credUser)
+    if (credPass) params.set('credential_pass', credPass)
     return openEventSource(`/api/deploy?${params.toString()}`)
   },
 

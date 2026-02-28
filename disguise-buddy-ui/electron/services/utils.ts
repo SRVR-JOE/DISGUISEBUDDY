@@ -92,6 +92,70 @@ export function isPowerShellAvailable(): Promise<boolean> {
   })
 }
 
+// -- WinRM prerequisites helper -----------------------------------------------
+
+export interface WinRMReadyResult {
+  success: boolean
+  message: string
+}
+
+/**
+ * Best-effort setup of local WinRM prerequisites before connecting to a remote
+ * machine.
+ *
+ * 1. Starts the WinRM service on the LOCAL machine (needed for PowerShell
+ *    remoting to work at all).
+ * 2. Adds the target IP to the LOCAL TrustedHosts list so PowerShell does not
+ *    reject connections to bare IP addresses.
+ *
+ * Both commands run locally — no -ComputerName or -Credential args.
+ * Failures are logged as warnings but never abort the caller; the function
+ * always resolves (never rejects).
+ */
+export async function ensureWinRMReady(targetIP: string): Promise<WinRMReadyResult> {
+  const messages: string[] = []
+
+  // Start the WinRM service if it is not already running
+  try {
+    const startResult = await runPowerShell(
+      'Start-Service WinRM -ErrorAction SilentlyContinue'
+    )
+    if (startResult.exitCode === 0) {
+      console.log('[utils] WinRM service started (or was already running)')
+      messages.push('WinRM service ready')
+    } else {
+      const warn = `WinRM service start returned exit ${startResult.exitCode}: ${startResult.stderr || startResult.stdout}`
+      console.warn(`[utils] ${warn}`)
+      messages.push(warn)
+    }
+  } catch (err) {
+    const warn = `Could not start WinRM service: ${err instanceof Error ? err.message : String(err)}`
+    console.warn(`[utils] ${warn}`)
+    messages.push(warn)
+  }
+
+  // Add the target IP to TrustedHosts so PowerShell accepts bare-IP connections
+  try {
+    const trustedResult = await runPowerShell(
+      `Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value "${targetIP}" -Force`
+    )
+    if (trustedResult.exitCode === 0) {
+      console.log(`[utils] Added ${targetIP} to WSMan TrustedHosts`)
+      messages.push(`TrustedHosts updated for ${targetIP}`)
+    } else {
+      const warn = `TrustedHosts update returned exit ${trustedResult.exitCode}: ${trustedResult.stderr || trustedResult.stdout}`
+      console.warn(`[utils] ${warn}`)
+      messages.push(warn)
+    }
+  } catch (err) {
+    const warn = `Could not update TrustedHosts: ${err instanceof Error ? err.message : String(err)}`
+    console.warn(`[utils] ${warn}`)
+    messages.push(warn)
+  }
+
+  return { success: true, message: messages.join('; ') }
+}
+
 // -- Timing helper ------------------------------------------------------------
 
 export function delay(ms: number): Promise<void> {

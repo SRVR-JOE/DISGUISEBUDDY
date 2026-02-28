@@ -121,8 +121,11 @@ app.get('/api/deploy', async (req: Request, res: Response) => {
 
   const server = (req.query.server as string) || ''
   const profileName = (req.query.profile as string) || ''
+  const credUser = (req.query.credential_user as string) || ''
+  const credPass = (req.query.credential_pass as string) || ''
+  const credential = credUser && credPass ? { username: credUser, password: credPass } : undefined
 
-  console.log(`[deploy] Starting deployment: server=${server}, profile=${profileName}`)
+  console.log(`[deploy] Starting deployment: server=${server}, profile=${profileName}, hasCredential=${!!credential}`)
 
   const profiles = getProfiles()
   const profile = profiles.find(p => p.Name === profileName)
@@ -145,7 +148,7 @@ app.get('/api/deploy', async (req: Request, res: Response) => {
   }
 
   const { cancel } = deployProfile(
-    { targetIP: server, profile },
+    { targetIP: server, profile, credential },
     {
       onStep: (step) => {
         console.log(`[deploy] ${server}: Step ${step.stepNumber}/${step.total} — ${step.message}`)
