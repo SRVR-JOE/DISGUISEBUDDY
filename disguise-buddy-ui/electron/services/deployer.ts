@@ -171,7 +171,11 @@ async function runLiveDeploy(
 
     const dcomResult = await enableWinRMViaDCOM(targetIP, credential)
     if (!dcomResult.success) {
-      throw new Error(`Cannot enable WinRM on ${targetIP}: ${dcomResult.message}`)
+      throw new Error(
+        `Cannot reach ${targetIP} remotely (WinRM and DCOM both unavailable). ` +
+        `Run this on the target server in an Admin PowerShell: ` +
+        `Enable-PSRemoting -Force -SkipNetworkProfileCheck`
+      )
     }
 
     // Give the WinRM service time to initialise before the first retry

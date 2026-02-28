@@ -132,6 +132,11 @@ export const api = {
     return openEventSource(`/api/terminal/execute?${params.toString()}`)
   },
 
+  // Setup script — PowerShell one-liner to enable WinRM on a target server
+  getSetupScript(): Promise<{ oneLiner: string; scriptContent: string; instructions: string }> {
+    return get('/api/setup-script')
+  },
+
   // SSE — Terminal: ping host
   // Returns an EventSource. Caller is responsible for attaching handlers and closing it.
   pingHost(target: string, count?: number): EventSource {

@@ -248,6 +248,10 @@ export function DashboardPage() {
   // Per-row deploy states: ip → RowDeployState
   const [deployStates, setDeployStates] = useState<Record<string, RowDeployState>>({})
 
+  // Setup instructions panel
+  const [showSetup, setShowSetup] = useState(false)
+  const [setupScript, setSetupScript] = useState('')
+
   // Refs to keep EventSource handles so we can close them on unmount
   const scanEsRef = useRef<EventSource | null>(null)
   const deployEsRefs = useRef<Record<string, EventSource>>({})
@@ -270,6 +274,8 @@ export function DashboardPage() {
       })
       .catch(() => toast.error('Failed to load network interfaces'))
       .finally(() => setNicsLoading(false))
+
+    api.getSetupScript().then(data => setSetupScript(data.oneLiner)).catch(() => {})
 
     return () => {
       scanEsRef.current?.close()
@@ -568,6 +574,55 @@ export function DashboardPage() {
           </AnimatePresence>
         </GlassCard>
       </motion.div>
+
+      {/* ── Setup instructions ── */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowSetup(v => !v)}
+          className="text-xs text-textMuted hover:text-textSecondary transition-colors duration-150 flex items-center gap-1.5"
+        >
+          <ChevronDown size={12} className={`transition-transform ${showSetup ? 'rotate-180' : ''}`} />
+          {showSetup ? 'Hide' : 'Show'} server setup instructions
+        </button>
+
+        <AnimatePresence>
+          {showSetup && (
+            <motion.div
+              key="setup-panel"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <GlassCard className="mt-3">
+                <p className="text-sm text-textSecondary mb-3">
+                  If deployment fails with "WinRM and DCOM both unavailable", run this command once on each target server in an <strong>Administrator PowerShell</strong>:
+                </p>
+                <div className="relative">
+                  <pre className="text-xs font-mono bg-black/30 text-green-400 p-4 rounded-lg overflow-x-auto whitespace-pre-wrap break-all">
+                    {setupScript || 'Loading...'}
+                  </pre>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(setupScript)
+                      toast.success('Copied to clipboard')
+                    }}
+                    className="absolute top-2 right-2 px-2 py-1 text-xs bg-surface/80 text-textSecondary rounded border border-border hover:bg-surface transition-colors"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <p className="text-xs text-textMuted mt-2">
+                  This only needs to be run once per server. After that, remote deployment will work automatically.
+                </p>
+              </GlassCard>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* ── Results table ── */}
       <AnimatePresence>

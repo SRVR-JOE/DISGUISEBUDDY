@@ -289,6 +289,27 @@ app.get('/api/terminal/ping', (req: Request, res: Response) => {
   req.on('close', () => cancel())
 })
 
+// ─── Setup script ─────────────────────────────────────────────────────────────
+
+app.get('/api/setup-script', (_req: Request, res: Response) => {
+  const script = [
+    'Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Force -ErrorAction SilentlyContinue',
+    'Enable-PSRemoting -Force -SkipNetworkProfileCheck',
+    'Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force',
+    'winrm set winrm/config/service @{AllowUnencrypted="true"}',
+    'winrm set winrm/config/service/auth @{Basic="true"}',
+    'New-NetFirewallRule -DisplayName "WinRM HTTP" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue',
+    'Restart-Service WinRM',
+    'Write-Host "WinRM enabled successfully. This machine can now be configured remotely." -ForegroundColor Green',
+  ].join('; ')
+
+  res.json({
+    oneLiner: `powershell -Command "${script}"`,
+    scriptContent: script,
+    instructions: 'Run this command in an Administrator PowerShell on each disguise server. Only needed once per server.',
+  })
+})
+
 // ─── 404 fallback ─────────────────────────────────────────────────────────────
 
 app.use((_req: Request, res: Response) => {
