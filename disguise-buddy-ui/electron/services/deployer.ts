@@ -152,8 +152,9 @@ async function runLiveDeploy(
 
   let wsmanResult: Awaited<ReturnType<typeof runPowerShell>>
   try {
+    const authArg = credential ? ' -Authentication Negotiate' : ''
     wsmanResult = await runPowerShell(
-      `Test-WSMan -ComputerName ${targetIP}${credArg} -ErrorAction Stop`
+      `Test-WSMan -ComputerName ${targetIP}${credArg}${authArg} -ErrorAction Stop`
     )
   } catch (spawnErr: unknown) {
     const msg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr)
