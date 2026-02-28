@@ -1,0 +1,10 @@
+At C:\Users\Solotech\Documents\GitHub\DISGUISEBUDDY\Start-DisguiseBuddy.ps1:80 char:45
++     for ($i = 1; $i -le $MaxAttempts; $i++) {
++                                             ~
+Missing closing '}' in statement block or type definition.
+At C:\Users\Solotech\Documents\GitHub\DISGUISEBUDDY\Start-DisguiseBuddy.ps1:69 char:25
++ function Wait-ForServer {
++                         ~
+Missing closing '}' in statement block or type definition.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MissingEndCurlyBrace
