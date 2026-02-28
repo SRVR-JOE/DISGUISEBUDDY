@@ -285,22 +285,30 @@ Write-Host '        Ports clear.' -ForegroundColor Green
 Write-Host ''
 Write-Host '  [4/5] Starting servers...' -ForegroundColor Cyan
 
-# Resolve the local tsx binary path (installed in node_modules/.bin)
-$tsxBin = Join-Path $script:UiDir 'node_modules' '.bin' 'tsx.cmd'
+# Resolve local binaries (Join-Path only takes 2 args in PS 5.1)
+$binDir  = Join-Path (Join-Path $script:UiDir 'node_modules') '.bin'
+$tsxBin  = Join-Path $binDir 'tsx.cmd'
+$viteBin = Join-Path $binDir 'vite.cmd'
+
+# If tsx isn't installed locally yet, run npm install to get it
 if (-not (Test-Path $tsxBin)) {
-    # Fallback to npx.cmd if tsx isn't installed locally
-    $tsxBin = 'npx.cmd'
-    $tsxArgs = @('tsx', 'electron/dev-server.ts')
-} else {
-    $tsxArgs = @('electron/dev-server.ts')
+    Write-Host '        tsx not found locally — running npm install...' -ForegroundColor Yellow
+    $npmProc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'install' `
+                   -WorkingDirectory $script:UiDir -Wait -PassThru -NoNewWindow
 }
 
-$viteBin = Join-Path $script:UiDir 'node_modules' '.bin' 'vite.cmd'
-if (-not (Test-Path $viteBin)) {
+if (Test-Path $tsxBin) {
+    $tsxArgs = @('electron/dev-server.ts')
+} else {
+    $tsxBin = 'npx.cmd'
+    $tsxArgs = @('--yes', 'tsx', 'electron/dev-server.ts')
+}
+
+if (Test-Path $viteBin) {
+    $viteArgs = $null
+} else {
     $viteBin = 'npx.cmd'
     $viteArgs = @('vite')
-} else {
-    $viteArgs = $null
 }
 
 # ── API server (port 47100) ──────────────────────────────────────────────────
