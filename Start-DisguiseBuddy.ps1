@@ -225,41 +225,22 @@ if (-not (Test-Path $script:UiDir -PathType Container)) {
 Write-Host "        Found: $script:UiDir" -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
-# STEP 3 - npm install (first run only)
+# STEP 3 - Kill stale processes BEFORE npm install
 # -----------------------------------------------------------------------------
 Write-Host ''
-Write-Host '  [3/5] Checking npm dependencies...' -ForegroundColor Cyan
+Write-Host '  [3/5] Clearing stale processes...' -ForegroundColor Cyan
 
-$nodeModules = Join-Path $script:UiDir 'node_modules'
-if (-not (Test-Path $nodeModules -PathType Container)) {
-    Write-Host '        node_modules not found - running npm install...' -ForegroundColor Yellow
-    Write-Host ''
-    try {
-        $npmProc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'install' `
-                       -WorkingDirectory $script:UiDir `
-                       -Wait -PassThru -NoNewWindow
-        if ($npmProc.ExitCode -ne 0) {
-            throw "npm install exited with code $($npmProc.ExitCode)."
-        }
-        Write-Host ''
-        Write-Host '        Dependencies installed.' -ForegroundColor Green
-    } catch {
-        Write-Host ''
-        Write-Host "  ERROR: npm install failed: $_" -ForegroundColor Red
-        Write-Host ''
-        Read-Host '  Press Enter to exit'
-        exit 1
-    }
+# Kill stale node/tsx processes that lock files in node_modules
+$staleProcs = Get-Process -Name 'node' -ErrorAction SilentlyContinue
+if ($null -ne $staleProcs) {
+    Write-Host "        Found $($staleProcs.Count) stale node process(es) - killing..." -ForegroundColor Yellow
+    $staleProcs | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
 } else {
-    Write-Host '        node_modules present - skipping install.' -ForegroundColor Green
+    Write-Host '        No stale node processes.' -ForegroundColor Green
 }
 
-# -----------------------------------------------------------------------------
-# STEP 3.5 - Kill any stale processes on our ports
-# -----------------------------------------------------------------------------
-Write-Host ''
-Write-Host '  [3.5] Clearing stale processes on ports 47100 and 5173...' -ForegroundColor Cyan
-
+# Also clear specific ports
 foreach ($port in @(47100, 5173)) {
     try {
         $conns = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
@@ -267,7 +248,7 @@ foreach ($port in @(47100, 5173)) {
             $pids = $conns | Select-Object -ExpandProperty OwningProcess -Unique
             foreach ($pid in $pids) {
                 if ($pid -ne 0) {
-                    Write-Host "        Killing stale process $pid on port $port" -ForegroundColor Yellow
+                    Write-Host "        Killing process $pid on port $port" -ForegroundColor Yellow
                     Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
                 }
             }
@@ -281,22 +262,65 @@ foreach ($port in @(47100, 5173)) {
 Write-Host '        Ports clear.' -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
-# STEP 4 - Start background servers
+# STEP 4 - npm install
 # -----------------------------------------------------------------------------
 Write-Host ''
-Write-Host '  [4/5] Starting servers...' -ForegroundColor Cyan
+Write-Host '  [4/6] Checking npm dependencies...' -ForegroundColor Cyan
+
+$nodeModules = Join-Path $script:UiDir 'node_modules'
+$needsInstall = -not (Test-Path $nodeModules -PathType Container)
+
+# Also check if tsx is missing (added in recent update)
+if (-not $needsInstall) {
+    $tsxCheck = Join-Path (Join-Path $nodeModules '.bin') 'tsx.cmd'
+    if (-not (Test-Path $tsxCheck)) {
+        Write-Host '        tsx missing - need to update dependencies...' -ForegroundColor Yellow
+        $needsInstall = $true
+    }
+}
+
+if ($needsInstall) {
+    Write-Host '        Running npm install...' -ForegroundColor Yellow
+    Write-Host ''
+    try {
+        $npmProc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'install' `
+                       -WorkingDirectory $script:UiDir `
+                       -Wait -PassThru -NoNewWindow
+        if ($npmProc.ExitCode -ne 0) {
+            # Retry with --force if access denied
+            Write-Host ''
+            Write-Host '        First attempt failed - retrying with --force...' -ForegroundColor Yellow
+            $npmProc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'install', '--force' `
+                           -WorkingDirectory $script:UiDir `
+                           -Wait -PassThru -NoNewWindow
+            if ($npmProc.ExitCode -ne 0) {
+                throw "npm install --force exited with code $($npmProc.ExitCode)."
+            }
+        }
+        Write-Host ''
+        Write-Host '        Dependencies installed.' -ForegroundColor Green
+    } catch {
+        Write-Host ''
+        Write-Host "  ERROR: npm install failed: $_" -ForegroundColor Red
+        Write-Host '         Close VS Code and any other editors, then try again.' -ForegroundColor Yellow
+        Write-Host ''
+        Read-Host '  Press Enter to exit'
+        exit 1
+    }
+} else {
+    Write-Host '        Dependencies up to date.' -ForegroundColor Green
+}
+
+# -----------------------------------------------------------------------------
+# STEP 5 - Start background servers
+# -----------------------------------------------------------------------------
+Write-Host ''
+Write-Host '  [5/6] Starting servers...' -ForegroundColor Cyan
 
 # Resolve local binaries (Join-Path only takes 2 args in PS 5.1)
 $binDir  = Join-Path (Join-Path $script:UiDir 'node_modules') '.bin'
 $tsxBin  = Join-Path $binDir 'tsx.cmd'
 $viteBin = Join-Path $binDir 'vite.cmd'
-
-# If tsx is not installed locally yet, run npm install to get it
-if (-not (Test-Path $tsxBin)) {
-    Write-Host '        tsx not found locally - running npm install...' -ForegroundColor Yellow
-    $npmProc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'install' `
-                   -WorkingDirectory $script:UiDir -Wait -PassThru -NoNewWindow
-}
 
 if (Test-Path $tsxBin) {
     $tsxArgs = @('electron/dev-server.ts')
@@ -346,10 +370,10 @@ try {
 }
 
 # -----------------------------------------------------------------------------
-# STEP 5 - Wait for both servers to respond
+# STEP 6 - Wait for both servers to respond
 # -----------------------------------------------------------------------------
 Write-Host ''
-Write-Host '  [5/5] Waiting for servers to be ready...' -ForegroundColor Cyan
+Write-Host '  [6/6] Waiting for servers to be ready...' -ForegroundColor Cyan
 
 $apiReady  = Wait-ForServer -Url 'http://localhost:47100/api/dashboard' `
                             -Label 'API server (port 47100)' `
