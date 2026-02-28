@@ -117,3 +117,15 @@ export interface CommandResult {
   exitCode: number
   durationMs: number
 }
+
+// ─── Diagnostic probe ─────────────────────────────────────────────────────────
+
+export interface ProbeResult {
+  target: string
+  timestamp: string
+  ports: Record<string, boolean>
+  smb: { success: boolean; message: string }
+  winrm: { success: boolean; message: string }
+  d3api: { success: boolean; hostname?: string; version?: string; status?: number; message?: string }
+  recommended: 'smb' | 'winrm' | 'manual'
+}

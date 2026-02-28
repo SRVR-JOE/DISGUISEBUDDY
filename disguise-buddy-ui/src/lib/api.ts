@@ -3,6 +3,7 @@ import type {
   Result,
   NetworkInterface,
   SoftwarePackage,
+  ProbeResult,
 } from '@/lib/types'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -135,6 +136,14 @@ export const api = {
   // Setup script — PowerShell one-liner to enable WinRM on a target server
   getSetupScript(): Promise<{ oneLiner: string; scriptContent: string; instructions: string }> {
     return get('/api/setup-script')
+  },
+
+  // Diagnostic probe — tests all connectivity methods against a target IP
+  probeServer(server: string, credUser?: string, credPass?: string): Promise<ProbeResult> {
+    const params = new URLSearchParams({ server })
+    if (credUser) params.set('credential_user', credUser)
+    if (credPass) params.set('credential_pass', credPass)
+    return get<ProbeResult>(`/api/probe?${params.toString()}`)
   },
 
   // SSE — Terminal: ping host
