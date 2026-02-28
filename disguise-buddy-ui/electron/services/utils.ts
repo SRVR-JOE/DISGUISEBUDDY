@@ -234,6 +234,113 @@ Write-Output "DCOM_BOOTSTRAP_OK"
   }
 }
 
+// -- SMB WinRM bootstrap ------------------------------------------------------
+
+export interface SMBBootstrapResult {
+  success: boolean
+  message: string
+}
+
+/**
+ * Uses SMB (port 445) + schtasks.exe to remotely enable WinRM on a target
+ * machine.  This bypasses the need for both WinRM (5985) and DCOM/RPC (135).
+ *
+ * Strategy:
+ *   1. Authenticates to the remote IPC$ share via `net use`
+ *   2. Creates a scheduled task via `schtasks.exe /create /s` which routes
+ *      RPC through the SMB named pipe \\PIPE\\atsvc (port 445 only)
+ *   3. The task runs Enable-PSRemoting + firewall rule on the target
+ *   4. Cleans up the scheduled task and IPC$ mapping
+ *
+ * Requires port 445 to be reachable on the target.
+ */
+export async function enableWinRMViaSMB(
+  targetIP: string,
+  credential?: { username: string; password: string },
+): Promise<SMBBootstrapResult> {
+  const username = credential?.username ?? 'd3'
+  const password = credential?.password ?? 'disguise'
+  const taskName = `DisguiseBuddy_${Date.now()}`
+
+  console.log(`[utils] Attempting SMB WinRM bootstrap for ${targetIP}...`)
+
+  // 1. Connect to IPC$ to verify SMB is reachable
+  const connectResult = await runPowerShell(
+    `net use "\\\\${targetIP}\\IPC$" /user:${username} "${password}" 2>&1`
+  )
+
+  if (connectResult.exitCode !== 0 && !connectResult.stdout.includes('already')) {
+    const msg = `SMB connection to ${targetIP} failed (port 445 may be blocked): ${connectResult.stderr || connectResult.stdout}`
+    console.error(`[utils] ${msg}`)
+    return { success: false, message: msg }
+  }
+
+  console.log(`[utils] SMB connected to ${targetIP}`)
+
+  try {
+    // 2. Create a scheduled task that enables WinRM
+    const enableCmd = [
+      'Enable-PSRemoting -Force -SkipNetworkProfileCheck',
+      'Set-Item WSMan:\\\\localhost\\\\Client\\\\TrustedHosts -Value * -Force',
+      'New-NetFirewallRule -DisplayName \\"WinRM HTTP\\" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue',
+      'Restart-Service WinRM',
+    ].join('; ')
+
+    const createResult = await runPowerShell(
+      `schtasks.exe /create /s ${targetIP} /u ${username} /p "${password}"` +
+      ` /tn "${taskName}"` +
+      ` /tr "powershell.exe -NonInteractive -ExecutionPolicy Bypass -Command ${enableCmd}"` +
+      ` /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /f`
+    )
+
+    if (createResult.exitCode !== 0) {
+      const msg = `schtasks create failed on ${targetIP}: ${createResult.stderr || createResult.stdout}`
+      console.error(`[utils] ${msg}`)
+      return { success: false, message: msg }
+    }
+
+    console.log(`[utils] Scheduled task "${taskName}" created on ${targetIP}`)
+
+    // 3. Run the task immediately
+    const runResult = await runPowerShell(
+      `schtasks.exe /run /s ${targetIP} /u ${username} /p "${password}" /tn "${taskName}"`
+    )
+
+    if (runResult.exitCode !== 0) {
+      const msg = `schtasks run failed on ${targetIP}: ${runResult.stderr || runResult.stdout}`
+      console.error(`[utils] ${msg}`)
+      return { success: false, message: msg }
+    }
+
+    console.log(`[utils] Scheduled task running on ${targetIP}, waiting for completion...`)
+
+    // 4. Wait for the task to finish (poll status)
+    await delay(5000)
+
+    for (let i = 0; i < 6; i++) {
+      const statusResult = await runPowerShell(
+        `schtasks.exe /query /s ${targetIP} /u ${username} /p "${password}" /tn "${taskName}" /fo CSV /nh`
+      )
+      if (statusResult.stdout.includes('Ready') || statusResult.stdout.includes('Could not')) {
+        break
+      }
+      console.log(`[utils] Task still running on ${targetIP}, waiting...`)
+      await delay(3000)
+    }
+
+    // 5. Clean up the scheduled task
+    await runPowerShell(
+      `schtasks.exe /delete /s ${targetIP} /u ${username} /p "${password}" /tn "${taskName}" /f`
+    ).catch(() => { /* best-effort cleanup */ })
+
+    console.log(`[utils] SMB bootstrap completed for ${targetIP}`)
+    return { success: true, message: `SMB bootstrap succeeded for ${targetIP}` }
+  } finally {
+    // Disconnect IPC$ (best-effort)
+    await runPowerShell(`net use "\\\\${targetIP}\\IPC$" /delete /y 2>&1`).catch(() => {})
+  }
+}
+
 // -- Timing helper ------------------------------------------------------------
 
 export function delay(ms: number): Promise<void> {

@@ -13,7 +13,7 @@
  */
 
 import net from 'net'
-import { runPowerShell, delay, ensureWinRMReady, enableWinRMViaDCOM } from './utils.js'
+import { runPowerShell, delay, ensureWinRMReady, enableWinRMViaSMB, enableWinRMViaDCOM } from './utils.js'
 
 // -- Public types -------------------------------------------------------------
 
@@ -164,15 +164,36 @@ async function runLiveDeploy(
     throw spawnErr
   })
 
-  // If WinRM is not reachable, attempt DCOM bootstrap before giving up
+  // If WinRM is not reachable, try SMB bootstrap (port 445), then DCOM (port 135)
   if (wsmanResult.exitCode !== 0) {
-    step('connect', 'WinRM not available — enabling via DCOM...')
-    console.log('[deployer] WinRM not available, attempting DCOM bootstrap...')
+    let bootstrapSucceeded = false
 
-    const dcomResult = await enableWinRMViaDCOM(targetIP, credential)
-    if (!dcomResult.success) {
+    // Try SMB bootstrap first (most likely to work — d3 servers have firewall off)
+    step('connect', 'WinRM not available — enabling via SMB (port 445)...')
+    console.log('[deployer] WinRM not available, attempting SMB bootstrap...')
+
+    const smbResult = await enableWinRMViaSMB(targetIP, credential)
+    if (smbResult.success) {
+      bootstrapSucceeded = true
+      console.log('[deployer] SMB bootstrap succeeded')
+    } else {
+      // Fall back to DCOM (port 135)
+      step('connect', 'SMB not available — trying DCOM (port 135)...')
+      console.log(`[deployer] SMB failed: ${smbResult.message}`)
+      console.log('[deployer] Attempting DCOM bootstrap...')
+
+      const dcomResult = await enableWinRMViaDCOM(targetIP, credential)
+      if (dcomResult.success) {
+        bootstrapSucceeded = true
+        console.log('[deployer] DCOM bootstrap succeeded')
+      } else {
+        console.log(`[deployer] DCOM failed: ${dcomResult.message}`)
+      }
+    }
+
+    if (!bootstrapSucceeded) {
       throw new Error(
-        `Cannot reach ${targetIP} remotely (WinRM and DCOM both unavailable). ` +
+        `Cannot reach ${targetIP} remotely (WinRM, SMB, and DCOM all unavailable). ` +
         `Run this on the target server in an Admin PowerShell: ` +
         `Enable-PSRemoting -Force -SkipNetworkProfileCheck`
       )
@@ -205,7 +226,9 @@ async function runLiveDeploy(
 
     if (!winrmReady) {
       throw new Error(
-        `WinRM did not become available on ${targetIP} after DCOM bootstrap (waited ~38s)`
+        `WinRM did not become available on ${targetIP} after bootstrap (waited ~38s). ` +
+        `Run this on the target server in an Admin PowerShell: ` +
+        `Enable-PSRemoting -Force -SkipNetworkProfileCheck`
       )
     }
   }

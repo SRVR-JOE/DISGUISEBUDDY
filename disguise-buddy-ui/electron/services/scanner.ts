@@ -48,7 +48,7 @@ export interface ScanCallbacks {
 
 // -- Constants ----------------------------------------------------------------
 
-const DEFAULT_PORTS = [80, 873, 9864]
+const DEFAULT_PORTS = [80, 445, 873, 9864]
 const CONCURRENT_BATCH_SIZE = 20
 const D3_SYSTEM_API_PATH = '/api/service/system'
 
