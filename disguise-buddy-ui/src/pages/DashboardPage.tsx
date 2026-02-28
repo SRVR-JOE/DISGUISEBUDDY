@@ -242,8 +242,8 @@ export function DashboardPage() {
   const [hasScanned, setHasScanned] = useState(false)
 
   // Credentials
-  const [credUser, setCredUser] = useState('disguise')
-  const [credPass, setCredPass] = useState('d3')
+  const [credUser, setCredUser] = useState('d3')
+  const [credPass, setCredPass] = useState('disguise')
 
   // Per-row deploy states: ip → RowDeployState
   const [deployStates, setDeployStates] = useState<Record<string, RowDeployState>>({})
