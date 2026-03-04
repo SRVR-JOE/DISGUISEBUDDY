@@ -2,7 +2,7 @@
   "name": "disguise-buddy-ui",
   "version": "1.0.0",
   "description": "Disguise Buddy — d3 server configuration manager",
-  "main": "electron/main.js",
+  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -11,7 +11,7 @@
     "api": "tsx electron/dev-server.ts",
     "start": "concurrently --kill-others-on-fail \"tsx electron/dev-server.ts\" \"vite --open\"",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "tsc -p electron/tsconfig.json && vite build && electron-builder"
   },
   "keywords": [],
   "author": "",
@@ -42,5 +42,36 @@
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "wait-on": "^9.0.4"
+  },
+  "build": {
+    "appId": "com.disguise.buddy",
+    "productName": "Disguise Buddy",
+    "directories": {
+      "output": "dist-installer"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "dist-renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../profiles",
+        "to": "profiles",
+        "filter": ["**/*.json"]
+      },
+      {
+        "from": "../software",
+        "to": "software",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": true
+    }
   }
 }

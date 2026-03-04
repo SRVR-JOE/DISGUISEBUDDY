@@ -114,6 +114,7 @@ export interface WinRMReadyResult {
  */
 export async function ensureWinRMReady(targetIP: string): Promise<WinRMReadyResult> {
   const messages: string[] = []
+  let failed = false
 
   // Start the WinRM service if it is not already running
   try {
@@ -127,11 +128,13 @@ export async function ensureWinRMReady(targetIP: string): Promise<WinRMReadyResu
       const warn = `WinRM service start returned exit ${startResult.exitCode}: ${startResult.stderr || startResult.stdout}`
       console.warn(`[utils] ${warn}`)
       messages.push(warn)
+      failed = true
     }
   } catch (err) {
     const warn = `Could not start WinRM service: ${err instanceof Error ? err.message : String(err)}`
     console.warn(`[utils] ${warn}`)
     messages.push(warn)
+    failed = true
   }
 
   // Add the target IP to TrustedHosts so PowerShell accepts bare-IP connections
@@ -146,14 +149,16 @@ export async function ensureWinRMReady(targetIP: string): Promise<WinRMReadyResu
       const warn = `TrustedHosts update returned exit ${trustedResult.exitCode}: ${trustedResult.stderr || trustedResult.stdout}`
       console.warn(`[utils] ${warn}`)
       messages.push(warn)
+      failed = true
     }
   } catch (err) {
     const warn = `Could not update TrustedHosts: ${err instanceof Error ? err.message : String(err)}`
     console.warn(`[utils] ${warn}`)
     messages.push(warn)
+    failed = true
   }
 
-  return { success: true, message: messages.join('; ') }
+  return { success: !failed, message: messages.join('; ') }
 }
 
 // -- DCOM WinRM bootstrap -----------------------------------------------------
@@ -262,11 +267,17 @@ export async function enableWinRMViaSMB(
   const password = credential?.password ?? 'disguise'
   const taskName = `DisguiseBuddy_${Date.now()}`
 
+  // Escape values for embedding inside PowerShell double-quoted strings.
+  // Backtick escapes the special characters PowerShell interprets inside "…".
+  const escapePs = (s: string): string => s.replace(/[`"$]/g, '`$&')
+  const escapedUser = escapePs(username)
+  const escapedPass = escapePs(password)
+
   console.log(`[utils] Attempting SMB WinRM bootstrap for ${targetIP}...`)
 
   // 1. Connect to IPC$ to verify SMB is reachable
   const connectResult = await runPowerShell(
-    `net use "\\\\${targetIP}\\IPC$" /user:${username} "${password}" 2>&1`
+    `net use "\\\\${targetIP}\\IPC$" /user:"${escapedUser}" "${escapedPass}" 2>&1`
   )
 
   if (connectResult.exitCode !== 0 && !connectResult.stdout.includes('already')) {
@@ -279,17 +290,20 @@ export async function enableWinRMViaSMB(
 
   try {
     // 2. Create a scheduled task that enables WinRM
+    // Use -EncodedCommand to avoid all quoting issues with schtasks /tr
     const enableCmd = [
       'Enable-PSRemoting -Force -SkipNetworkProfileCheck',
-      'Set-Item WSMan:\\\\localhost\\\\Client\\\\TrustedHosts -Value * -Force',
-      'New-NetFirewallRule -DisplayName \\"WinRM HTTP\\" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue',
+      'Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force',
+      'New-NetFirewallRule -DisplayName "WinRM HTTP" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue',
       'Restart-Service WinRM',
     ].join('; ')
 
+    const encodedCmd = Buffer.from(enableCmd, 'utf16le').toString('base64')
+
     const createResult = await runPowerShell(
-      `schtasks.exe /create /s ${targetIP} /u ${username} /p "${password}"` +
+      `schtasks.exe /create /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}"` +
       ` /tn "${taskName}"` +
-      ` /tr "powershell.exe -NonInteractive -ExecutionPolicy Bypass -Command ${enableCmd}"` +
+      ` /tr "powershell.exe -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encodedCmd}"` +
       ` /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /f`
     )
 
@@ -303,7 +317,7 @@ export async function enableWinRMViaSMB(
 
     // 3. Run the task immediately
     const runResult = await runPowerShell(
-      `schtasks.exe /run /s ${targetIP} /u ${username} /p "${password}" /tn "${taskName}"`
+      `schtasks.exe /run /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}"`
     )
 
     if (runResult.exitCode !== 0) {
@@ -319,7 +333,7 @@ export async function enableWinRMViaSMB(
 
     for (let i = 0; i < 6; i++) {
       const statusResult = await runPowerShell(
-        `schtasks.exe /query /s ${targetIP} /u ${username} /p "${password}" /tn "${taskName}" /fo CSV /nh`
+        `schtasks.exe /query /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /fo CSV /nh`
       )
       if (statusResult.stdout.includes('Ready') || statusResult.stdout.includes('Could not')) {
         break
@@ -330,7 +344,7 @@ export async function enableWinRMViaSMB(
 
     // 5. Clean up the scheduled task
     await runPowerShell(
-      `schtasks.exe /delete /s ${targetIP} /u ${username} /p "${password}" /tn "${taskName}" /f`
+      `schtasks.exe /delete /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /f`
     ).catch(() => { /* best-effort cleanup */ })
 
     console.log(`[utils] SMB bootstrap completed for ${targetIP}`)

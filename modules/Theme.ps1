@@ -59,6 +59,7 @@ $script:LightTheme = @{
     WarningBackground = [System.Drawing.ColorTranslator]::FromHtml('#FFFBEB')
     ErrorBackground   = [System.Drawing.ColorTranslator]::FromHtml('#FEF2F2')
     Border            = [System.Drawing.ColorTranslator]::FromHtml('#E2E8F0')
+    BorderLight       = [System.Drawing.ColorTranslator]::FromHtml('#CBD5E1')
     NavBackground     = [System.Drawing.ColorTranslator]::FromHtml('#FFFFFF')
     NavHover          = [System.Drawing.ColorTranslator]::FromHtml('#F1F5F9')
     NavActive         = [System.Drawing.ColorTranslator]::FromHtml('#7C3AED')
@@ -359,7 +360,7 @@ function Write-AppLog {
                 Select-Object -Skip 5 |
                 Remove-Item -Force -ErrorAction SilentlyContinue
         } catch {
-            # If rotation fails, continue writing to current log
+            Write-Warning "Log rotation failed: $_"
         }
     }
 

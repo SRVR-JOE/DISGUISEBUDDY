@@ -96,6 +96,7 @@ export function executeRemote(
   const startTime = Date.now()
   let stdoutAccum = ''
   let stderrAccum = ''
+  let completed = false
 
   // Build the Invoke-Command script.
   // The inner command is embedded directly; callers are responsible for
@@ -141,24 +142,30 @@ export function executeRemote(
     const msg = `PowerShell spawn error: ${err.message}`
     stderrAccum += msg + '\n'
     callbacks.onError(msg)
-    callbacks.onComplete({
-      stdout: stdoutAccum.trimEnd(),
-      stderr: stderrAccum.trimEnd(),
-      exitCode: 1,
-      durationMs: Date.now() - startTime,
-    })
+    if (!completed) {
+      completed = true
+      callbacks.onComplete({
+        stdout: stdoutAccum.trimEnd(),
+        stderr: stderrAccum.trimEnd(),
+        exitCode: 1,
+        durationMs: Date.now() - startTime,
+      })
+    }
   })
 
   child.on('close', (code) => {
     // Flush any buffered partial line from each stream
     stdoutBuffer.flush()
     stderrBuffer.flush()
-    callbacks.onComplete({
-      stdout: stdoutAccum.trimEnd(),
-      stderr: stderrAccum.trimEnd(),
-      exitCode: code ?? 1,
-      durationMs: Date.now() - startTime,
-    })
+    if (!completed) {
+      completed = true
+      callbacks.onComplete({
+        stdout: stdoutAccum.trimEnd(),
+        stderr: stderrAccum.trimEnd(),
+        exitCode: code ?? 1,
+        durationMs: Date.now() - startTime,
+      })
+    }
   })
 
   return {
@@ -183,6 +190,7 @@ export function executeLocal(
   const startTime = Date.now()
   let stdoutAccum = ''
   let stderrAccum = ''
+  let completed = false
 
   const encoded = encodePowerShell(command)
 
@@ -212,23 +220,29 @@ export function executeLocal(
     const msg = `PowerShell spawn error: ${err.message}`
     stderrAccum += msg + '\n'
     callbacks.onError(msg)
-    callbacks.onComplete({
-      stdout: stdoutAccum.trimEnd(),
-      stderr: stderrAccum.trimEnd(),
-      exitCode: 1,
-      durationMs: Date.now() - startTime,
-    })
+    if (!completed) {
+      completed = true
+      callbacks.onComplete({
+        stdout: stdoutAccum.trimEnd(),
+        stderr: stderrAccum.trimEnd(),
+        exitCode: 1,
+        durationMs: Date.now() - startTime,
+      })
+    }
   })
 
   child.on('close', (code) => {
     stdoutBuffer.flush()
     stderrBuffer.flush()
-    callbacks.onComplete({
-      stdout: stdoutAccum.trimEnd(),
-      stderr: stderrAccum.trimEnd(),
-      exitCode: code ?? 1,
-      durationMs: Date.now() - startTime,
-    })
+    if (!completed) {
+      completed = true
+      callbacks.onComplete({
+        stdout: stdoutAccum.trimEnd(),
+        stderr: stderrAccum.trimEnd(),
+        exitCode: code ?? 1,
+        durationMs: Date.now() - startTime,
+      })
+    }
   })
 
   return {
@@ -257,6 +271,7 @@ export function pingHost(
   const startTime = Date.now()
   let stdoutAccum = ''
   let stderrAccum = ''
+  let completed = false
 
   const isWindows = os.platform() === 'win32'
   const pingArgs = isWindows
@@ -285,23 +300,29 @@ export function pingHost(
     const msg = `ping spawn error: ${err.message}`
     stderrAccum += msg + '\n'
     callbacks.onError(msg)
-    callbacks.onComplete({
-      stdout: stdoutAccum.trimEnd(),
-      stderr: stderrAccum.trimEnd(),
-      exitCode: 1,
-      durationMs: Date.now() - startTime,
-    })
+    if (!completed) {
+      completed = true
+      callbacks.onComplete({
+        stdout: stdoutAccum.trimEnd(),
+        stderr: stderrAccum.trimEnd(),
+        exitCode: 1,
+        durationMs: Date.now() - startTime,
+      })
+    }
   })
 
   child.on('close', (code) => {
     stdoutBuffer.flush()
     stderrBuffer.flush()
-    callbacks.onComplete({
-      stdout: stdoutAccum.trimEnd(),
-      stderr: stderrAccum.trimEnd(),
-      exitCode: code ?? 1,
-      durationMs: Date.now() - startTime,
-    })
+    if (!completed) {
+      completed = true
+      callbacks.onComplete({
+        stdout: stdoutAccum.trimEnd(),
+        stderr: stderrAccum.trimEnd(),
+        exitCode: code ?? 1,
+        durationMs: Date.now() - startTime,
+      })
+    }
   })
 
   return {

@@ -124,10 +124,18 @@ function New-D3ProjectShare {
         }
 
         if ($existingShare) {
-            Write-AppLog -Message "Share '$ShareName' already exists. Remove it first to recreate." -Level 'WARN'
-            return [PSCustomObject]@{
-                Success = $false
-                Message = "Share '$ShareName' already exists. Remove it first or update its settings."
+            if ($existingShare.Path -eq $LocalPath) {
+                Write-AppLog -Message "Share '$ShareName' already configured correctly at '$LocalPath'." -Level 'INFO'
+                return [PSCustomObject]@{
+                    Success = $true
+                    Message = "Share '$ShareName' already configured correctly at '$LocalPath'."
+                }
+            } else {
+                Write-AppLog -Message "Share '$ShareName' already exists at '$($existingShare.Path)' (requested: '$LocalPath'). Remove it first to recreate." -Level 'WARN'
+                return [PSCustomObject]@{
+                    Success = $false
+                    Message = "Share '$ShareName' already exists at a different path ('$($existingShare.Path)'). Remove it first or update its settings."
+                }
             }
         }
 

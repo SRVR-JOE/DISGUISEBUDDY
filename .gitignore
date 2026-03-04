@@ -1,0 +1,25 @@
+# ─── Node / Electron UI ───────────────────────────────────────────────────────
+disguise-buddy-ui/node_modules/
+disguise-buddy-ui/dist-renderer/
+disguise-buddy-ui/dist-electron/
+disguise-buddy-ui/dist-installer/
+disguise-buddy-ui/.vite/
+
+# ─── PowerShell build artifacts ───────────────────────────────────────────────
+dist/DisguiseBuddy-merged.ps1
+dist/COMPILE.ps1
+
+# ─── Runtime-generated data (should not be tracked) ──────────────────────────
+dist/logs/
+dist/settings/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ─── OS / editor artifacts ────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

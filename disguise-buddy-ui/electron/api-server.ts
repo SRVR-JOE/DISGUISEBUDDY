@@ -3,6 +3,7 @@ import cors from 'cors'
 import type { Request, Response } from 'express'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'module'
 import net from 'net'
 import http from 'http'
 import {
@@ -17,15 +18,48 @@ import { isPowerShellAvailable, runPowerShell } from './services/utils.js'
 import { installSoftware, getPackages, addPackage, removePackage } from './services/installer.js'
 import { executeRemote, executeLocal, pingHost } from './services/terminal.js'
 
+// ESM-compatible require — used to conditionally load 'electron' without a
+// static top-level import so that this module also works in the dev-server
+// context (plain Node.js, no Electron runtime present).
+const _require = createRequire(import.meta.url)
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SOFTWARE_DIR = path.resolve(__dirname, '..', '..', 'software')
+
+/**
+ * Resolve a resource path that works in both dev and packaged Electron builds.
+ *
+ * - In a packaged app: extraResources are unpacked to process.resourcesPath,
+ *   so we look there instead of relative to __dirname (which is inside the
+ *   asar archive and cannot reach sibling directories on disk).
+ * - In dev / dev-server (plain Node.js): falls back to __dirname-relative path
+ *   two levels up — i.e. the repo root.
+ * - If 'electron' is not available at all (e.g. dev-server.ts), the try/catch
+ *   silently falls through to the fallback.
+ */
+function getResourcePath(relativePath: string): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { app } = _require('electron') as { app: any }
+    if (app?.isPackaged) {
+      return path.join(process.resourcesPath, relativePath)
+    }
+  } catch {
+    // Not running inside Electron (e.g. tsx electron/dev-server.ts)
+  }
+  return path.resolve(__dirname, '..', '..', relativePath)
+}
+
+const SOFTWARE_DIR = getResourcePath('software')
 
 const PORT = 47100
 const app = express()
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
-app.use(cors())
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'app://disguise-buddy'],
+  methods: ['GET', 'POST', 'DELETE'],
+}))
 app.use(express.json())
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -95,6 +129,33 @@ app.get('/api/scan', (req: Request, res: Response) => {
   const start = parseInt(req.query.start as string) || 1
   const end = parseInt(req.query.end as string) || 254
   const timeout = parseInt(req.query.timeout as string) || 200
+
+  // Input validation
+  if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(subnet)) {
+    sendSse(res, 'error', { message: 'Invalid subnet format. Expected format: x.x.x (e.g. 192.168.10)' })
+    res.end()
+    return
+  }
+  if (!Number.isInteger(start) || start < 1 || start > 254) {
+    sendSse(res, 'error', { message: 'Invalid start: must be an integer between 1 and 254' })
+    res.end()
+    return
+  }
+  if (!Number.isInteger(end) || end < 1 || end > 254) {
+    sendSse(res, 'error', { message: 'Invalid end: must be an integer between 1 and 254' })
+    res.end()
+    return
+  }
+  if (start > end) {
+    sendSse(res, 'error', { message: 'Invalid range: start must be less than or equal to end' })
+    res.end()
+    return
+  }
+  if (!Number.isInteger(timeout) || timeout < 50 || timeout > 5000) {
+    sendSse(res, 'error', { message: 'Invalid timeout: must be an integer between 50 and 5000' })
+    res.end()
+    return
+  }
 
   const { cancel } = scanNetwork(
     { subnet, startIP: start, endIP: end, timeoutMs: timeout, ports: [80, 873, 9864] },
@@ -275,6 +336,24 @@ app.get('/api/terminal/ping', (req: Request, res: Response) => {
     return
   }
 
+  // Input validation: target must be a valid IPv4 address or hostname
+  const isIPv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(target)
+  if (isIPv4) {
+    const octets = target.split('.').map(Number)
+    if (octets.some(o => o < 0 || o > 255)) {
+      sendSse(res, 'error', { message: 'Invalid IPv4 address: each octet must be 0-255' })
+      res.end()
+      return
+    }
+  } else {
+    const isHostname = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/.test(target)
+    if (!isHostname) {
+      sendSse(res, 'error', { message: 'Invalid target: must be a valid IPv4 address or hostname' })
+      res.end()
+      return
+    }
+  }
+
   const { cancel } = pingHost(
     target,
     count,
@@ -289,6 +368,12 @@ app.get('/api/terminal/ping', (req: Request, res: Response) => {
   )
 
   req.on('close', () => cancel())
+})
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+
+app.get('/api/dashboard', (_req: Request, res: Response) => {
+  res.json({ status: 'ok', profiles: getProfiles().length })
 })
 
 // ─── Setup script ─────────────────────────────────────────────────────────────
@@ -552,8 +637,8 @@ app.use((_req: Request, res: Response) => {
 
 export function startApiServer(): Promise<void> {
   return new Promise((resolve, reject) => {
-    const server = app.listen(PORT, () => {
-      console.log(`[api-server] Listening on http://localhost:${PORT}`)
+    const server = app.listen(PORT, '127.0.0.1', () => {
+      console.log(`[api-server] Listening on http://127.0.0.1:${PORT}`)
       resolve()
     })
     server.on('error', (err: NodeJS.ErrnoException) => {

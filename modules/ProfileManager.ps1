@@ -786,8 +786,13 @@ function Apply-FullProfile {
         }
         else {
             $skipCount++
-            [void]$results.AppendLine("[SKIP] Hostname: Already set to '$($Profile.ServerName)'")
-            Write-AppLog "Hostname unchanged (already '$($Profile.ServerName)')" -Level 'INFO'
+            if ([string]::IsNullOrWhiteSpace($Profile.ServerName)) {
+                [void]$results.AppendLine("[SKIP] Hostname: Not configured in profile")
+                Write-AppLog "Hostname unchanged (not configured in profile)" -Level 'INFO'
+            } else {
+                [void]$results.AppendLine("[SKIP] Hostname: Already set to '$($Profile.ServerName)'")
+                Write-AppLog "Hostname unchanged (already '$($Profile.ServerName)')" -Level 'INFO'
+            }
         }
     }
     catch {
@@ -1014,12 +1019,12 @@ function Get-CurrentSystemProfile {
 
     # Define the expected adapter roles and their indices
     $roleDefinitions = @(
-        @{ Index = 0; Role = "d3Net";    DisplayName = "d3 Network" },
-        @{ Index = 1; Role = "Media";    DisplayName = "Media Network" },
-        @{ Index = 2; Role = "sACN";     DisplayName = "Lighting (sACN/Art-Net)" },
-        @{ Index = 3; Role = "NDI";      DisplayName = "NDI Video" },
-        @{ Index = 4; Role = "Control";  DisplayName = "Control (OSC/Automation)" },
-        @{ Index = 5; Role = "100G"; DisplayName = "Internet / Management" }
+        @{ Index = 0; Role = "d3Net";  DisplayName = "d3 Network" },
+        @{ Index = 1; Role = "sACN";   DisplayName = "Lighting (sACN/Art-Net)" },
+        @{ Index = 2; Role = "Media";  DisplayName = "Media Network" },
+        @{ Index = 3; Role = "NDI";    DisplayName = "NDI Video" },
+        @{ Index = 4; Role = "100G";   DisplayName = "100G" },
+        @{ Index = 5; Role = "100G";   DisplayName = "100G" }
     )
 
     # Try to read physical network adapters from the system

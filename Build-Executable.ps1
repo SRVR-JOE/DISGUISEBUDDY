@@ -196,20 +196,6 @@ foreach ($modFile in $ModuleLoadOrder) {
         }
     }
 
-    # Patch NetworkConfig: replace profile import path
-    # Original:  Join-Path (Split-Path $PSScriptRoot -Parent) 'profiles'
-    # Patched:   Join-Path (Get-AppRootPath) 'profiles'
-    if ($modFile -eq 'NetworkConfig.ps1') {
-        $before = $modContent
-        $modContent = $modContent -replace [regex]::Escape('Join-Path (Split-Path $PSScriptRoot -Parent) ''profiles'''),
-                                           'Join-Path (Get-AppRootPath) ''profiles'''
-        if ($modContent -eq $before) {
-            Write-Host "     WARNING: NetworkConfig PSScriptRoot patch did not match. Verify profile import path manually." -ForegroundColor Yellow
-        } else {
-            Write-OK 'NetworkConfig.ps1 path patched'
-        }
-    }
-
     [void]$sb.AppendLine($modContent)
     [void]$sb.AppendLine('')
 }

@@ -160,6 +160,8 @@ async function runLiveDeploy(
 
   const username = credential?.username ?? 'd3'
   const password = credential?.password ?? 'disguise'
+  const escapedUser = escapePs(username)
+  const escapedPass = escapePs(password)
 
   // ── Attempt Transport A: SMB Direct ─────────────────────────────────────
 
@@ -176,7 +178,7 @@ async function runLiveDeploy(
   if (isCancelled()) return
 
   const ipcConnect = await runPowerShell(
-    `net use "\\\\${targetIP}\\IPC$" /user:${username} "${escapePs(password)}" 2>&1`
+    `net use "\\\\${targetIP}\\IPC$" /user:"${escapedUser}" "${escapedPass}" 2>&1`
   ).catch(() => null)
 
   const smbReachable =
@@ -234,6 +236,8 @@ interface SmbDirectOptions {
 
 async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
   const { targetIP, profile, username, password, smbStep, isCancelled } = opts
+  const escapedUser = escapePs(username)
+  const escapedPass = escapePs(password)
 
   const taskName = 'DisguiseBuddy_Deploy'
   const scriptFileName = 'disguisebuddy_deploy.ps1'
@@ -309,7 +313,7 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
 
   // Delete any stale task first (best-effort)
   await runPowerShell(
-    `schtasks.exe /delete /s ${targetIP} /u ${username} /p "${escapePs(password)}" /tn "${taskName}" /f 2>&1`
+    `schtasks.exe /delete /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /f 2>&1`
   ).catch(() => {})
 
   const createResult = await runPowerShell(
@@ -336,7 +340,7 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
   if (isCancelled()) return
 
   const runResult = await runPowerShell(
-    `schtasks.exe /run /s ${targetIP} /u ${username} /p "${escapePs(password)}" /tn "${taskName}"`
+    `schtasks.exe /run /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}"`
   )
 
   if (runResult.exitCode !== 0) {
@@ -360,7 +364,7 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
     await delay(3000)
 
     const queryResult = await runPowerShell(
-      `schtasks.exe /query /s ${targetIP} /u ${username} /p "${escapePs(password)}" /tn "${taskName}" /fo CSV /nh 2>&1`
+      `schtasks.exe /query /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /fo CSV /nh 2>&1`
     )
 
     const output = queryResult.stdout.toLowerCase()
@@ -398,11 +402,22 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
   )
 
   if (readResult.exitCode !== 0 || !readResult.stdout.trim()) {
-    // Non-fatal: the script ran but we couldn't read the JSON.
-    // Treat as partial success and warn.
     console.warn(
       `[deployer] Could not read result file from ${resultUNC}: ` +
       (readResult.stderr || readResult.stdout || 'empty output')
+    )
+    // Clean up before returning so we don't leave temp files behind
+    const safeScriptUNCEarly = scriptUNC.replace(/'/g, "''")
+    await Promise.allSettled([
+      runPowerShell(
+        `schtasks.exe /delete /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /f 2>&1`
+      ),
+      runPowerShell(`Remove-Item -Path '${safeScriptUNCEarly}' -Force -ErrorAction SilentlyContinue`),
+      runPowerShell(`Remove-Item -Path '${safeResultUNC}' -Force -ErrorAction SilentlyContinue`),
+    ])
+    await runPowerShell(`net use "\\\\${targetIP}\\IPC$" /delete /y 2>&1`).catch(() => {})
+    throw new Error(
+      'Deployment executed but results could not be verified. Check the server manually.'
     )
   } else {
     try {
@@ -418,7 +433,11 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
       console.log(`[deployer] Remote script results: ${msgs}`)
     } catch (parseErr) {
       if (parseErr instanceof SyntaxError) {
-        console.warn(`[deployer] Could not parse result JSON: ${readResult.stdout}`)
+        console.error(`[deployer] Could not parse result JSON from ${targetIP}: ${readResult.stdout}`)
+        throw new Error(
+          `Deployment completed on ${targetIP} but result file contained invalid JSON. ` +
+          `Check the server manually. Raw: ${readResult.stdout.substring(0, 200)}`
+        )
       } else {
         throw parseErr
       }
@@ -433,7 +452,7 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
   await Promise.allSettled([
     // Delete the scheduled task
     runPowerShell(
-      `schtasks.exe /delete /s ${targetIP} /u ${username} /p "${escapePs(password)}" /tn "${taskName}" /f 2>&1`
+      `schtasks.exe /delete /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /f 2>&1`
     ),
     // Delete the script file
     runPowerShell(`Remove-Item -Path '${safeScriptUNC}' -Force -ErrorAction SilentlyContinue`),
@@ -483,7 +502,10 @@ async function runWinrmDeploy(
   step('setup', 'Configuring WinRM prerequisites...')
   if (isCancelled()) return
 
-  await ensureWinRMReady(targetIP)
+  const prereqResult = await ensureWinRMReady(targetIP)
+  if (!prereqResult.success) {
+    console.warn(`[deployer] WinRM prerequisites failed: ${prereqResult.message}`)
+  }
 
   // Step 2: Test WinRM connectivity (with DCOM bootstrap fallback)
   step('connect', `Testing WinRM connectivity to ${targetIP}...`)
@@ -552,8 +574,12 @@ async function runWinrmDeploy(
           console.log(`[deployer] WinRM became available after attempt ${attempt}`)
           break
         }
-      } catch {
-        // Swallow — will retry
+      } catch (retryErr) {
+        const errMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
+        if (errMsg.includes('ENOENT') || errMsg.includes('spawn')) {
+          throw retryErr // PowerShell not available — no point retrying
+        }
+        console.warn(`[deployer] WinRM retry ${attempt}/6 error: ${errMsg}`)
       }
 
       console.log(`[deployer] WinRM retry ${attempt}/6 — not yet ready`)
@@ -588,6 +614,8 @@ async function runWinrmDeploy(
   step('network', `Configuring ${enabledAdapters.length} network adapter(s)...`)
   if (isCancelled()) return
 
+  const failedAdapters: string[] = []
+
   for (const adapter of enabledAdapters) {
     if (isCancelled()) return
 
@@ -598,10 +626,11 @@ async function runWinrmDeploy(
       `Invoke-Command -ComputerName ${targetIP}${credArg} -ScriptBlock { ${psBlock} } -ErrorAction Stop`
     )
     if (adapterResult.exitCode !== 0) {
+      const detail = adapterResult.stderr || adapterResult.stdout
       console.error(
-        `[deployer] Adapter ${adapter.Index} (${adapter.DisplayName}) config failed: ` +
-        (adapterResult.stderr || adapterResult.stdout)
+        `[deployer] Adapter ${adapter.Index} (${adapter.DisplayName}) config failed: ${detail}`
       )
+      failedAdapters.push(`${adapter.DisplayName} (${detail})`)
     }
   }
 
@@ -609,13 +638,18 @@ async function runWinrmDeploy(
   step('smb', 'Configuring SMB shares...')
   if (isCancelled()) return
 
+  let smbFailed = false
+  let smbFailDetail = ''
+
   const smbScript = buildSmbScript(profile.SMBSettings)
   if (smbScript) {
     const smbResult = await runPowerShell(
       `Invoke-Command -ComputerName ${targetIP}${credArg} -ScriptBlock { ${smbScript} } -ErrorAction Stop`
     )
     if (smbResult.exitCode !== 0) {
-      console.error(`[deployer] SMB configuration failed: ${smbResult.stderr || smbResult.stdout}`)
+      smbFailDetail = smbResult.stderr || smbResult.stdout
+      console.error(`[deployer] SMB configuration failed: ${smbFailDetail}`)
+      smbFailed = true
     }
   }
 
@@ -630,10 +664,24 @@ async function runWinrmDeploy(
   }
 
   if (!isCancelled()) {
-    callbacks.onComplete({
-      success: true,
-      message: `Profile "${profile.Name}" successfully deployed to ${targetIP} via WinRM`,
-    })
+    if (failedAdapters.length > 0 || smbFailed) {
+      const parts: string[] = []
+      if (failedAdapters.length > 0) {
+        parts.push(`${failedAdapters.length} adapter(s) failed: ${failedAdapters.join('; ')}`)
+      }
+      if (smbFailed) {
+        parts.push(`SMB configuration failed: ${smbFailDetail}`)
+      }
+      callbacks.onComplete({
+        success: false,
+        message: `Partial failure deploying "${profile.Name}" to ${targetIP} via WinRM — ${parts.join(' | ')}`,
+      })
+    } else {
+      callbacks.onComplete({
+        success: true,
+        message: `Profile "${profile.Name}" successfully deployed to ${targetIP} via WinRM`,
+      })
+    }
   }
 }
 
@@ -815,8 +863,13 @@ function buildSmbScript(smb: SMBSettings): string {
   return buildSmbScriptLines(smb).join('; ')
 }
 
+/**
+ * Escape a string for embedding inside a PowerShell double-quoted string.
+ * Handles backtick (escape char), dollar (variable expansion), and
+ * double-quote (string terminator).
+ */
 function escapePs(s: string): string {
-  return s.replace(/'/g, "''")
+  return s.replace(/[`$"]/g, '`$&')
 }
 
 function sanitiseName(name: string): string {

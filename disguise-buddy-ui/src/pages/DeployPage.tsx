@@ -185,16 +185,24 @@ export function DeployPage() {
     const es = api.scanNetwork(subnet, start, end)
 
     es.addEventListener('progress', (e: MessageEvent) => {
-      const data = JSON.parse(e.data) as { percent: number; current?: number }
-      setScanProgress(data.percent)
-      if (data.current !== undefined) {
-        setScanStatus(`Scanning ${subnet}.${data.current}…`)
+      try {
+        const data = JSON.parse(e.data) as { percent: number; current?: number }
+        setScanProgress(data.percent)
+        if (data.current !== undefined) {
+          setScanStatus(`Scanning ${subnet}.${data.current}…`)
+        }
+      } catch {
+        console.warn('[DeployPage] Failed to parse scan progress event:', e.data)
       }
     })
 
     es.addEventListener('discovered', (e: MessageEvent) => {
-      const server = JSON.parse(e.data) as DiscoveredServer
-      setServers((prev) => [...prev, server])
+      try {
+        const server = JSON.parse(e.data) as DiscoveredServer
+        setServers((prev) => [...prev, server])
+      } catch {
+        console.warn('[DeployPage] Failed to parse discovered event:', e.data)
+      }
     })
 
     es.addEventListener('complete', () => {
@@ -206,11 +214,25 @@ export function DeployPage() {
       toast.success(`Scan complete: ${count} server${count === 1 ? '' : 's'} found`)
     })
 
+    // Named SSE 'error' event — application-level error sent by the server
+    es.addEventListener('error', (e: MessageEvent) => {
+      setScanning(false)
+      setScanStatus('')
+      es.close()
+      try {
+        const data = JSON.parse(e.data) as { message?: string }
+        toast.error(data.message ?? 'Scan failed')
+      } catch {
+        toast.error('Scan failed')
+      }
+    })
+
+    // Network-level onerror — connection dropped / server unreachable
     es.onerror = () => {
       setScanning(false)
       setScanStatus('')
       es.close()
-      toast.error('Scan failed')
+      toast.error('Scan connection lost')
     }
   }, [subnet, rangeStart, rangeEnd])
 
@@ -254,28 +276,76 @@ export function DeployPage() {
       const es = api.deployProfile(server.IPAddress, selectedProfile)
 
       es.addEventListener('progress', (e: MessageEvent) => {
-        const data = JSON.parse(e.data) as { percent: number; message?: string }
+        try {
+          const data = JSON.parse(e.data) as { step?: string; message?: string; stepNumber?: number; total?: number }
+          const percent = data.total ? Math.round(((data.stepNumber ?? 0) / data.total) * 100) : 0
+          setDeployStates((prev) => ({
+            ...prev,
+            [server.IPAddress]: {
+              status: 'deploying',
+              progress: percent,
+              message: data.message ?? '',
+            },
+          }))
+        } catch {
+          console.warn(`[DeployPage] Failed to parse progress event for ${server.IPAddress}:`, e.data)
+        }
+      })
+
+      es.addEventListener('complete', (e: MessageEvent) => {
+        es.close()
+        let success = true
+        let msg = 'Done'
+        try {
+          const data = JSON.parse(e.data) as { success?: boolean; message?: string }
+          success = data.success !== false
+          msg = data.message ?? (success ? 'Done' : 'Failed')
+        } catch {
+          console.warn(`[DeployPage] Failed to parse complete event for ${server.IPAddress}:`, e.data)
+          success = false
+          msg = 'Deployment completed but result could not be verified'
+        }
         setDeployStates((prev) => ({
           ...prev,
           [server.IPAddress]: {
-            status: 'deploying',
-            progress: data.percent,
-            message: data.message ?? '',
+            status: success ? 'done' : 'error',
+            progress: success ? 100 : prev[server.IPAddress]?.progress ?? 0,
+            message: msg,
           },
         }))
-      })
-
-      es.addEventListener('complete', () => {
-        es.close()
-        setDeployStates((prev) => ({
-          ...prev,
-          [server.IPAddress]: { status: 'done', progress: 100, message: 'Done' },
-        }))
-        toast.success(`Deployed to ${server.Hostname || server.IPAddress}`)
+        if (success) {
+          toast.success(`Deployed to ${server.Hostname || server.IPAddress}`)
+        } else {
+          toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}: ${msg}`)
+        }
         completed++
         if (completed === total) setDeploying(false)
       })
 
+      // Named SSE 'error' event — application-level error sent by the server
+      es.addEventListener('error', (e: MessageEvent) => {
+        es.close()
+        let msg = 'Failed'
+        try {
+          const data = JSON.parse(e.data) as { message?: string }
+          msg = data.message ?? msg
+        } catch {
+          // use default message
+        }
+        setDeployStates((prev) => ({
+          ...prev,
+          [server.IPAddress]: {
+            status: 'error',
+            progress: prev[server.IPAddress]?.progress ?? 0,
+            message: msg,
+          },
+        }))
+        toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}: ${msg}`)
+        completed++
+        if (completed === total) setDeploying(false)
+      })
+
+      // Network-level onerror — connection dropped / server unreachable
       es.onerror = () => {
         es.close()
         setDeployStates((prev) => ({
@@ -283,10 +353,10 @@ export function DeployPage() {
           [server.IPAddress]: {
             status: 'error',
             progress: prev[server.IPAddress]?.progress ?? 0,
-            message: 'Failed',
+            message: 'Connection lost',
           },
         }))
-        toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}`)
+        toast.error(`Deploy connection lost for ${server.Hostname || server.IPAddress}`)
         completed++
         if (completed === total) setDeploying(false)
       }
