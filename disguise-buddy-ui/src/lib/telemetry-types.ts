@@ -53,4 +53,4 @@ export interface AnomalyEvent {
   unit: string
 }
 
-export type TimeRange = '5m' | '15m' | '1h' | '6h' | '24h'
+export type TimeRange = '30s' | '1m' | '5m' | '15m' | '1h'

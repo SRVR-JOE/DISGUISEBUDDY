@@ -1,11 +1,11 @@
 import type { TimeRange } from '@/lib/telemetry-types'
 
 const RANGES: { value: TimeRange; label: string }[] = [
+  { value: '30s', label: '30s' },
+  { value: '1m', label: '1m' },
   { value: '5m', label: '5m' },
   { value: '15m', label: '15m' },
   { value: '1h', label: '1h' },
-  { value: '6h', label: '6h' },
-  { value: '24h', label: '24h' },
 ]
 
 interface TimeRangeSelectorProps {

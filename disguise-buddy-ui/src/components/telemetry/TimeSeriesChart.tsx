@@ -17,15 +17,12 @@ import { ChartTooltip } from './ChartTooltip'
 
 function formatTimeTick(timestamp: number, timeRange: TimeRange): string {
   const d = new Date(timestamp)
-  if (timeRange === '24h') {
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    const hour = String(d.getHours()).padStart(2, '0')
-    const min = String(d.getMinutes()).padStart(2, '0')
-    return `${month}/${day} ${hour}:${min}`
-  }
   const hour = String(d.getHours()).padStart(2, '0')
   const min = String(d.getMinutes()).padStart(2, '0')
+  const sec = String(d.getSeconds()).padStart(2, '0')
+  if (timeRange === '30s' || timeRange === '1m') {
+    return `${hour}:${min}:${sec}`
+  }
   return `${hour}:${min}`
 }
 
