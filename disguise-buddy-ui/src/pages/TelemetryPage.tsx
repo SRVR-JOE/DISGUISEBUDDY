@@ -105,7 +105,11 @@ export function TelemetryPage() {
   )
 
   const handleSnapshot = async () => {
-    await api.triggerSnapshot()
+    try {
+      await api.triggerSnapshot()
+    } catch (err) {
+      console.error('[TelemetryPage] Snapshot failed:', err)
+    }
   }
 
   const categoryLabels: Record<string, string> = {
@@ -273,6 +277,7 @@ export function TelemetryPage() {
             let amberThreshold: number | undefined
             let redThreshold: number | undefined
             if (category === 'temperature') { amberThreshold = 60; redThreshold = 75 }
+            // Fan thresholds: lower RPM = worse (fans slowing down is the warning signal)
             if (category === 'fan') { amberThreshold = 1000; redThreshold = 500 }
 
             if (compareMode) {

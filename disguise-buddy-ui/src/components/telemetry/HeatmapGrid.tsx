@@ -1,7 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { TelemetrySnapshot } from '@/lib/telemetry-types'
-import { METRICS } from '@/lib/metric-definitions'
-import { CHART_THEME } from '@/lib/metric-definitions'
+import { METRICS, CHART_THEME } from '@/lib/metric-definitions'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

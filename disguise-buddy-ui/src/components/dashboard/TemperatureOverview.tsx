@@ -60,6 +60,8 @@ function peakTemp(temps: { label: string; value: number }[]): number | undefined
 
 // ─── Skeleton ───────────────────────────────────────────────────────────────
 
+const SKELETON_HEIGHTS = [45, 72, 38, 65, 55, 82, 48, 70]
+
 function TemperatureSkeleton() {
   return (
     <div className="space-y-3 animate-pulse">
@@ -67,11 +69,11 @@ function TemperatureSkeleton() {
       <div className="flex gap-3 items-end h-48">
         <div className="w-8 h-full bg-white/[0.04] rounded" />
         <div className="flex-1 flex items-end gap-1.5">
-          {Array.from({ length: 12 }).map((_, i) => (
+          {SKELETON_HEIGHTS.map((height, i) => (
             <div
               key={i}
               className="flex-1 bg-white/[0.04] rounded-t"
-              style={{ height: `${30 + Math.random() * 60}%` }}
+              style={{ height: `${height}%` }}
             />
           ))}
         </div>

@@ -106,7 +106,7 @@ export function AnomalyTimeline({
               key={event.id}
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.02, duration: 0.2 }}
+              transition={{ delay: Math.min(i * 0.02, 0.3), duration: 0.2 }}
               className={`flex items-start gap-2 rounded-lg px-3 py-2 border ${bgColor} ${borderColor}`}
             >
               <Icon className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${severityColor}`} />

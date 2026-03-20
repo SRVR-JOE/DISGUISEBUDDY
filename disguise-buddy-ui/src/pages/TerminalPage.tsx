@@ -89,7 +89,7 @@ export function TerminalPage() {
   const { discoveredServers: servers } = useAppContext()
 
   // ── Server list ─────────────────────────────────────────────────────────────
-  const [serversLoading, setServersLoading] = useState(true)
+  const [serversLoading] = useState(false)
   const [refreshingServers, setRefreshingServers] = useState(false)
 
   // ── Target selection ────────────────────────────────────────────────────────
@@ -113,11 +113,6 @@ export function TerminalPage() {
 
   // ── Active SSE ref ───────────────────────────────────────────────────────────
   const esRef = useRef<{ cancel: () => void } | null>(null)
-
-  // ── No auto-discovery — user must scan from Dashboard first ──────────────────
-  useEffect(() => {
-    setServersLoading(false)
-  }, [])
 
   // ── Auto-scroll to bottom whenever lines update ──────────────────────────────
   useEffect(() => {

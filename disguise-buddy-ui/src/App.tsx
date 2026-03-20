@@ -23,12 +23,10 @@ export default function App(): React.ReactElement {
   }, [])
 
   const handleRefresh = useCallback(() => {
-    console.log('[App] F5 — refresh triggered for view:', activeView)
     window.dispatchEvent(new Event('app-refresh'))
   }, [activeView])
 
   const handleDeploy = useCallback(() => {
-    console.log('[App] Ctrl+Enter — deploy triggered')
     window.dispatchEvent(new Event('app-deploy'))
   }, [])
 

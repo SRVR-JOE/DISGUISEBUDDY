@@ -157,7 +157,7 @@ export async function ensureWinRMReady(targetIP: string): Promise<WinRMReadyResu
   try {
     const trustedResult = await runPowerShell(
       `$current = (Get-Item WSMan:\\localhost\\Client\\TrustedHosts).Value; ` +
-      `if ($current -notmatch '(^|,)${targetIP}(,|$)') { ` +
+      `if ($current -notmatch '(^|,)${targetIP.replace(/\./g, '\\\\.')}(,|$)') { ` +
       `Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value "${targetIP}" -Concatenate -Force }`
     )
     if (trustedResult.exitCode === 0) {
@@ -224,7 +224,7 @@ export async function enableWinRMViaDCOM(
   const psScript = `
 $ErrorActionPreference = "Stop"
 $securePassword = ConvertTo-SecureString "${escapedPass}" -AsPlainText -Force
-$credential = New-Object System.Management.Automation.PSCredential("${escapedIP}\\${escapedUser}", $securePassword)
+$credential = New-Object System.Management.Automation.PSCredential(".\\${escapedUser}", $securePassword)
 $cimOptions = New-CimSessionOption -Protocol Dcom
 $cimSession = New-CimSession -ComputerName "${escapedIP}" -Credential $credential -SessionOption $cimOptions -ErrorAction Stop
 $enableScript = '${remoteCmd.replace(/'/g, "''")}'

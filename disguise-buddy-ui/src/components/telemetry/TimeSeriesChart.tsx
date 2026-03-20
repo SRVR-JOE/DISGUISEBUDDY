@@ -180,7 +180,7 @@ export function TimeSeriesChart({
         {/* Extra reference lines */}
         {referenceLines.map((rl, i) => (
           <ReferenceLine
-            key={`ref-${i}`}
+            key={`ref-${rl.value}-${i}`}
             y={rl.value}
             stroke={rl.color}
             strokeDasharray={rl.strokeDasharray ?? '6 3'}

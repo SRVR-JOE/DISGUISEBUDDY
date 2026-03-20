@@ -126,7 +126,11 @@ export function getPackages(packagesDir: string = DEFAULT_SOFTWARE_DIR): Softwar
 export function addPackage(
   packagesDir: string = DEFAULT_SOFTWARE_DIR,
   pkg: Omit<SoftwarePackage, 'id' | 'size'>,
-): SoftwarePackage {
+): { success: false; message: string } | SoftwarePackage {
+  if (pkg.filename !== path.basename(pkg.filename)) {
+    return { success: false, message: 'Invalid filename: path traversal not allowed' }
+  }
+
   ensureManifestDir(packagesDir)
 
   const fullPath = pkg.path || path.join(packagesDir, pkg.filename)
@@ -219,7 +223,7 @@ async function runLiveInstall(
 
       const copyResult = await runPowerShell(
         `$session = New-PSSession -ComputerName ${targetIP}${credArg} -ErrorAction Stop; ` +
-        `Copy-Item -Path '${escapePs(pkg.path)}' -Destination 'C:\\Temp\\${pkg.filename}' ` +
+        `Copy-Item -Path '${escapePs(pkg.path)}' -Destination 'C:\\Temp\\${escapePs(pkg.filename)}' ` +
         `-ToSession $session -ErrorAction Stop; ` +
         `Remove-PSSession $session`
       )
@@ -235,7 +239,7 @@ async function runLiveInstall(
       const installResult = await runPowerShell(
         `Invoke-Command -ComputerName ${targetIP}${credArg} -ScriptBlock { ` +
         `$proc = Start-Process ` +
-        `  -FilePath 'C:\\Temp\\${pkg.filename}' ` +
+        `  -FilePath 'C:\\Temp\\${escapePs(pkg.filename)}' ` +
         `  -ArgumentList '${escapePs(pkg.silentArgs)}' ` +
         `  -Wait -PassThru -ErrorAction Stop; ` +
         `exit $proc.ExitCode ` +
@@ -257,7 +261,7 @@ async function runLiveInstall(
 
       await runPowerShell(
         `Invoke-Command -ComputerName ${targetIP}${credArg} -ScriptBlock { ` +
-        `Remove-Item 'C:\\Temp\\${pkg.filename}' -Force -ErrorAction SilentlyContinue } -ErrorAction SilentlyContinue`
+        `Remove-Item 'C:\\Temp\\${escapePs(pkg.filename)}' -Force -ErrorAction SilentlyContinue } -ErrorAction SilentlyContinue`
       ).catch(() => {
         // Non-critical
       })

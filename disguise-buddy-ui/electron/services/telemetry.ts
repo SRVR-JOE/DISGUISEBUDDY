@@ -168,6 +168,7 @@ export class TelemetryService {
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private persistTimer: ReturnType<typeof setInterval> | null = null
   private sseCallbacks: Set<SnapshotCallback> = new Set()
+  private snapshotInProgress = false
 
   constructor(servers?: string[]) {
     this.servers = servers ?? [
@@ -217,30 +218,36 @@ export class TelemetryService {
   // ── Snapshot ─────────────────────────────────────────────────────────────
 
   async takeSnapshot(): Promise<TelemetrySnapshot> {
-    const timestamp = Date.now()
-    const serverSnapshots = await Promise.all(this.servers.map(ip => this.probeServer(ip, timestamp)))
+    if (this.snapshotInProgress) return this.snapshots[this.snapshots.length - 1] ?? { timestamp: Date.now(), servers: [] }
+    this.snapshotInProgress = true
+    try {
+      const timestamp = Date.now()
+      const serverSnapshots = await Promise.all(this.servers.map(ip => this.probeServer(ip, timestamp)))
 
-    const snapshot: TelemetrySnapshot = { timestamp, servers: serverSnapshots }
+      const snapshot: TelemetrySnapshot = { timestamp, servers: serverSnapshots }
 
-    // Append to ring buffer
-    this.snapshots.push(snapshot)
-    if (this.snapshots.length > MAX_SNAPSHOTS) {
-      this.snapshots = this.snapshots.slice(this.snapshots.length - MAX_SNAPSHOTS)
+      // Append to ring buffer
+      this.snapshots.push(snapshot)
+      if (this.snapshots.length > MAX_SNAPSHOTS) {
+        this.snapshots = this.snapshots.slice(this.snapshots.length - MAX_SNAPSHOTS)
+      }
+
+      // Evict entries older than retention window
+      const cutoff = Date.now() - this.retentionMs
+      const firstValid = this.snapshots.findIndex(s => s.timestamp >= cutoff)
+      if (firstValid > 0) {
+        this.snapshots = this.snapshots.slice(firstValid)
+      }
+
+      // Broadcast to SSE clients
+      for (const cb of this.sseCallbacks) {
+        try { cb(snapshot) } catch (err) { console.warn('[telemetry] SSE callback error:', err) }
+      }
+
+      return snapshot
+    } finally {
+      this.snapshotInProgress = false
     }
-
-    // Evict entries older than retention window
-    const cutoff = Date.now() - this.retentionMs
-    const firstValid = this.snapshots.findIndex(s => s.timestamp >= cutoff)
-    if (firstValid > 0) {
-      this.snapshots = this.snapshots.slice(firstValid)
-    }
-
-    // Broadcast to SSE clients
-    for (const cb of this.sseCallbacks) {
-      try { cb(snapshot) } catch { /* ignore broken client */ }
-    }
-
-    return snapshot
   }
 
   private async probeServer(ip: string, timestamp: number): Promise<ServerSnapshot> {
@@ -323,7 +330,7 @@ export class TelemetryService {
 
   // ── Persistence ──────────────────────────────────────────────────────────
 
-  private persistToDisk(): void {
+  private async persistToDisk(): Promise<void> {
     try {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -334,7 +341,7 @@ export class TelemetryService {
         retentionMs: this.retentionMs,
         snapshots: this.snapshots,
       })
-      fs.writeFileSync(PERSIST_PATH, payload, 'utf-8')
+      await fs.promises.writeFile(PERSIST_PATH, payload, 'utf-8')
       console.log(`[telemetry] Persisted ${this.snapshots.length} snapshots to disk`)
     } catch (err) {
       console.error('[telemetry] Failed to persist:', err)
@@ -351,9 +358,11 @@ export class TelemetryService {
         retentionMs?: number
         snapshots?: TelemetrySnapshot[]
       }
-      if (data.servers) this.servers = data.servers
-      if (data.pollIntervalMs) this.pollIntervalMs = data.pollIntervalMs
-      if (data.retentionMs) this.retentionMs = data.retentionMs
+      if (data.servers) this.servers = data.servers.filter(
+        (ip) => typeof ip === 'string' && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)
+      )
+      if (data.pollIntervalMs && data.pollIntervalMs >= 5000) this.pollIntervalMs = data.pollIntervalMs
+      if (data.retentionMs && data.retentionMs >= 60000) this.retentionMs = data.retentionMs
       if (Array.isArray(data.snapshots)) {
         // Evict stale entries
         const cutoff = Date.now() - this.retentionMs

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
 import type { DiscoveredServer, Profile } from './types'
 
 interface AppState {
@@ -31,6 +31,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return Array.from(map.values())
     })
   }, [])
+
+  useEffect(() => { document.documentElement.classList.toggle('dark', isDark) }, [])
 
   const toggleTheme = useCallback(() => {
     setIsDark(prev => {

@@ -84,6 +84,11 @@ function sseHeaders(res: Response): void {
   res.flushHeaders()
 }
 
+/** Escape a string for safe embedding in a PowerShell double-quoted string */
+function escapePsDouble(s: string): string {
+  return s.replace(/[`$"]/g, '`$&')
+}
+
 // ─── Profiles ─────────────────────────────────────────────────────────────────
 
 app.get('/api/profiles', (_req: Request, res: Response) => {
@@ -111,7 +116,7 @@ app.post('/api/profiles/:name/apply', async (req: Request, res: Response) => {
   try {
     // Build PowerShell script to apply the profile locally
     const psLines: string[] = []
-    const serverName = profile.ServerName.replace(/'/g, "''")
+    const serverName = escapePsDouble(profile.ServerName.replace(/'/g, "''"))
 
     // 1. Rename computer if ServerName differs from current
     psLines.push(`
@@ -127,7 +132,7 @@ if ("${serverName}" -ne $currentName) {
     // 2. Configure each enabled adapter (static IP or DHCP)
     for (const adapter of profile.NetworkAdapters) {
       if (!adapter.Enabled) continue
-      const adapterName = adapter.AdapterName.replace(/'/g, "''")
+      const adapterName = escapePsDouble(adapter.AdapterName.replace(/'/g, "''"))
       if (adapter.DHCP) {
         psLines.push(`
 # Configure ${adapterName} for DHCP
@@ -136,11 +141,11 @@ Set-DnsClientServerAddress -InterfaceAlias '${adapterName}' -ResetServerAddresse
 Write-Output "Configured ${adapterName} for DHCP"
 `)
       } else {
-        const ip = adapter.IPAddress.replace(/'/g, "''")
-        const mask = adapter.SubnetMask.replace(/'/g, "''")
-        const gw = adapter.Gateway.replace(/'/g, "''")
-        const dns1 = adapter.DNS1.replace(/'/g, "''")
-        const dns2 = adapter.DNS2.replace(/'/g, "''")
+        const ip = escapePsDouble(adapter.IPAddress.replace(/'/g, "''"))
+        const mask = escapePsDouble(adapter.SubnetMask.replace(/'/g, "''"))
+        const gw = escapePsDouble(adapter.Gateway.replace(/'/g, "''"))
+        const dns1 = escapePsDouble(adapter.DNS1.replace(/'/g, "''"))
+        const dns2 = escapePsDouble(adapter.DNS2.replace(/'/g, "''"))
         // Convert subnet mask to prefix length
         psLines.push(`
 # Configure ${adapterName} with static IP
@@ -159,8 +164,8 @@ Write-Output "Configured ${adapterName} with IP ${ip}"
 
     // 3. Create/update SMB shares
     if (profile.SMBSettings.ShareD3Projects) {
-      const shareName = profile.SMBSettings.ShareName.replace(/'/g, "''")
-      const sharePath = profile.SMBSettings.ProjectsPath.replace(/'/g, "''")
+      const shareName = escapePsDouble(profile.SMBSettings.ShareName.replace(/'/g, "''"))
+      const sharePath = escapePsDouble(profile.SMBSettings.ProjectsPath.replace(/'/g, "''"))
       psLines.push(`
 # Create/update d3 Projects SMB share
 if (!(Test-Path '${sharePath}')) { New-Item -Path '${sharePath}' -ItemType Directory -Force | Out-Null }
@@ -177,9 +182,9 @@ if ($existing) {
 
     if (profile.SMBSettings.AdditionalShares) {
       for (const share of profile.SMBSettings.AdditionalShares) {
-        const sName = share.Name.replace(/'/g, "''")
-        const sPath = share.Path.replace(/'/g, "''")
-        const sDesc = (share.Description || '').replace(/'/g, "''")
+        const sName = escapePsDouble(share.Name.replace(/'/g, "''"))
+        const sPath = escapePsDouble(share.Path.replace(/'/g, "''"))
+        const sDesc = escapePsDouble((share.Description || '').replace(/'/g, "''"))
         psLines.push(`
 # Additional share: ${sName}
 if (!(Test-Path '${sPath}')) { New-Item -Path '${sPath}' -ItemType Directory -Force | Out-Null }
@@ -372,6 +377,12 @@ app.post('/api/install', (req: Request, res: Response) => {
   const allPkgs = getPackages(SOFTWARE_DIR)
   const packages = allPkgs.filter(p => packageIds.includes(p.id))
 
+  if (server && (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(server) || server.split('.').some((o: string) => Number(o) > 255))) {
+    sendSse(res, 'error', { message: 'Invalid server IP address' })
+    res.end()
+    return
+  }
+
   if (packages.length === 0) {
     sendSse(res, 'error', { message: 'No valid packages specified' })
     res.end()
@@ -424,6 +435,7 @@ app.post('/api/terminal/execute', (req: Request, res: Response) => {
     /;\s*Format-/i,
     /;\s*del\s+\//i,
     /;\s*rm\s+-rf/i,
+    /&\s*\(.*['"]\s*\+\s*['"]/,
   ]
 
   const blocklist = [
@@ -435,6 +447,8 @@ app.post('/api/terminal/execute', (req: Request, res: Response) => {
     'stop-computer',
     'restart-computer',
     'reset-computermachinepassword',
+    'invoke-expression',
+    'iex',
   ]
 
   const cmdLower = command.toLowerCase().trim()
@@ -602,11 +616,21 @@ function probeHttp(url: string, timeoutMs: number): Promise<{ status: number; bo
 
 app.get('/api/probe', async (req: Request, res: Response) => {
   const target = (req.query.server as string) || ''
-  const credUser = (req.query.credential_user as string) || 'd3'
-  const credPass = (req.query.credential_pass as string) || 'disguise'
+  const credUser = (req.query.credential_user as string) || ''
+  const credPass = (req.query.credential_pass as string) || ''
+
+  if (!credUser || !credPass) {
+    res.status(400).json({ success: false, message: 'Credentials required (credential_user and credential_pass)' })
+    return
+  }
 
   if (!target.trim()) {
     res.status(400).json({ success: false, message: 'server query param is required' })
+    return
+  }
+
+  if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(target) || target.split('.').some(o => Number(o) > 255)) {
+    res.status(400).json({ success: false, message: 'Invalid target IP address' })
     return
   }
 
@@ -639,7 +663,7 @@ app.get('/api/probe', async (req: Request, res: Response) => {
   } else {
     try {
       const connectOut = await runPowerShell(
-        `net use "\\\\${target}\\IPC$" /user:${credUser} "${credPass}" 2>&1`
+        `net use "\\\\${target}\\IPC$" /user:"${escapePsDouble(credUser)}" "${escapePsDouble(credPass)}" 2>&1`
       )
       const connected =
         connectOut.exitCode === 0 ||
@@ -795,12 +819,12 @@ app.get('/api/identity', async (req: Request, res: Response) => {
     const result = await runPowerShell(`
       [PSCustomObject]@{
         Hostname = $env:COMPUTERNAME
-        Domain = (Get-WmiObject Win32_ComputerSystem).Domain
-        DomainType = if ((Get-WmiObject Win32_ComputerSystem).PartOfDomain) { 'Domain' } else { 'Workgroup' }
+        Domain = (Get-CimInstance Win32_ComputerSystem).Domain
+        DomainType = if ((Get-CimInstance Win32_ComputerSystem).PartOfDomain) { 'Domain' } else { 'Workgroup' }
         OSVersion = [System.Environment]::OSVersion.VersionString
         Uptime = ((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).ToString('d\\.hh\\:mm\\:ss')
-        SerialNumber = (Get-WmiObject Win32_BIOS).SerialNumber
-        Model = (Get-WmiObject Win32_ComputerSystem).Model
+        SerialNumber = (Get-CimInstance Win32_BIOS).SerialNumber
+        Model = (Get-CimInstance Win32_ComputerSystem).Model
       } | ConvertTo-Json
     `)
     res.json(JSON.parse(result.stdout || '{}'))
@@ -852,6 +876,24 @@ app.get('/api/smc/discover', async (req: Request, res: Response) => {
   const startNum = Number(start) || 200
   const endNum = Number(end) || 254
   const timeoutMs = Number(timeout) || 4000
+
+  const subnetMatch = String(subnet || '').match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!subnetMatch || subnetMatch.slice(1).some(o => Number(o) > 255)) {
+    res.status(400).json({ success: false, message: 'Invalid subnet format (expected x.x.x)' })
+    return
+  }
+  if (!Number.isInteger(startNum) || startNum < 1 || startNum > 254) {
+    res.status(400).json({ success: false, message: 'Invalid start: must be an integer between 1 and 254' })
+    return
+  }
+  if (!Number.isInteger(endNum) || endNum < 1 || endNum > 254) {
+    res.status(400).json({ success: false, message: 'Invalid end: must be an integer between 1 and 254' })
+    return
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    res.status(400).json({ success: false, message: 'Invalid timeout: must be a positive number' })
+    return
+  }
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -1030,6 +1072,15 @@ app.get('/api/telemetry/stream', (req: Request, res: Response) => {
 
 // Start telemetry polling
 telemetryService.start()
+
+// ─── Global error handler ─────────────────────────────────────────────────────
+
+app.use((err: any, _req: Request, res: Response, _next: any) => {
+  console.error('[api] Unhandled error:', err)
+  if (!res.headersSent) {
+    res.status(500).json({ success: false, message: 'Internal server error' })
+  }
+})
 
 // ─── 404 fallback ─────────────────────────────────────────────────────────────
 

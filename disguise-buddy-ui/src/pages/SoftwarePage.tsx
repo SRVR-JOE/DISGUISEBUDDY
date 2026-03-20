@@ -473,7 +473,7 @@ export function SoftwarePage() {
   const [addingSoftware, setAddingSoftware] = useState(false)
 
   // ── Servers state ────────────────────────────────────────────────────────────
-  const [serversLoading, setServersLoading] = useState(true)
+  const [serversLoading] = useState(false)
   const [selectedServerIPs, setSelectedServerIPs] = useState<Set<string>>(new Set())
   const [refreshingServers, setRefreshingServers] = useState(false)
 
@@ -496,7 +496,6 @@ export function SoftwarePage() {
       })
       .finally(() => {
         setPackagesLoading(false)
-        setServersLoading(false)
       })
   }, [])
 

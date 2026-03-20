@@ -237,6 +237,18 @@ function Test-ProfileSchema {
         }
     }
 
+    # Validate AdditionalShares paths
+    if ($Profile.SMBSettings.AdditionalShares) {
+        foreach ($share in $Profile.SMBSettings.AdditionalShares) {
+            if ($share.Path -match '^\\\\') {
+                return [PSCustomObject]@{ Success = $false; Message = "UNC paths not allowed in AdditionalShares: $($share.Path)" }
+            }
+            if ($share.Path -match '^[A-Z]:\\Windows' -or $share.Path -match '^[A-Z]:\\Program Files') {
+                return [PSCustomObject]@{ Success = $false; Message = "System paths not allowed in AdditionalShares: $($share.Path)" }
+            }
+        }
+    }
+
     # Validate ProjectsPath (the actual field used in profile schema)
     if ($Profile.SMBSettings -and $Profile.SMBSettings.PSObject.Properties['ProjectsPath']) {
         $pp = $Profile.SMBSettings.ProjectsPath

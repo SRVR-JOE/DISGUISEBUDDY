@@ -58,6 +58,7 @@ function del<T>(path: string): Promise<T> {
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
+// TODO: Replace any callback types with proper interfaces from telemetry-types.ts
 /** Read an SSE stream from a fetch Response and dispatch parsed events. */
 function readSseStream(
   resPromise: Promise<Response>,
@@ -70,7 +71,8 @@ function readSseStream(
 ) {
   resPromise
     .then(async (res) => {
-      const reader = res.body!.getReader()
+      if (!res.body) { callbacks.onError?.({ message: 'No response body' }); return }
+      const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
       while (true) {

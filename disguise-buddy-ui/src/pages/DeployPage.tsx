@@ -167,6 +167,7 @@ export function DeployPage() {
   // ── Deploy state ────────────────────────────────────────────────────────────
   const [deploying, setDeploying] = useState(false)
   const [deployStates, setDeployStates] = useState<Record<string, ServerDeployState>>({})
+  const completedRef = useRef(0)
 
   // ── Load profiles on mount ──────────────────────────────────────────────────
   useEffect(() => {
@@ -196,10 +197,11 @@ export function DeployPage() {
     setSelectedIPs(new Set())
     setDeployStates({})
     setScanProgress(0)
-    setScanStatus(`Scanning ${subnet}.${start}–${end}…`)
+    const capturedSubnet = subnet
+    setScanStatus(`Scanning ${capturedSubnet}.${start}–${end}…`)
 
     const handle = api.scanNetwork(
-      subnet,
+      capturedSubnet,
       start,
       end,
       parseInt(timeout, 10),
@@ -209,7 +211,7 @@ export function DeployPage() {
           setScanProgress(data.percent)
         }
         if (data.current !== undefined) {
-          setScanStatus(`Scanning ${subnet}.${data.current}…`)
+          setScanStatus(`Scanning ${capturedSubnet}.${data.current}…`)
         }
         // Handle discovered servers arriving as progress events
         if (data.IPAddress) {
@@ -264,7 +266,7 @@ export function DeployPage() {
     setDeployStates(initialStates)
     setDeploying(true)
 
-    let completed = 0
+    completedRef.current = 0
     const total = targets.length
 
     for (const server of targets) {
@@ -303,8 +305,8 @@ export function DeployPage() {
             },
           }))
           toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}: ${msg}`)
-          completed++
-          if (completed === total) setDeploying(false)
+          completedRef.current++
+          if (completedRef.current === total) setDeploying(false)
         },
         // onDone
         (data: any) => {
@@ -323,8 +325,8 @@ export function DeployPage() {
           } else {
             toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}: ${msg}`)
           }
-          completed++
-          if (completed === total) setDeploying(false)
+          completedRef.current++
+          if (completedRef.current === total) setDeploying(false)
         },
       )
       deployHandleRefs.current.push(handle)

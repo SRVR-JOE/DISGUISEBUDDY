@@ -28,6 +28,11 @@ import {
   enableWinRMViaDCOM,
 } from './utils.ts'
 
+/** Escape a string for safe embedding in a PowerShell double-quoted string */
+function escapePsDouble(s: string): string {
+  return s.replace(/[`$"]/g, '`$&')
+}
+
 // -- Deploy mutex -------------------------------------------------------------
 
 const activeDeployments = new Set<string>()
@@ -180,6 +185,13 @@ async function runLiveDeployInner(
   isCancelled: () => boolean,
 ): Promise<void> {
   const { targetIP, profile, credential } = options
+
+  if (profile.ServerName && profile.ServerName.length > 15) {
+    throw new Error(`ServerName "${profile.ServerName}" exceeds NetBIOS 15-character limit`)
+  }
+  if (profile.ServerName && !/^[A-Za-z0-9-]+$/.test(profile.ServerName)) {
+    throw new Error(`ServerName "${profile.ServerName}" contains invalid NetBIOS characters`)
+  }
 
   const username = credential?.username ?? 'd3'
   const password = credential?.password ?? 'disguise'
@@ -336,12 +348,12 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
 
   // Delete any stale task first (best-effort)
   await runPowerShell(
-    `schtasks.exe /delete /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /f 2>&1`
+    `schtasks.exe /delete /s "${targetIP}" /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /f 2>&1`
   ).catch(() => {})
 
   const createResult = await runPowerShell(
     `schtasks.exe /create` +
-    ` /s ${targetIP}` +
+    ` /s "${targetIP}"` +
     ` /u "${escapePs(username)}"` +
     ` /p "${escapePs(password)}"` +
     ` /tn "${taskName}"` +
@@ -363,7 +375,7 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
   if (isCancelled()) return
 
   const runResult = await runPowerShell(
-    `schtasks.exe /run /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}"`
+    `schtasks.exe /run /s "${targetIP}" /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}"`
   )
 
   if (runResult.exitCode !== 0) {
@@ -387,7 +399,7 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
     await delay(3000)
 
     const queryResult = await runPowerShell(
-      `schtasks.exe /query /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /fo CSV /nh 2>&1`
+      `schtasks.exe /query /s "${targetIP}" /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /fo CSV /nh 2>&1`
     )
 
     const output = queryResult.stdout.toLowerCase()
@@ -412,8 +424,8 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
     console.warn(`[deployer] Task did not reach "Ready" in 60 s — proceeding to read results anyway`)
   }
 
-  // Give the script a moment to flush its JSON output before we read it
-  await delay(1000)
+  // Give the script a moment to flush its JSON output before we read it (extra time for slower networks)
+  await delay(2000)
 
   // Step 6: Read the result JSON
   smbStep('results', `Reading deployment results from ${targetIP}...`)
@@ -433,7 +445,7 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
     const safeScriptUNCEarly = scriptUNC.replace(/'/g, "''")
     await Promise.allSettled([
       runPowerShell(
-        `schtasks.exe /delete /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /f 2>&1`
+        `schtasks.exe /delete /s "${targetIP}" /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /f 2>&1`
       ),
       runPowerShell(`Remove-Item -Path '${safeScriptUNCEarly}' -Force -ErrorAction SilentlyContinue`),
       runPowerShell(`Remove-Item -Path '${safeResultUNC}' -Force -ErrorAction SilentlyContinue`),
@@ -475,7 +487,7 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
   await Promise.allSettled([
     // Delete the scheduled task
     runPowerShell(
-      `schtasks.exe /delete /s ${targetIP} /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /f 2>&1`
+      `schtasks.exe /delete /s "${targetIP}" /u "${escapedUser}" /p "${escapedPass}" /tn "${taskName}" /f 2>&1`
     ),
     // Delete the script file
     runPowerShell(`Remove-Item -Path '${safeScriptUNC}' -Force -ErrorAction SilentlyContinue`),
@@ -537,7 +549,7 @@ async function runWinrmDeploy(
   const authArg = credential ? ' -Authentication Negotiate' : ''
 
   let wsmanResult = await runPowerShell(
-    `Test-WSMan -ComputerName ${targetIP}${credArg}${authArg} -ErrorAction Stop`
+    `Test-WSMan -ComputerName '${targetIP}'${credArg}${authArg} -ErrorAction Stop`
   ).catch((spawnErr: unknown) => {
     const msg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr)
     if (msg.includes('ENOENT') || msg.includes('spawn')) {
@@ -590,7 +602,7 @@ async function runWinrmDeploy(
 
       try {
         wsmanResult = await runPowerShell(
-          `Test-WSMan -ComputerName ${targetIP}${credArg}${authArg} -ErrorAction Stop`
+          `Test-WSMan -ComputerName '${targetIP}'${credArg}${authArg} -ErrorAction Stop`
         )
         if (wsmanResult.exitCode === 0) {
           winrmReady = true
@@ -625,7 +637,7 @@ async function runWinrmDeploy(
   if (isCancelled()) return
 
   const renameResult = await runPowerShell(
-    `Rename-Computer -ComputerName ${targetIP} -NewName "${sanitiseName(profile.ServerName)}"` +
+    `Rename-Computer -ComputerName '${targetIP}' -NewName "${sanitiseName(profile.ServerName)}"` +
     ` -Force${credArg} -ErrorAction Stop`
   )
   if (renameResult.exitCode !== 0) {
@@ -765,7 +777,7 @@ function buildDeployScript(profile: Profile): string {
     }
     lines.push(`    [void]$result.messages.Add('Adapter ${safeDisplayName} configured')`)
     lines.push(`  } catch {`)
-    lines.push(`    [void]$result.messages.Add("Adapter ${safeDisplayName} failed: $_")`)
+    lines.push(`    [void]$result.messages.Add("Adapter ${escapePsDouble(safeDisplayName)} failed: $_")`)
     lines.push(`  }`)
   }
 
@@ -879,16 +891,16 @@ function buildAdapterScriptLines(adapter: AdapterConfig): string[] {
   const lines: string[] = []
 
   lines.push(
-    `$iface = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*${sanitiseName(adapter.AdapterName)}*" } | Select-Object -First 1`
+    `$iface = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*${escapePsDouble(sanitiseName(adapter.AdapterName))}*" } | Select-Object -First 1`
   )
   lines.push(
-    `if (-not $iface) { $iface = Get-NetAdapter | Where-Object { $_.Name -like "*${sanitiseName(adapter.AdapterName)}*" } | Select-Object -First 1 }`
+    `if (-not $iface) { $iface = Get-NetAdapter | Where-Object { $_.Name -like "*${escapePsDouble(sanitiseName(adapter.AdapterName))}*" } | Select-Object -First 1 }`
   )
   lines.push(
     `if (-not $iface) { $iface = (Get-NetAdapter | Sort-Object InterfaceIndex)[${adapter.Index}] }`
   )
   lines.push(
-    `if (-not $iface) { Write-Warning "Adapter '${sanitiseName(adapter.AdapterName)}' not found"; continue }`
+    `if (-not $iface) { Write-Warning "Adapter '${escapePsDouble(sanitiseName(adapter.AdapterName))}' not found"; continue }`
   )
   lines.push(`$idx = $iface.InterfaceIndex`)
 
@@ -903,9 +915,9 @@ function buildAdapterScriptLines(adapter: AdapterConfig): string[] {
     lines.push(`Remove-NetRoute -InterfaceIndex $idx -Confirm:$false -ErrorAction SilentlyContinue`)
     lines.push(`Set-NetIPInterface -InterfaceIndex $idx -Dhcp Disabled -ErrorAction SilentlyContinue`)
 
-    let addCmd = `New-NetIPAddress -InterfaceIndex $idx -IPAddress "${adapter.IPAddress}" -PrefixLength ${prefixLength}`
+    let addCmd = `New-NetIPAddress -InterfaceIndex $idx -IPAddress "${escapePsDouble(adapter.IPAddress)}" -PrefixLength ${prefixLength}`
     if (adapter.Gateway) {
-      addCmd += ` -DefaultGateway "${adapter.Gateway}"`
+      addCmd += ` -DefaultGateway "${escapePsDouble(adapter.Gateway)}"`
     }
     addCmd += ' -ErrorAction Stop'
     lines.push(addCmd)
@@ -914,7 +926,7 @@ function buildAdapterScriptLines(adapter: AdapterConfig): string[] {
     if (dnsServers.length > 0) {
       lines.push(
         `Set-DnsClientServerAddress -InterfaceIndex $idx` +
-        ` -ServerAddresses ${dnsServers.map((d) => `"${d}"`).join(',')} -ErrorAction SilentlyContinue`
+        ` -ServerAddresses ${dnsServers.map((d) => `"${escapePsDouble(d)}"`).join(',')} -ErrorAction SilentlyContinue`
       )
     }
   }
@@ -922,7 +934,7 @@ function buildAdapterScriptLines(adapter: AdapterConfig): string[] {
   // Set VLAN ID if configured
   if (adapter.VLANID != null) {
     lines.push(`# Set VLAN ID`)
-    lines.push(`$vlanAdapter = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*${sanitiseName(adapter.AdapterName)}*" }`)
+    lines.push(`$vlanAdapter = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*${escapePsDouble(sanitiseName(adapter.AdapterName))}*" }`)
     lines.push(`if ($vlanAdapter) {`)
     lines.push(`    Set-NetAdapterAdvancedProperty -Name $vlanAdapter.Name -RegistryKeyword "VlanID" -RegistryValue ${adapter.VLANID}`)
     lines.push(`}`)

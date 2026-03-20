@@ -216,12 +216,24 @@ export function SpreadsheetPage() {
 
   // ── Cell navigation ───────────────────────────────────────────────────────
 
+  /** Pre-computed DHCP flags per profile per adapter, used to determine navigable cells. */
+  const dhcpFlags = useMemo(() => {
+    const flags: Record<string, Record<number, boolean>> = {}
+    for (const p of sortedProfiles) {
+      flags[p.Name] = {}
+      for (const ac of ADAPTER_COLUMNS) {
+        flags[p.Name][ac.index] = getCellValue(p, edits, { adapterIndex: ac.index, sub: 'dhcp' }) as boolean
+      }
+    }
+    return flags
+  }, [sortedProfiles, edits])
+
   /** Build a flat list of navigable cell keys per row (for Tab/Enter). */
   const cellGrid = useMemo(() => {
     return sortedProfiles.map((p) => {
       const cells: CellKey[] = [`${p.Name}::serverName`]
       for (const ac of ADAPTER_COLUMNS) {
-        const isDhcp = getCellValue(p, edits, { adapterIndex: ac.index, sub: 'dhcp' }) as boolean
+        const isDhcp = dhcpFlags[p.Name]?.[ac.index] ?? false
         if (!isDhcp) {
           cells.push(`${p.Name}::${ac.index}::ip`)
           if (ac.hasSubnet) cells.push(`${p.Name}::${ac.index}::subnet`)
@@ -229,21 +241,21 @@ export function SpreadsheetPage() {
       }
       return cells
     })
-  }, [sortedProfiles, edits])
+  }, [sortedProfiles, dhcpFlags])
 
-  function focusCell(key: CellKey) {
+  const focusCell = useCallback((key: CellKey) => {
     const el = cellRefs.current.get(key)
     if (el) {
       el.focus()
       el.select()
     }
-  }
+  }, [])
 
-  function handleCellKeyDown(
+  const handleCellKeyDown = useCallback((
     e: KeyboardEvent<HTMLInputElement>,
     rowIdx: number,
     cellKey: CellKey,
-  ) {
+  ) => {
     const row = cellGrid[rowIdx]
     if (!row) return
     const colIdx = row.indexOf(cellKey)
@@ -267,7 +279,7 @@ export function SpreadsheetPage() {
         focusCell(nextRow[targetCol])
       }
     }
-  }
+  }, [cellGrid, focusCell])
 
   // ── Cell editing ──────────────────────────────────────────────────────────
 
@@ -289,6 +301,7 @@ export function SpreadsheetPage() {
     adapterIndex: number,
     value: boolean,
   ): void
+  // any[] is intentional here — the overload signatures above enforce type safety at call sites
   function setEdit(
     profileName: string,
     field: string,
@@ -427,19 +440,27 @@ export function SpreadsheetPage() {
   // ── Quick Fill ────────────────────────────────────────────────────────────
 
   function applyQuickFill() {
-    sortedProfiles.forEach((profile, i) => {
-      const hostOffset = quickFill.d3netStart + i
-      // d3Net (index 0)
-      setEdit(profile.Name, 'adapter', 0, 'ip', `${quickFill.d3netBase}.${hostOffset}`)
-      setEdit(profile.Name, 'adapter', 0, 'subnet', quickFill.d3netSubnet)
-      // sACN (index 1)
-      const sacnOffset = quickFill.sacnStart + i
-      setEdit(profile.Name, 'adapter', 1, 'ip', `${quickFill.sacnBase}.${sacnOffset}`)
-      setEdit(profile.Name, 'adapter', 1, 'subnet', quickFill.sacnSubnet)
-      // Media (index 2)
-      const mediaOffset = quickFill.mediaStart + i
-      setEdit(profile.Name, 'adapter', 2, 'ip', `${quickFill.mediaBase}.${mediaOffset}`)
-      setEdit(profile.Name, 'adapter', 2, 'subnet', quickFill.mediaSubnet)
+    setEdits((prev) => {
+      const next = { ...prev }
+      sortedProfiles.forEach((profile, i) => {
+        const entry = { ...next[profile.Name] }
+        const adapters = { ...entry.adapters }
+
+        const hostOffset = quickFill.d3netStart + i
+        const sacnOffset = quickFill.sacnStart + i
+        const mediaOffset = quickFill.mediaStart + i
+
+        // d3Net (index 0)
+        adapters[0] = { ...adapters[0], ip: `${quickFill.d3netBase}.${hostOffset}`, subnet: quickFill.d3netSubnet }
+        // sACN (index 1)
+        adapters[1] = { ...adapters[1], ip: `${quickFill.sacnBase}.${sacnOffset}`, subnet: quickFill.sacnSubnet }
+        // Media (index 2)
+        adapters[2] = { ...adapters[2], ip: `${quickFill.mediaBase}.${mediaOffset}`, subnet: quickFill.mediaSubnet }
+
+        entry.adapters = adapters
+        next[profile.Name] = entry
+      })
+      return next
     })
     toast.success(`Quick Fill applied to ${sortedProfiles.length} profiles — review and Save All`)
     setQuickFillOpen(false)

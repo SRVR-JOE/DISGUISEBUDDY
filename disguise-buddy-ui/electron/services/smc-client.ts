@@ -7,6 +7,8 @@
 
 import http from 'http'
 
+const MAX_BODY_BYTES = 1_048_576
+
 /**
  * Query a single disguise server's SMC API via HTTP GET.
  *
@@ -15,16 +17,26 @@ import http from 'http'
  * @param timeoutMs Request timeout in milliseconds (default 4000)
  */
 export async function querySmc(mgmtIp: string, endpoint: string, timeoutMs = 4000): Promise<any> {
+  if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(mgmtIp)) {
+    return Promise.reject(new Error('Invalid IP address'))
+  }
+  if (!/^[\w\/\-\.]+$/.test(endpoint)) {
+    return Promise.reject(new Error('Invalid endpoint path'))
+  }
   return new Promise((resolve, reject) => {
+    let settled = false
     const req = http.get(`http://${mgmtIp}/api/${endpoint}`, { timeout: timeoutMs }, (res) => {
       let data = ''
-      res.on('data', (chunk: string) => { data += chunk })
+      res.on('data', (chunk: string) => {
+        data += chunk
+        if (data.length > MAX_BODY_BYTES) { req.destroy(); if (!settled) { settled = true; reject(new Error('Response body too large')) } return }
+      })
       res.on('end', () => {
-        try { resolve(JSON.parse(data)) } catch { reject(new Error('Invalid JSON')) }
+        if (!settled) { settled = true; try { resolve(JSON.parse(data)) } catch { reject(new Error('Invalid JSON')) } }
       })
     })
-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')) })
-    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(new Error('timeout')) })
+    req.on('error', (err) => { if (!settled) { settled = true; reject(err) } })
   })
 }
 
@@ -37,7 +49,14 @@ export async function querySmc(mgmtIp: string, endpoint: string, timeoutMs = 400
  * @param timeoutMs Request timeout in milliseconds (default 4000)
  */
 export async function postSmc(mgmtIp: string, endpoint: string, body: any, timeoutMs = 4000): Promise<any> {
+  if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(mgmtIp)) {
+    return Promise.reject(new Error('Invalid IP address'))
+  }
+  if (!/^[\w\/\-\.]+$/.test(endpoint)) {
+    return Promise.reject(new Error('Invalid endpoint path'))
+  }
   return new Promise((resolve, reject) => {
+    let settled = false
     const payload = JSON.stringify(body)
     const url = new URL(`http://${mgmtIp}/api/${endpoint}`)
 
@@ -55,15 +74,18 @@ export async function postSmc(mgmtIp: string, endpoint: string, body: any, timeo
       },
       (res) => {
         let data = ''
-        res.on('data', (chunk: string) => { data += chunk })
+        res.on('data', (chunk: string) => {
+          data += chunk
+          if (data.length > MAX_BODY_BYTES) { req.destroy(); if (!settled) { settled = true; reject(new Error('Response body too large')) } return }
+        })
         res.on('end', () => {
-          try { resolve(JSON.parse(data)) } catch { reject(new Error('Invalid JSON')) }
+          if (!settled) { settled = true; try { resolve(JSON.parse(data)) } catch { reject(new Error('Invalid JSON')) } }
         })
       },
     )
 
-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')) })
-    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(new Error('timeout')) })
+    req.on('error', (err) => { if (!settled) { settled = true; reject(err) } })
     req.write(payload)
     req.end()
   })

@@ -107,6 +107,8 @@ function serverDisplayName(server: ServerSnapshot): string {
   return server.hostname || server.mgmtIp
 }
 
+// NOTE: Timestamps go stale between renders — this value is computed once at render time
+// and will not automatically update while the component remains mounted.
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now()
   const diffMs = now - timestamp

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type {
   TimeRange,
   TelemetrySnapshot,
@@ -27,12 +27,6 @@ function downsample(points: DataPoint[], maxPoints: number): DataPoint[] {
     result.push(points[points.length - 1])
   }
   return result
-}
-
-let anomalyCounter = 0
-function nextAnomalyId(): string {
-  anomalyCounter += 1
-  return `anomaly-${Date.now()}-${anomalyCounter}`
 }
 
 function extractMetricSeries(
@@ -114,7 +108,7 @@ function extractMetricSeries(
   return result
 }
 
-function detectAnomalies(snapshots: TelemetrySnapshot[]): AnomalyEvent[] {
+function detectAnomalies(snapshots: TelemetrySnapshot[], nextId: () => string): AnomalyEvent[] {
   const anomalies: AnomalyEvent[] = []
   const tempMetric = METRICS.find((m) => m.key === 'temperature')!
   const fanMetric = METRICS.find((m) => m.key === 'fan')!
@@ -126,7 +120,7 @@ function detectAnomalies(snapshots: TelemetrySnapshot[]): AnomalyEvent[] {
         const sev = tempMetric.severity(sensor.value)
         if (sev !== 'green') {
           anomalies.push({
-            id: nextAnomalyId(),
+            id: nextId(),
             timestamp: snap.timestamp,
             serverId: server.mgmtIp,
             serverName: server.hostname,
@@ -146,7 +140,7 @@ function detectAnomalies(snapshots: TelemetrySnapshot[]): AnomalyEvent[] {
         const sev = volMetric.severity(rail.value, rail.nominal)
         if (sev !== 'green') {
           anomalies.push({
-            id: nextAnomalyId(),
+            id: nextId(),
             timestamp: snap.timestamp,
             serverId: server.mgmtIp,
             serverName: server.hostname,
@@ -165,7 +159,7 @@ function detectAnomalies(snapshots: TelemetrySnapshot[]): AnomalyEvent[] {
         const sev = fanMetric.severity(fan.rpm)
         if (sev !== 'green') {
           anomalies.push({
-            id: nextAnomalyId(),
+            id: nextId(),
             timestamp: snap.timestamp,
             serverId: server.mgmtIp,
             serverName: server.hostname,
@@ -204,6 +198,12 @@ export function useTelemetry({ timeRange, liveMode }: UseTelemetryOptions): UseT
   const [loading, setLoading] = useState(true)
   const serverColorMapRef = useRef(new Map<string, string>())
   const eventSourceRef = useRef<EventSource | null>(null)
+  const anomalyCounterRef = useRef(0)
+
+  const nextAnomalyId = useCallback((): string => {
+    anomalyCounterRef.current += 1
+    return `anomaly-${Date.now()}-${anomalyCounterRef.current}`
+  }, [])
 
   // Assign stable colors to servers as they appear
   const assignColors = useCallback((servers: ServerSnapshot[]) => {
@@ -267,10 +267,11 @@ export function useTelemetry({ timeRange, liveMode }: UseTelemetryOptions): UseT
       es.close()
       eventSourceRef.current = null
     }
-  }, [liveMode, assignColors])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMode])
 
-  const series = extractMetricSeries(snapshots, serverColorMapRef.current)
-  const anomalies = detectAnomalies(snapshots)
+  const series = useMemo(() => extractMetricSeries(snapshots, serverColorMapRef.current), [snapshots])
+  const anomalies = useMemo(() => detectAnomalies(snapshots, nextAnomalyId), [snapshots, nextAnomalyId])
   const latestSnapshot = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null
 
   return { series, anomalies, snapshots, loading, latestSnapshot }

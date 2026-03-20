@@ -286,7 +286,7 @@ function ServerCard({ server }: ServerCardProps) {
             <ul className="space-y-0.5">
               {server.errors.slice(0, 3).map((err, idx) => (
                 <li
-                  key={idx}
+                  key={`${idx}-${err}`}
                   className="text-error/80 text-[10px] font-mono leading-snug truncate"
                   title={err}
                 >

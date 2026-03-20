@@ -63,8 +63,8 @@ function Find-DisguiseServers {
     }
 
     # Validate IP range
-    if ($StartIP -lt 0 -or $StartIP -gt 255 -or $EndIP -lt 0 -or $EndIP -gt 255) {
-        Write-AppLog -Message "Find-DisguiseServers: IP range values must be 0-255. Got StartIP=$StartIP, EndIP=$EndIP." -Level 'ERROR'
+    if ($StartIP -lt 1 -or $StartIP -gt 255 -or $EndIP -lt 0 -or $EndIP -gt 255) {
+        Write-AppLog -Message "Find-DisguiseServers: IP range values must be 1-255 for StartIP and 0-255 for EndIP. Got StartIP=$StartIP, EndIP=$EndIP." -Level 'ERROR'
         return @()
     }
     if ($StartIP -gt $EndIP) {
@@ -2548,8 +2548,8 @@ function New-DeployView {
         }
 
         # Validate IP range
-        if ($startIP -lt 0 -or $startIP -gt 255 -or $endIP -lt 0 -or $endIP -gt 255 -or $startIP -gt $endIP) {
-            $lblScanStatus.Text      = "Invalid IP range. Start and End must be 0-255, Start <= End."
+        if ($startIP -lt 1 -or $startIP -gt 255 -or $endIP -lt 0 -or $endIP -gt 255 -or $startIP -gt $endIP) {
+            $lblScanStatus.Text      = "Invalid IP range. Start must be 1-255, End must be 0-255, Start <= End."
             $lblScanStatus.ForeColor = $script:Theme.Error
             return
         }

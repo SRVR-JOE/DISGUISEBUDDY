@@ -22,8 +22,8 @@ export function DashboardPage() {
 
   // Load profile count + push default servers on mount
   useEffect(() => {
-    api.getProfiles().then(p => setProfileCount(p.length)).catch(() => {})
-    api.setTelemetryServers(DEFAULT_IPS).catch(() => {})
+    api.getProfiles().then(p => setProfileCount(p.length)).catch(err => console.warn('[Dashboard]', err))
+    api.setTelemetryServers(DEFAULT_IPS).catch(err => console.warn('[Dashboard]', err))
   }, [])
 
   // Extract latest server states

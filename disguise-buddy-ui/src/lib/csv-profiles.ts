@@ -291,7 +291,9 @@ export function downloadCSV(csv: string, filename: string): void {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  document.body.appendChild(a)
   a.click()
+  document.body.removeChild(a)
   URL.revokeObjectURL(url)
 }
 
@@ -315,6 +317,7 @@ export function pickAndReadCSV(): Promise<string> {
       reader.onerror = () => reject(reader.error)
       reader.readAsText(file)
     }
+    input.oncancel = () => reject(new Error('File selection cancelled'))
     input.click()
   })
 }
