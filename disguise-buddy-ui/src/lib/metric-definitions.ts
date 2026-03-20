@@ -17,13 +17,13 @@ export const METRICS: MetricDefinition[] = [
   {
     key: 'temperature',
     label: 'Temperature',
-    unit: '\u00B0C',
+    unit: '\u00B0F',
     category: 'temperature',
-    amberThreshold: 60,
-    redThreshold: 75,
+    amberThreshold: 140,
+    redThreshold: 167,
     severity: (value: number) => {
-      if (value > 75) return 'red'
-      if (value >= 60) return 'amber'
+      if (value > 167) return 'red'
+      if (value >= 140) return 'amber'
       return 'green'
     },
   },

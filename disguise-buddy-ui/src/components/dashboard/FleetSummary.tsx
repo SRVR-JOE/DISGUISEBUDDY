@@ -37,8 +37,8 @@ interface StatDef {
 
 function tempColor(avg: number): { accent: string; accentHex: string } {
   if (avg <= 0) return { accent: 'text-textMuted', accentHex: '#64748B' }
-  if (avg < 60) return { accent: 'text-success', accentHex: '#10B981' }
-  if (avg < 75) return { accent: 'text-warning', accentHex: '#F59E0B' }
+  if (avg < 140) return { accent: 'text-success', accentHex: '#10B981' }
+  if (avg < 167) return { accent: 'text-warning', accentHex: '#F59E0B' }
   return { accent: 'text-error', accentHex: '#EF4444' }
 }
 
@@ -192,7 +192,7 @@ export function FleetSummary({ servers, profileCount, loading = false }: FleetSu
 
   const avgTemp = computeAvgTemp(servers)
   const { accent: tempAccent, accentHex: tempAccentHex } = tempColor(avgTemp)
-  const tempDisplay = avgTemp > 0 ? `${avgTemp.toFixed(1)}\u00B0` : '--'
+  const tempDisplay = avgTemp > 0 ? `${avgTemp.toFixed(1)}\u00B0F` : '--'
 
   return (
     <div

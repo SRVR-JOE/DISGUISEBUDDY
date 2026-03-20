@@ -35,8 +35,8 @@ const PALETTE = [
 const GRID_COLOR = '#2A2A3C'
 const TEXT_COLOR = '#94A3B8'
 const FONT_FAMILY = 'JetBrains Mono, monospace'
-const WARNING_TEMP = 60
-const CRITICAL_TEMP = 75
+const WARNING_TEMP = 140
+const CRITICAL_TEMP = 167
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -141,7 +141,7 @@ function TemperatureTooltip({ active, payload, label }: CustomTooltipProps) {
           <span className="text-white font-bold ml-auto">
             {typeof entry.value === 'number' ? entry.value.toFixed(1) : entry.value}
             <span style={{ color: TEXT_COLOR }} className="ml-0.5">
-              °C
+              °F
             </span>
           </span>
         </div>
@@ -275,19 +275,19 @@ export function TemperatureOverview({ snapshots, loading = false }: TemperatureO
                 tickLine={false}
                 axisLine={false}
                 width={48}
-                tickFormatter={(v: number) => `${v}°C`}
+                tickFormatter={(v: number) => `${v}°F`}
               />
 
               <Tooltip content={<TemperatureTooltip />} />
 
-              {/* Warning threshold – 60 °C */}
+              {/* Warning threshold – 60 °F */}
               <ReferenceLine
                 y={WARNING_TEMP}
                 stroke="#F59E0B"
                 strokeDasharray="6 3"
                 strokeOpacity={0.6}
                 label={{
-                  value: `${WARNING_TEMP}°C`,
+                  value: `${WARNING_TEMP}°F`,
                   position: 'right' as const,
                   fill: '#F59E0B',
                   fontSize: 9,
@@ -295,14 +295,14 @@ export function TemperatureOverview({ snapshots, loading = false }: TemperatureO
                 }}
               />
 
-              {/* Critical threshold – 75 °C */}
+              {/* Critical threshold – 75 °F */}
               <ReferenceLine
                 y={CRITICAL_TEMP}
                 stroke="#EF4444"
                 strokeDasharray="6 3"
                 strokeOpacity={0.6}
                 label={{
-                  value: `${CRITICAL_TEMP}°C`,
+                  value: `${CRITICAL_TEMP}°F`,
                   position: 'right' as const,
                   fill: '#EF4444',
                   fontSize: 9,

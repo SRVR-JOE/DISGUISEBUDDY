@@ -36,7 +36,9 @@ interface DashboardServer {
 function parseTemp(val: string | undefined): number {
   if (!val) return 0
   const match = val.match(/(\d+)/)
-  return match ? parseInt(match[1], 10) : 0
+  if (!match) return 0
+  const c = parseInt(match[1], 10)
+  return Math.round(c * 9 / 5 + 32) // Convert C to F
 }
 
 function parseVoltage(val: string | undefined): number {
@@ -54,8 +56,8 @@ function parseRPM(val: string | undefined): number {
 // ─── Color helpers ────────────────────────────────────────────────────────────
 
 function tempColor(value: number): string {
-  if (value < 60) return '#22c55e'
-  if (value < 75) return '#f59e0b'
+  if (value < 140) return '#22c55e'
+  if (value < 167) return '#f59e0b'
   return '#ef4444'
 }
 
@@ -95,8 +97,8 @@ function roleVariant(role: string): 'success' | 'info' | 'warning' | 'neutral' {
 function countAnomalies(servers: DashboardServer[]): number {
   let count = 0
   for (const s of servers) {
-    if (parseTemp(s.chassis['CPU-TMP']) > 75) count++
-    if (parseTemp(s.chassis['SYS-TMP']) > 50) count++
+    if (parseTemp(s.chassis['CPU-TMP']) > 167) count++
+    if (parseTemp(s.chassis['SYS-TMP']) > 122) count++
     const v12 = parseVoltage(s.chassis['PAY_12-VOL'])
     if (v12 > 0 && Math.abs(v12 - 12) / 12 > 0.1) count++
     const v5 = parseVoltage(s.chassis['PAY_5-VOL'])
@@ -116,7 +118,7 @@ function countAnomalies(servers: DashboardServer[]): number {
 
 // ─── TempGauge (inline SVG) ──────────────────────────────────────────────────
 
-function TempGauge({ value, max = 100, label, size = 80 }: { value: number; max?: number; label: string; size?: number }) {
+function TempGauge({ value, max = 212, label, size = 80 }: { value: number; max?: number; label: string; size?: number }) {
   const pct = Math.min(100, (value / max) * 100)
   const color = tempColor(value)
   const strokeWidth = size * 0.1
@@ -181,7 +183,7 @@ function TempGauge({ value, max = 100, label, size = 80 }: { value: number; max?
           fontWeight="700"
           fontFamily="'JetBrains Mono', monospace"
         >
-          {value}°
+          {value}°F
         </text>
         <text
           x={center}
@@ -381,12 +383,12 @@ function RackUnit({
               <motion.div
                 className="h-full rounded-full"
                 style={{ backgroundColor: tempColor(cpuTemp) }}
-                animate={{ width: `${Math.min(100, (cpuTemp / 100) * 100)}%` }}
+                animate={{ width: `${Math.min(100, (cpuTemp / 212) * 100)}%` }}
                 transition={{ duration: 0.5 }}
               />
             </div>
             <span className="text-xs font-mono w-10 text-right" style={{ color: tempColor(cpuTemp) }}>
-              {cpuTemp}°C
+              {cpuTemp}°F
             </span>
           </div>
 
@@ -679,7 +681,7 @@ export function DashboardPage() {
     return Math.round(sum / servers.length)
   }, [servers])
 
-  const avgTempGlowColor = avgCpuTemp < 60 ? '#22c55e' : avgCpuTemp < 75 ? '#f59e0b' : '#ef4444'
+  const avgTempGlowColor = avgCpuTemp < 140 ? '#22c55e' : avgCpuTemp < 167 ? '#f59e0b' : '#ef4444'
 
   // ── Health matrix data ─────────────────────────────────────────────────────
 
@@ -785,7 +787,7 @@ export function DashboardPage() {
         <StatCard
           icon={Cpu}
           label="Avg CPU Temp"
-          value={servers.length > 0 ? `${avgCpuTemp}°C` : '--'}
+          value={servers.length > 0 ? `${avgCpuTemp}°F` : '--'}
           glowColor={avgTempGlowColor}
         />
       </div>
@@ -878,7 +880,7 @@ export function DashboardPage() {
                             <MatrixCell
                               key={s.ip}
                               color={tempColor(val)}
-                              value={val > 0 ? `${val}°` : '--'}
+                              value={val > 0 ? `${val}°F` : '--'}
                               tooltip={`${row.label}: ${rawVal || 'N/A'}`}
                             />
                           )

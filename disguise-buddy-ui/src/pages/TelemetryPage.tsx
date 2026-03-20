@@ -282,7 +282,7 @@ export function TelemetryPage() {
             // Threshold values per category
             let amberThreshold: number | undefined
             let redThreshold: number | undefined
-            if (category === 'temperature') { amberThreshold = 60; redThreshold = 75 }
+            if (category === 'temperature') { amberThreshold = 140; redThreshold = 167 }
             // Fan thresholds: lower RPM = worse (fans slowing down is the warning signal)
             if (category === 'fan') { amberThreshold = 1000; redThreshold = 500 }
 

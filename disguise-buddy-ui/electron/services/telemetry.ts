@@ -82,6 +82,11 @@ export interface TelemetrySnapshot {
  * values contain numeric readings.  The exact shape varies by firmware version
  * so we use heuristic matching on key names.
  */
+/** Convert Celsius to Fahrenheit */
+function cToF(c: number): number {
+  return Math.round((c * 9 / 5 + 32) * 10) / 10
+}
+
 function parseChassisStats(stats: any): {
   temperatures: { label: string; value: number }[]
   voltages: { label: string; value: number; nominal: number }[]
@@ -99,7 +104,7 @@ function parseChassisStats(stats: any): {
     if (typeof val === 'number') {
       // Simple numeric value — classify by key name
       if (keyLower.includes('temp') || keyLower.includes('thermal')) {
-        temperatures.push({ label: key, value: val })
+        temperatures.push({ label: key, value: cToF(val) })
       } else if (keyLower.includes('fan') || keyLower.includes('speed')) {
         fans.push({ label: key, rpm: val })
       } else if (keyLower.includes('volt') || keyLower.includes('vcc') || keyLower.includes('vnn') || keyLower.includes('vcore')) {
@@ -117,7 +122,7 @@ function parseChassisStats(stats: any): {
 
       const valLower = val.toLowerCase()
       if (keyLower.includes('tmp') || keyLower.includes('temp') || keyLower.includes('thermal') || valLower.includes('degrees') || valLower.includes('°c')) {
-        temperatures.push({ label: key, value: num })
+        temperatures.push({ label: key, value: cToF(num) })
       } else if (keyLower.includes('fan') || keyLower.includes('speed') || valLower.includes('rpm')) {
         fans.push({ label: key, rpm: num })
       } else if (keyLower.includes('vol') || keyLower.includes('vcc') || keyLower.includes('vnn') || keyLower.includes('vcore') || valLower.includes('volt')) {
@@ -136,7 +141,7 @@ function parseChassisStats(stats: any): {
       if (Number.isNaN(readingNum)) continue
 
       if (keyLower.includes('temp') || keyLower.includes('thermal') || obj['unit']?.toLowerCase?.()?.includes('c')) {
-        temperatures.push({ label: key, value: readingNum })
+        temperatures.push({ label: key, value: cToF(readingNum) })
       } else if (keyLower.includes('fan') || obj['unit']?.toLowerCase?.()?.includes('rpm')) {
         fans.push({ label: key, rpm: readingNum })
       } else if (
@@ -183,8 +188,8 @@ type SnapshotCallback = (snapshot: TelemetrySnapshot) => void
 
 // ─── TelemetryService ────────────────────────────────────────────────────────
 
-const MAX_SNAPSHOTS = 2880 // 24 h at 30 s intervals
-const DEFAULT_POLL_MS = 30_000
+const MAX_SNAPSHOTS = 7200 // 2 h at 1 s intervals (or 10 h at 5 s)
+const DEFAULT_POLL_MS = 5_000
 const DEFAULT_RETENTION_MS = 24 * 60 * 60 * 1000
 const PERSIST_INTERVAL_MS = 5 * 60 * 1000
 const DISCOVERY_INTERVAL_MS = 5 * 60 * 1000 // re-discover every 5 min

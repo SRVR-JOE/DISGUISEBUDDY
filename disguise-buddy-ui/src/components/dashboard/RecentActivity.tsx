@@ -37,8 +37,8 @@ interface RecentActivityProps {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const TEMP_WARNING_THRESHOLD = 60
-const TEMP_CRITICAL_THRESHOLD = 75
+const TEMP_WARNING_THRESHOLD = 140
+const TEMP_CRITICAL_THRESHOLD = 167
 
 const EVENT_CONFIG: Record<
   EventType,
@@ -205,7 +205,7 @@ function detectChanges(
           serverIp: server.mgmtIp,
           serverName: name,
           type: 'temp-critical',
-          description: `${temp.label} reached ${temp.value.toFixed(0)}°C (critical)`,
+          description: `${temp.label} reached ${temp.value.toFixed(0)}°F (critical)`,
         })
       }
       // Crossed warning threshold (60C) but not yet critical
@@ -220,7 +220,7 @@ function detectChanges(
           serverIp: server.mgmtIp,
           serverName: name,
           type: 'temp-warning',
-          description: `${temp.label} reached ${temp.value.toFixed(0)}°C (warning)`,
+          description: `${temp.label} reached ${temp.value.toFixed(0)}°F (warning)`,
         })
       }
     }
