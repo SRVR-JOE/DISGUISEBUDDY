@@ -32,8 +32,7 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'anomalies', label: 'Anomalies', icon: <AlertTriangle size={14} /> },
 ]
 
-// Default 7 GX3+ MGMT IPs
-const DEFAULT_IPS = Array.from({ length: 7 }, (_, i) => `192.168.100.${200 + i}`)
+// No hardcoded IPs — backend auto-discovers servers on the MGMT network
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
@@ -41,32 +40,32 @@ export function TelemetryPage() {
   const [timeRange, setTimeRange] = useState<TimeRange>('15m')
   const [liveMode, setLiveMode] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('charts')
-  const [selectedServers, setSelectedServers] = useState<string[]>(DEFAULT_IPS)
+  const [selectedServers, setSelectedServers] = useState<string[]>([])
   const [compareMode, setCompareMode] = useState(true)
+  const [autoSelected, setAutoSelected] = useState(false)
 
   const { series, anomalies, snapshots, loading } = useTelemetry({ timeRange, liveMode })
 
-  // Push default servers to backend on mount
-  useEffect(() => {
-    api.setTelemetryServers(DEFAULT_IPS).catch(console.error)
-  }, [])
-
-  // Known servers from snapshots
+  // Known servers from snapshots (auto-discovered by backend)
   const knownServers = useMemo(() => {
     const map = new Map<string, string>()
     for (const snap of snapshots) {
       for (const srv of snap.servers) {
-        if (!map.has(srv.mgmtIp)) {
+        if (srv.status !== 'offline' && !map.has(srv.mgmtIp)) {
           map.set(srv.mgmtIp, srv.hostname || srv.mgmtIp)
         }
       }
     }
-    // Also include default IPs that haven't responded yet
-    for (const ip of DEFAULT_IPS) {
-      if (!map.has(ip)) map.set(ip, ip)
-    }
     return map
   }, [snapshots])
+
+  // Auto-select all discovered servers on first data load
+  useEffect(() => {
+    if (!autoSelected && knownServers.size > 0) {
+      setSelectedServers(Array.from(knownServers.keys()))
+      setAutoSelected(true)
+    }
+  }, [knownServers, autoSelected])
 
   const toggleServer = useCallback((ip: string) => {
     setSelectedServers(prev =>

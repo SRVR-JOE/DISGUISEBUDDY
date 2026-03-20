@@ -89,10 +89,28 @@ function parseChassisStats(stats: any): {
       // Simple numeric value — classify by key name
       if (keyLower.includes('temp') || keyLower.includes('thermal')) {
         temperatures.push({ label: key, value: val })
-      } else if (keyLower.includes('fan')) {
+      } else if (keyLower.includes('fan') || keyLower.includes('speed')) {
         fans.push({ label: key, rpm: val })
       } else if (keyLower.includes('volt') || keyLower.includes('vcc') || keyLower.includes('vnn') || keyLower.includes('vcore')) {
         voltages.push({ label: key, value: val, nominal: 0 })
+      }
+      continue
+    }
+
+    // String value — disguise BMC returns "58 degrees C", "6100 RPM", "11.86 Volts"
+    if (typeof val === 'string') {
+      const numMatch = val.match(/^([\d.]+)\s*/)
+      if (!numMatch) continue
+      const num = parseFloat(numMatch[1])
+      if (Number.isNaN(num)) continue
+
+      const valLower = val.toLowerCase()
+      if (keyLower.includes('tmp') || keyLower.includes('temp') || keyLower.includes('thermal') || valLower.includes('degrees') || valLower.includes('°c')) {
+        temperatures.push({ label: key, value: num })
+      } else if (keyLower.includes('fan') || keyLower.includes('speed') || valLower.includes('rpm')) {
+        fans.push({ label: key, rpm: num })
+      } else if (keyLower.includes('vol') || keyLower.includes('vcc') || keyLower.includes('vnn') || keyLower.includes('vcore') || valLower.includes('volt')) {
+        voltages.push({ label: key, value: num, nominal: 0 })
       }
       continue
     }
@@ -158,6 +176,11 @@ const MAX_SNAPSHOTS = 2880 // 24 h at 30 s intervals
 const DEFAULT_POLL_MS = 30_000
 const DEFAULT_RETENTION_MS = 24 * 60 * 60 * 1000
 const PERSIST_INTERVAL_MS = 5 * 60 * 1000
+const DISCOVERY_INTERVAL_MS = 5 * 60 * 1000 // re-discover every 5 min
+const DEFAULT_DISCOVERY_SUBNET = '192.168.100'
+const DEFAULT_DISCOVERY_START = 200
+const DEFAULT_DISCOVERY_END = 254
+const DISCOVERY_TIMEOUT_MS = 2000
 
 export class TelemetryService {
   servers: string[]
@@ -165,28 +188,34 @@ export class TelemetryService {
   pollIntervalMs: number = DEFAULT_POLL_MS
   retentionMs: number = DEFAULT_RETENTION_MS
 
+  // Discovery config
+  discoverySubnet: string = DEFAULT_DISCOVERY_SUBNET
+  discoveryStart: number = DEFAULT_DISCOVERY_START
+  discoveryEnd: number = DEFAULT_DISCOVERY_END
+  private discoveryInProgress = false
+  private discoveryTimer: ReturnType<typeof setInterval> | null = null
+
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private persistTimer: ReturnType<typeof setInterval> | null = null
   private sseCallbacks: Set<SnapshotCallback> = new Set()
   private snapshotInProgress = false
 
   constructor(servers?: string[]) {
-    this.servers = servers ?? [
-      '192.168.100.200',
-      '192.168.100.201',
-      '192.168.100.202',
-      '192.168.100.203',
-      '192.168.100.204',
-      '192.168.100.205',
-      '192.168.100.206',
-    ]
+    this.servers = servers ?? []
     this.loadFromDisk()
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
-  start(): void {
+  async start(): Promise<void> {
     if (this.pollTimer) return // already running
+
+    // Auto-discover servers on the MGMT network before first poll
+    if (this.servers.length === 0) {
+      console.log('[telemetry] No servers configured — running auto-discovery...')
+      await this.autoDiscover()
+    }
+
     console.log(`[telemetry] Starting — polling ${this.servers.length} servers every ${this.pollIntervalMs}ms`)
 
     // Take an initial snapshot immediately
@@ -199,13 +228,81 @@ export class TelemetryService {
     this.persistTimer = setInterval(() => {
       this.persistToDisk()
     }, PERSIST_INTERVAL_MS)
+
+    // Periodically re-discover to pick up new servers or drop dead ones
+    this.discoveryTimer = setInterval(() => {
+      this.autoDiscover().catch(err => console.error('[telemetry] Discovery failed:', err))
+    }, DISCOVERY_INTERVAL_MS)
   }
 
   stop(): void {
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null }
     if (this.persistTimer) { clearInterval(this.persistTimer); this.persistTimer = null }
+    if (this.discoveryTimer) { clearInterval(this.discoveryTimer); this.discoveryTimer = null }
     this.persistToDisk()
     console.log('[telemetry] Stopped')
+  }
+
+  // ── Auto-Discovery ─────────────────────────────────────────────────────
+
+  async autoDiscover(): Promise<string[]> {
+    if (this.discoveryInProgress) return this.servers
+    this.discoveryInProgress = true
+
+    try {
+      const subnet = this.discoverySubnet
+      const start = this.discoveryStart
+      const end = this.discoveryEnd
+      const total = end - start + 1
+
+      console.log(`[telemetry] Scanning ${subnet}.${start}-${end} for disguise servers...`)
+
+      // Probe all IPs in parallel batches of 10 for speed
+      const BATCH_SIZE = 10
+      const found: string[] = []
+
+      for (let i = start; i <= end; i += BATCH_SIZE) {
+        const batch = Array.from(
+          { length: Math.min(BATCH_SIZE, end - i + 1) },
+          (_, j) => `${subnet}.${i + j}`,
+        )
+
+        const results = await Promise.all(
+          batch.map(async (ip) => {
+            try {
+              const machine = await querySmc(ip, 'localmachine', DISCOVERY_TIMEOUT_MS)
+              if (machine && machine.hostname) {
+                return { ip, hostname: machine.hostname, type: machine.type || '' }
+              }
+            } catch {
+              // Not a disguise server or unreachable
+            }
+            return null
+          }),
+        )
+
+        for (const r of results) {
+          if (r) {
+            found.push(r.ip)
+            console.log(`[telemetry]   Found: ${r.ip} → ${r.hostname} (${r.type})`)
+          }
+        }
+      }
+
+      if (found.length > 0) {
+        // Merge: keep any existing servers that are still alive, add new ones
+        const newSet = new Set(found)
+        const prev = this.servers.length
+        this.servers = found
+        console.log(`[telemetry] Discovery complete: ${found.length} servers (was ${prev})`)
+      } else if (this.servers.length === 0) {
+        console.log('[telemetry] Discovery found no servers — will retry next cycle')
+      }
+
+      return this.servers
+    } finally {
+      this.discoveryInProgress = false
+    }
   }
 
   // ── Configuration ────────────────────────────────────────────────────────

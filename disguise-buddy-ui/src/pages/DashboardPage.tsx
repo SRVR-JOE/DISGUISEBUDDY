@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, Radio, Pause, Play } from 'lucide-react'
+import { RefreshCw, Radio, Pause, Play, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
 import { useTelemetry } from '@/hooks/useTelemetry'
@@ -10,20 +10,17 @@ import { ServerHealthGrid } from '@/components/dashboard/ServerHealthGrid'
 import { RecentActivity } from '@/components/dashboard/RecentActivity'
 import { TemperatureOverview } from '@/components/dashboard/TemperatureOverview'
 
-// Default MGMT IPs for the 7 GX3+ servers
-const DEFAULT_IPS = Array.from({ length: 7 }, (_, i) => `192.168.100.${200 + i}`)
-
 export function DashboardPage() {
   const [timeRange, setTimeRange] = useState<TimeRange>('15m')
   const [liveMode, setLiveMode] = useState(true)
   const [profileCount, setProfileCount] = useState(0)
+  const [discovering, setDiscovering] = useState(false)
 
   const { snapshots, latestSnapshot, loading } = useTelemetry({ timeRange, liveMode })
 
-  // Load profile count + push default servers on mount
+  // Load profile count on mount (servers are auto-discovered by the backend)
   useEffect(() => {
     api.getProfiles().then(p => setProfileCount(p.length)).catch(err => console.warn('[Dashboard]', err))
-    api.setTelemetryServers(DEFAULT_IPS).catch(err => console.warn('[Dashboard]', err))
   }, [])
 
   // Extract latest server states
@@ -34,6 +31,15 @@ export function DashboardPage() {
     api.triggerSnapshot()
       .then(() => toast.success('Snapshot taken'))
       .catch(() => toast.error('Failed to take snapshot'))
+  }, [])
+
+  // Re-discover servers on the MGMT network
+  const handleDiscover = useCallback(() => {
+    setDiscovering(true)
+    api.triggerDiscovery()
+      .then(r => toast.success(`Found ${r.servers.length} servers`))
+      .catch(() => toast.error('Discovery failed'))
+      .finally(() => setDiscovering(false))
   }, [])
 
   // Listen for F5 app-refresh event
@@ -101,6 +107,12 @@ export function DashboardPage() {
             >
               {liveMode ? <Pause size={13} /> : <Play size={13} />}
               {liveMode ? 'Pause' : 'Live'}
+            </Button>
+
+            {/* Re-discover servers */}
+            <Button variant="ghost" size="sm" onClick={handleDiscover} disabled={discovering}>
+              <Search size={13} className={discovering ? 'animate-pulse' : ''} />
+              {discovering ? 'Scanning...' : 'Discover'}
             </Button>
 
             {/* Manual refresh */}

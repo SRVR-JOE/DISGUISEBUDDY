@@ -1070,7 +1070,26 @@ app.get('/api/telemetry/stream', (req: Request, res: Response) => {
   })
 })
 
-// Start telemetry polling
+// ─── Telemetry: discover + auto-start ────────────────────────────────────────
+
+app.post('/api/telemetry/discover', async (req: Request, res: Response) => {
+  try {
+    const { subnet, start, end } = req.body as { subnet?: string; start?: number; end?: number }
+    if (subnet) telemetryService.discoverySubnet = subnet
+    if (typeof start === 'number') telemetryService.discoveryStart = start
+    if (typeof end === 'number') telemetryService.discoveryEnd = end
+    const servers = await telemetryService.autoDiscover()
+    res.json({ success: true, servers })
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+app.get('/api/telemetry/servers', (_req: Request, res: Response) => {
+  res.json({ servers: telemetryService.servers })
+})
+
+// Start telemetry — auto-discovers servers on MGMT network then begins polling
 telemetryService.start()
 
 // ─── Global error handler ─────────────────────────────────────────────────────

@@ -334,6 +334,14 @@ export const api = {
     return post('/api/telemetry/servers', { ips })
   },
 
+  getTelemetryServers(): Promise<{ servers: string[] }> {
+    return get<{ servers: string[] }>('/api/telemetry/servers')
+  },
+
+  triggerDiscovery(opts?: { subnet?: string; start?: number; end?: number }): Promise<{ success: boolean; servers: string[] }> {
+    return post('/api/telemetry/discover', opts ?? {})
+  },
+
   updateTelemetryConfig(config: { pollIntervalMs?: number; retentionMs?: number }): Promise<any> {
     return post('/api/telemetry/config', config)
   },
