@@ -211,6 +211,9 @@ export class TelemetryService {
   private discoveryInProgress = false
   private discoveryTimer: ReturnType<typeof setInterval> | null = null
 
+  /** IPs explicitly added via setServers() — preserved across discovery cycles */
+  private manualServers: Set<string> = new Set()
+
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private persistTimer: ReturnType<typeof setInterval> | null = null
   private sseCallbacks: Set<SnapshotCallback> = new Set()
@@ -306,11 +309,10 @@ export class TelemetryService {
       }
 
       if (found.length > 0) {
-        // Merge: keep any existing servers that are still alive, add new ones
-        const newSet = new Set(found)
+        // Merge discovered servers with manually-added ones
         const prev = this.servers.length
-        this.servers = found
-        console.log(`[telemetry] Discovery complete: ${found.length} servers (was ${prev})`)
+        this.servers = [...new Set([...this.manualServers, ...found])]
+        console.log(`[telemetry] Discovery complete: ${found.length} discovered + ${this.manualServers.size} manual = ${this.servers.length} servers (was ${prev})`)
       } else if (this.servers.length === 0) {
         console.log('[telemetry] Discovery found no servers — will retry next cycle')
       }
@@ -324,6 +326,7 @@ export class TelemetryService {
   // ── Configuration ────────────────────────────────────────────────────────
 
   setServers(ips: string[]): void {
+    this.manualServers = new Set(ips)
     this.servers = ips
     console.log(`[telemetry] Server list updated: ${ips.join(', ')}`)
   }
@@ -474,8 +477,10 @@ export class TelemetryService {
 
   private async persistToDisk(): Promise<void> {
     try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true })
+      try {
+        await fs.promises.access(DATA_DIR)
+      } catch {
+        await fs.promises.mkdir(DATA_DIR, { recursive: true })
       }
       const payload = JSON.stringify({
         servers: this.servers,

@@ -473,7 +473,6 @@ export function SoftwarePage() {
   const [addingSoftware, setAddingSoftware] = useState(false)
 
   // ── Servers state ────────────────────────────────────────────────────────────
-  const [serversLoading] = useState(false)
   const [selectedServerIPs, setSelectedServerIPs] = useState<Set<string>>(new Set())
   const [refreshingServers, setRefreshingServers] = useState(false)
 
@@ -795,12 +794,12 @@ export function SoftwarePage() {
             <div className="flex items-center gap-3">
               <h3 className="text-text font-bold text-sm tracking-wide">Target Servers</h3>
               <Badge variant={servers.length > 0 ? 'info' : 'neutral'}>
-                {serversLoading ? '...' : servers.length}
+                {servers.length}
               </Badge>
             </div>
 
             <div className="flex items-center gap-3">
-              {servers.length > 0 && !serversLoading && (
+              {servers.length > 0 && (
                 <button
                   type="button"
                   onClick={toggleAllServers}
@@ -822,25 +821,8 @@ export function SoftwarePage() {
             </div>
           </div>
 
-          {/* Loading state */}
-          {serversLoading && (
-            <div
-              className="grid grid-cols-3 gap-3"
-              aria-busy="true"
-              aria-label="Loading servers"
-            >
-              {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  className="h-36 bg-surface/50 animate-pulse rounded-xl"
-                  aria-hidden="true"
-                />
-              ))}
-            </div>
-          )}
-
           {/* Empty state */}
-          {!serversLoading && servers.length === 0 && (
+          {servers.length === 0 && (
             <div className="flex flex-col items-center justify-center py-10 gap-3">
               <Server size={32} className="text-textMuted" aria-hidden="true" />
               <p className="text-textMuted text-sm">No servers discovered</p>
@@ -851,7 +833,7 @@ export function SoftwarePage() {
           )}
 
           {/* Server grid */}
-          {!serversLoading && servers.length > 0 && (
+          {servers.length > 0 && (
             <div
               className="grid grid-cols-3 gap-3"
               role="group"

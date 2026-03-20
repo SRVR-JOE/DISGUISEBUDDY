@@ -4,14 +4,13 @@ disguise-buddy-ui/dist-renderer/
 disguise-buddy-ui/dist-electron/
 disguise-buddy-ui/dist-installer/
 disguise-buddy-ui/.vite/
+disguise-buddy-ui/data/
 
 # ─── PowerShell build artifacts ───────────────────────────────────────────────
-dist/DisguiseBuddy-merged.ps1
-dist/COMPILE.ps1
+dist/
 
-# ─── Runtime-generated data (should not be tracked) ──────────────────────────
-dist/logs/
-dist/settings/
+# ─── Sensitive / runtime files ────────────────────────────────────────────────
+ERROR.txt
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 logs/

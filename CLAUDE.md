@@ -73,6 +73,40 @@ Standard adapter roles: d3Net (0), Media (1), sACN/Art-Net (2), NDI (3), Control
 
 `Write-AppLog` (in Theme.ps1) writes to `logs/disguisebuddy.log` with levels: INFO, WARN, ERROR, DEBUG.
 
+## Electron / React Web UI
+
+The `disguise-buddy-ui/` directory contains a second interface: a React + Electron desktop app that provides a modern web-based UI alongside the PowerShell WinForms app.
+
+### Tech Stack
+
+React 19, Vite 7, Electron 40, TypeScript 5.9, Tailwind CSS 3, Express (API server on port 47100).
+
+### Key Directories
+
+- `electron/` — Electron main process, Express API server, backend services (profile management, network config, telemetry collection)
+- `src/` — React frontend (components, pages, hooks, styles)
+- `data/` — Runtime telemetry data (gitignored, not committed)
+
+### Running
+
+```bash
+cd disguise-buddy-ui
+npm install
+npm run dev          # Vite dev server (browser-only, API via "npm run start")
+npm run start        # API server + Vite concurrently
+npm run electron:dev # Full Electron app with hot reload
+```
+
+Or use `Start-DisguiseBuddy.ps1` from the repo root.
+
+### Building
+
+```bash
+npm run electron:build   # Compiles TS, builds Vite, packages with electron-builder
+```
+
+Output goes to `dist-installer/`. The Electron main process is compiled by `tsc` into `dist-electron/`.
+
 ## Key Conventions
 
 - All UI factory functions are in UIComponents.ps1 and prefixed `New-Styled*` or `New-Section*` / `New-Status*`

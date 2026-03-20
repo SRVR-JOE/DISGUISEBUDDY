@@ -26,7 +26,7 @@ export default function App(): React.ReactElement {
 
   const handleRefresh = useCallback(() => {
     window.dispatchEvent(new Event('app-refresh'))
-  }, [activeView])
+  }, [])
 
   const handleDeploy = useCallback(() => {
     window.dispatchEvent(new Event('app-deploy'))

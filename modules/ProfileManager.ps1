@@ -241,10 +241,10 @@ function Test-ProfileSchema {
     if ($Profile.SMBSettings.AdditionalShares) {
         foreach ($share in $Profile.SMBSettings.AdditionalShares) {
             if ($share.Path -match '^\\\\') {
-                return [PSCustomObject]@{ Success = $false; Message = "UNC paths not allowed in AdditionalShares: $($share.Path)" }
+                $errors += "UNC paths not allowed in AdditionalShares: $($share.Path)"
             }
             if ($share.Path -match '^[A-Z]:\\Windows' -or $share.Path -match '^[A-Z]:\\Program Files') {
-                return [PSCustomObject]@{ Success = $false; Message = "System paths not allowed in AdditionalShares: $($share.Path)" }
+                $errors += "System paths not allowed in AdditionalShares: $($share.Path)"
             }
         }
     }

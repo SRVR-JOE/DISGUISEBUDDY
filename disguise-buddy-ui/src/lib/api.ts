@@ -7,10 +7,11 @@ import type {
   IdentityInfo,
   SmbShare,
 } from '@/lib/types'
+import type { TelemetrySnapshot } from '@/lib/telemetry-types'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
-const BASE_URL = 'http://localhost:47100'
+export const BASE_URL = 'http://localhost:47100'
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -58,15 +59,47 @@ function del<T>(path: string): Promise<T> {
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
-// TODO: Replace any callback types with proper interfaces from telemetry-types.ts
+/** Network adapter info returned by /api/network/adapters */
+export interface NetworkAdapterInfo {
+  Name: string
+  Description: string
+  Status: string
+  MacAddress: string
+  IPAddress: string
+  SubnetMask: string
+  Gateway: string
+  DNS: string[]
+  DHCP: boolean
+  LinkSpeed: string
+}
+
+/** SMC probe result from /api/smc/probe */
+export interface SmcProbeResult {
+  ip: string
+  hostname: string
+  role: string
+  adapters: { name: string; ipAddress: string; macAddress: string; netmask: string }[]
+  power: Record<string, string>
+  chassis: Record<string, string>
+}
+
+/** SSE event data — loosely structured JSON from the server. */
+export interface SseEventData {
+  type?: string
+  message?: string
+  line?: string
+  percent?: number
+  [key: string]: unknown
+}
+
 /** Read an SSE stream from a fetch Response and dispatch parsed events. */
 function readSseStream(
   resPromise: Promise<Response>,
   callbacks: {
-    onProgress?: (data: any) => void
-    onError?: (data: any) => void
-    onDone?: (data: any) => void
-    onOutput?: (data: any) => void
+    onProgress?: (data: SseEventData) => void
+    onError?: (data: SseEventData) => void
+    onDone?: (data: SseEventData) => void
+    onOutput?: (data: SseEventData) => void
   },
 ) {
   resPromise
@@ -84,7 +117,7 @@ function readSseStream(
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
-              const data = JSON.parse(line.slice(6))
+              const data = JSON.parse(line.slice(6)) as SseEventData
               if (data.type === 'error' || line.includes('"error"')) callbacks.onError?.(data)
               else if (data.type === 'done' || data.type === 'complete') callbacks.onDone?.(data)
               else if (data.line !== undefined) callbacks.onOutput?.(data)
@@ -201,7 +234,7 @@ export const api = {
     onDone?: (d: any) => void,
   ) {
     const ctrl = new AbortController()
-    const body: Record<string, any> = { server, packages: packageIds }
+    const body: Record<string, unknown> = { server, packages: packageIds }
     if (credUser) body.credential_user = credUser
     if (credPass) body.credential_pass = credPass
 
@@ -273,10 +306,10 @@ export const api = {
 
   // Diagnostic probe — tests all connectivity methods against a target IP
   probeServer(server: string, credUser?: string, credPass?: string): Promise<ProbeResult> {
-    const params = new URLSearchParams({ server })
-    if (credUser) params.set('credential_user', credUser)
-    if (credPass) params.set('credential_pass', credPass)
-    return get<ProbeResult>(`/api/probe?${params.toString()}`)
+    const body: Record<string, string> = { server }
+    if (credUser) body.credential_user = credUser
+    if (credPass) body.credential_pass = credPass
+    return post<ProbeResult>('/api/probe', body)
   },
 
   // Identity — current machine info
@@ -290,8 +323,8 @@ export const api = {
   },
 
   // Network adapters — detailed adapter info
-  getNetworkAdapters(): Promise<any[]> {
-    return get<any[]>('/api/network/adapters')
+  getNetworkAdapters(): Promise<NetworkAdapterInfo[]> {
+    return get<NetworkAdapterInfo[]>('/api/network/adapters')
   },
 
   // Apply profile locally
@@ -301,19 +334,19 @@ export const api = {
 
   // ─── Telemetry ──────────────────────────────────────────────────────────────
 
-  async getTelemetryHistory(range: string): Promise<any[]> {
-    return get<any[]>(`/api/telemetry/history?range=${range}`)
+  async getTelemetryHistory(range: string): Promise<TelemetrySnapshot[]> {
+    return get<TelemetrySnapshot[]>(`/api/telemetry/history?range=${range}`)
   },
 
-  async getTelemetryLatest(): Promise<any> {
-    return get<any>('/api/telemetry/latest')
+  async getTelemetryLatest(): Promise<TelemetrySnapshot> {
+    return get<TelemetrySnapshot>('/api/telemetry/latest')
   },
 
-  async triggerSnapshot(): Promise<any> {
-    return post<any>('/api/telemetry/latest')
+  async triggerSnapshot(): Promise<TelemetrySnapshot> {
+    return post<TelemetrySnapshot>('/api/telemetry/latest')
   },
 
-  setTelemetryServers(ips: string[]): Promise<any> {
+  setTelemetryServers(ips: string[]): Promise<{ success: boolean }> {
     return post('/api/telemetry/servers', { ips })
   },
 
@@ -325,7 +358,7 @@ export const api = {
     return post('/api/telemetry/discover', opts ?? {})
   },
 
-  updateTelemetryConfig(config: { pollIntervalMs?: number; retentionMs?: number }): Promise<any> {
+  updateTelemetryConfig(config: { pollIntervalMs?: number; retentionMs?: number }): Promise<{ success: boolean }> {
     return post('/api/telemetry/config', config)
   },
 
@@ -351,7 +384,7 @@ export const api = {
 
   // SSE — Telemetry stream (real-time push)
   telemetryStream(
-    onSnapshot?: (d: any) => void,
+    onSnapshot?: (d: TelemetrySnapshot) => void,
     onError?: (e: any) => void,
   ) {
     const es = new EventSource(`${BASE_URL}/api/telemetry/stream`)
@@ -381,8 +414,8 @@ export const api = {
   },
 
   // Single SMC server probe
-  smcProbe(ip: string): Promise<any> {
-    return get(`/api/smc/probe?ip=${encodeURIComponent(ip)}`)
+  smcProbe(ip: string): Promise<SmcProbeResult> {
+    return get<SmcProbeResult>(`/api/smc/probe?ip=${encodeURIComponent(ip)}`)
   },
 
   // Set LED strip color
@@ -415,20 +448,28 @@ export const api = {
     return post<Result>('/api/smc/oled', { ip, title, message, auth })
   },
 
-  // Run LED FX animation across multiple servers (SSE stream)
-  smcRunFx(ips: string[], fx: string, speed?: number, loops?: number, color?: { r: number; g: number; b: number }, auth?: { user: string; pass: string }): EventSource {
-    const params = new URLSearchParams({ ips: ips.join(','), fx })
-    if (speed) params.set('speed', String(speed))
-    if (loops) params.set('loops', String(loops))
-    if (color) {
-      params.set('r', String(color.r))
-      params.set('g', String(color.g))
-      params.set('b', String(color.b))
-    }
-    if (auth) {
-      params.set('auth_user', auth.user)
-      params.set('auth_pass', auth.pass)
-    }
-    return openEventSource(`/api/smc/fx?${params.toString()}`)
+  // Run LED FX animation across multiple servers (SSE stream via POST)
+  smcRunFx(
+    ips: string[], fx: string, speed?: number, loops?: number,
+    color?: { r: number; g: number; b: number }, auth?: { user: string; pass: string },
+    onProgress?: (d: any) => void, onError?: (e: any) => void, onDone?: (d: any) => void,
+  ) {
+    const ctrl = new AbortController()
+    const body: Record<string, unknown> = { ips: ips.join(','), fx }
+    if (speed) body.speed = speed
+    if (loops) body.loops = loops
+    if (color) { body.r = color.r; body.g = color.g; body.b = color.b }
+    if (auth) body.auth = auth
+
+    readSseStream(
+      fetch(`${BASE_URL}/api/smc/fx`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      }),
+      { onProgress, onError, onDone },
+    )
+    return { cancel: () => ctrl.abort() }
   },
 }

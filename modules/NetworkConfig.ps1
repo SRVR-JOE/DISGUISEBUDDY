@@ -25,7 +25,7 @@
 $script:DetectedAdapters = @()
 
 # Canonical adapter roles for disguise servers
-$script:StandardAdapterRoles = @('d3Net', 'sACN', 'Media', 'NDI', 'Control', '100G')
+$script:StandardAdapterRoles = @('d3Net', 'sACN', 'Media', 'NDI', 'Control', 'Internet')
 
 # Adapter role definitions with display metadata
 $script:AdapterRoles = @(
@@ -79,8 +79,8 @@ $script:AdapterRoles = @(
     }
     @{
         Index      = 4
-        RoleName   = '100G'
-        ShortName  = '100G'
+        RoleName   = 'Control'
+        ShortName  = 'Control'
         Color      = '#3B82F6'   # Blue
         DefaultIP  = ''
         DefaultSub = ''
@@ -91,8 +91,8 @@ $script:AdapterRoles = @(
     }
     @{
         Index      = 5
-        RoleName   = '100G'
-        ShortName  = '100G'
+        RoleName   = 'Internet'
+        ShortName  = 'Internet'
         Color      = '#64748B'   # Gray
         DefaultIP  = ''
         DefaultSub = ''

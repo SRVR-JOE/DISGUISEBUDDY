@@ -16,7 +16,7 @@ import {
   CircleDot,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { api } from '@/lib/api'
+import { api, type SmcProbeResult } from '@/lib/api'
 import { GlassCard, SectionHeader, Badge, Button, StatusDot, Toggle } from '@/components/ui'
 import { sortServers } from '@/lib/server-sort'
 
@@ -394,9 +394,9 @@ function RackUnit({
 
           {/* Mini fan indicators */}
           <div className="flex items-center gap-1 shrink-0">
-            {fans.slice(0, 4).map((f, i) => (
+            {fans.slice(0, 4).map((f) => (
               <motion.div
-                key={i}
+                key={f.name}
                 animate={{ rotate: f.rpm > 0 ? 360 : 0 }}
                 transition={{ duration: f.rpm > 3000 ? 0.5 : 1.5, repeat: Infinity, ease: 'linear' }}
               >
@@ -463,8 +463,8 @@ function RackUnit({
                   <Fan size={12} /> Fan Speeds
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {fans.map((f, i) => (
-                    <FanIndicator key={i} rpm={f.rpm} label={f.name} />
+                  {fans.map((f) => (
+                    <FanIndicator key={f.name} rpm={f.rpm} label={f.name} />
                   ))}
                 </div>
               </div>
@@ -506,8 +506,8 @@ function RackUnit({
                         </tr>
                       </thead>
                       <tbody>
-                        {server.adapters.map((a, i) => (
-                          <tr key={i} className="border-b border-border/20 last:border-0">
+                        {server.adapters.map((a) => (
+                          <tr key={a.macAddress || a.name} className="border-b border-border/20 last:border-0">
                             <td className="px-3 py-1.5 text-xs text-textSecondary">{a.name}</td>
                             <td className="px-3 py-1.5 text-xs font-mono text-text">{a.ipAddress}</td>
                             <td className="px-3 py-1.5 text-xs font-mono text-textMuted">{a.macAddress}</td>
@@ -541,6 +541,20 @@ function MatrixCell({ color, value, tooltip }: { color: string; value: string; t
   )
 }
 
+// ─── Health matrix row definitions (static, never changes) ──────────────────
+
+const HEALTH_MATRIX_ROWS = [
+  { label: 'CPU Temp', key: 'CPU-TMP', type: 'temp' as const },
+  { label: 'SYS Temp', key: 'SYS-TMP', type: 'temp' as const },
+  { label: '12V Rail', key: 'PAY_12-VOL', type: 'voltage' as const, nominal: 12 },
+  { label: '5V Rail', key: 'PAY_5-VOL', type: 'voltage' as const, nominal: 5 },
+  { label: '3.3V Rail', key: 'PAY_3_3-VOL', type: 'voltage' as const, nominal: 3.3 },
+  { label: 'CPU Fan', key: 'CPU_FAN0-SPEED', type: 'fan' as const },
+  { label: 'SYS Fan 1', key: 'SYS_FAN1-SPEED', type: 'fan' as const },
+  { label: 'SYS Fan 2', key: 'SYS_FAN2-SPEED', type: 'fan' as const },
+  { label: 'SYS Fan 3', key: 'SYS_FAN3-SPEED', type: 'fan' as const },
+]
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
@@ -553,6 +567,8 @@ export function DashboardPage() {
 
   const esRef = useRef<EventSource | null>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const refreshAllRef = useRef<() => Promise<void>>(undefined)
+  const refreshingRef = useRef(false)
 
   // ── Auto-scan on mount ─────────────────────────────────────────────────────
 
@@ -581,7 +597,7 @@ export function DashboardPage() {
         }
         setServers(prev => {
           if (prev.some(s => s.ip === server.ip)) return prev
-          return sortServers([...prev, server] as any) as any
+          return sortServers([...prev, server])
         })
       } catch { /* skip malformed */ }
     })
@@ -628,13 +644,14 @@ export function DashboardPage() {
   // ── Refresh all servers ────────────────────────────────────────────────────
 
   const refreshAll = useCallback(async () => {
-    if (servers.length === 0 || refreshing) return
+    if (servers.length === 0 || refreshingRef.current) return
+    refreshingRef.current = true
     setRefreshing(true)
     try {
       const updated = await Promise.all(
         servers.map(s =>
           api.smcProbe(s.ip)
-            .then((data: any) => ({
+            .then((data: SmcProbeResult) => ({
               ip: data.ip ?? s.ip,
               hostname: data.hostname ?? s.hostname,
               role: data.role ?? s.role,
@@ -645,19 +662,23 @@ export function DashboardPage() {
             .catch(() => s)
         )
       )
-      setServers(sortServers(updated as any) as any)
+      setServers(sortServers(updated))
       toast.success('Refreshed all servers')
     } finally {
+      refreshingRef.current = false
       setRefreshing(false)
     }
-  }, [servers, refreshing])
+  }, [servers])
+
+  // Keep the ref in sync with the latest refreshAll
+  refreshAllRef.current = refreshAll
 
   // ── Auto-refresh toggle ────────────────────────────────────────────────────
 
   useEffect(() => {
     if (autoRefresh && servers.length > 0) {
       refreshTimerRef.current = setInterval(() => {
-        refreshAll()
+        refreshAllRef.current?.()
       }, 30000)
     } else {
       if (refreshTimerRef.current) {
@@ -668,7 +689,7 @@ export function DashboardPage() {
     return () => {
       if (refreshTimerRef.current) clearInterval(refreshTimerRef.current)
     }
-  }, [autoRefresh, refreshAll, servers.length])
+  }, [autoRefresh, servers.length])
 
   // ── Derived stats ──────────────────────────────────────────────────────────
 
@@ -683,19 +704,7 @@ export function DashboardPage() {
 
   const avgTempGlowColor = avgCpuTemp < 140 ? '#22c55e' : avgCpuTemp < 167 ? '#f59e0b' : '#ef4444'
 
-  // ── Health matrix data ─────────────────────────────────────────────────────
-
-  const voltageRows = useMemo(() => [
-    { label: 'CPU Temp', key: 'CPU-TMP', type: 'temp' as const },
-    { label: 'SYS Temp', key: 'SYS-TMP', type: 'temp' as const },
-    { label: '12V Rail', key: 'PAY_12-VOL', type: 'voltage' as const, nominal: 12 },
-    { label: '5V Rail', key: 'PAY_5-VOL', type: 'voltage' as const, nominal: 5 },
-    { label: '3.3V Rail', key: 'PAY_3_3-VOL', type: 'voltage' as const, nominal: 3.3 },
-    { label: 'CPU Fan', key: 'CPU_FAN0-SPEED', type: 'fan' as const },
-    { label: 'SYS Fan 1', key: 'SYS_FAN1-SPEED', type: 'fan' as const },
-    { label: 'SYS Fan 2', key: 'SYS_FAN2-SPEED', type: 'fan' as const },
-    { label: 'SYS Fan 3', key: 'SYS_FAN3-SPEED', type: 'fan' as const },
-  ], [])
+  // ── Health matrix data (defined at module scope — see HEALTH_MATRIX_ROWS) ──
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -867,7 +876,7 @@ export function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {voltageRows.map(row => (
+                  {HEALTH_MATRIX_ROWS.map(row => (
                     <tr key={row.key} className="border-b border-border/20 last:border-0">
                       <td className="px-3 py-1.5 text-xs text-textSecondary font-medium sticky left-0 bg-card z-10">
                         {row.label}

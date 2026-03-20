@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Monitor, RefreshCw, AlertCircle } from 'lucide-react'
 import { GlassCard, SectionHeader, Badge, Button } from '@/components/ui'
+import { BASE_URL } from '@/lib/api'
 import type { IdentityInfo } from '@/lib/types'
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -10,10 +11,10 @@ export function IdentityPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const fetchIdentity = () => {
+  const fetchIdentity = useCallback(() => {
     setLoading(true)
     setError('')
-    fetch('http://localhost:47100/api/identity')
+    fetch(`${BASE_URL}/api/identity`)
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()
@@ -25,11 +26,11 @@ export function IdentityPage() {
         setError(err.message)
       })
       .finally(() => setLoading(false))
-  }
+  }, [])
 
   useEffect(() => {
     fetchIdentity()
-  }, [])
+  }, [fetchIdentity])
 
   return (
     <div className="p-6 flex flex-col gap-6">

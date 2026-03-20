@@ -8,6 +8,7 @@ export { ConfirmDialog } from './ConfirmDialog'
 export { StatusDot } from './StatusDot'
 export { Toggle } from './Toggle'
 export { DataTable } from './DataTable'
+export { Select } from './Select'
 
 // Re-export types for consumer convenience
 export type { Column } from './DataTable'

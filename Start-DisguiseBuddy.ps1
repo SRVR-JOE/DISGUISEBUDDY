@@ -106,7 +106,7 @@ function Wait-ForServer {
 # -----------------------------------------------------------------------------
 # STEP 1 - Ensure Node.js is present
 # -----------------------------------------------------------------------------
-Write-Host '  [1/5] Checking for Node.js...' -ForegroundColor Cyan
+Write-Host '  [1/6] Checking for Node.js...' -ForegroundColor Cyan
 
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 
@@ -211,7 +211,7 @@ if ($null -ne $nodeCmd) {
 # STEP 2 - Verify the UI folder exists
 # -----------------------------------------------------------------------------
 Write-Host ''
-Write-Host '  [2/5] Locating UI directory...' -ForegroundColor Cyan
+Write-Host '  [2/6] Locating UI directory...' -ForegroundColor Cyan
 
 if (-not (Test-Path $script:UiDir -PathType Container)) {
     Write-Host ''
@@ -228,13 +228,18 @@ Write-Host "        Found: $script:UiDir" -ForegroundColor Green
 # STEP 3 - Kill stale processes BEFORE npm install
 # -----------------------------------------------------------------------------
 Write-Host ''
-Write-Host '  [3/5] Clearing stale processes...' -ForegroundColor Cyan
+Write-Host '  [3/6] Clearing stale processes...' -ForegroundColor Cyan
 
-# Kill stale node/tsx processes that lock files in node_modules
-$staleProcs = Get-Process -Name 'node' -ErrorAction SilentlyContinue
-if ($null -ne $staleProcs) {
-    Write-Host "        Found $($staleProcs.Count) stale node process(es) - killing..." -ForegroundColor Yellow
-    $staleProcs | Stop-Process -Force -ErrorAction SilentlyContinue
+# Kill stale node/tsx processes related to DISGUISE BUDDY only
+$projectDir = $PSScriptRoot -replace '\\', '\\'
+$staleWmiProcs = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -match 'disguise-buddy-ui' -or $_.CommandLine -match $projectDir }
+if ($null -ne $staleWmiProcs) {
+    $staleCount = @($staleWmiProcs).Count
+    Write-Host "        Found $staleCount stale DISGUISE BUDDY node process(es) - killing..." -ForegroundColor Yellow
+    foreach ($wp in $staleWmiProcs) {
+        Stop-Process -Id $wp.ProcessId -Force -ErrorAction SilentlyContinue
+    }
     Start-Sleep -Seconds 2
 } else {
     Write-Host '        No stale node processes.' -ForegroundColor Green

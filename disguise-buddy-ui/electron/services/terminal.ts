@@ -104,10 +104,19 @@ export function executeRemote(
   let psScript: string
 
   if (credential) {
-    // Build a PSCredential and pass it to Invoke-Command
+    // Escape credentials for safe embedding inside PowerShell single-quoted strings.
+    // Single-quoted strings in PS only need '' for literal single quotes, but we use
+    // double-quoted strings for the SecureString value so we must also escape backticks,
+    // dollar signs, and double quotes (PS special chars inside "...").
+    const escapePsDouble = (s: string): string => s.replace(/[`$"]/g, '`$&')
+    const escapePsSingle = (s: string): string => s.replace(/'/g, "''")
+
+    // Build a PSCredential and pass it to Invoke-Command.
+    // Use double-quoted string for password (handles all special chars via escaping).
+    // Use single-quoted string for username (simpler, just needs '' escaping).
     psScript = [
-      `$pass = ConvertTo-SecureString -String '${credential.password.replace(/'/g, "''")}' -AsPlainText -Force`,
-      `$cred = New-Object System.Management.Automation.PSCredential('${credential.username.replace(/'/g, "''")}', $pass)`,
+      `$pass = ConvertTo-SecureString -String "${escapePsDouble(credential.password)}" -AsPlainText -Force`,
+      `$cred = New-Object System.Management.Automation.PSCredential('${escapePsSingle(credential.username)}', $pass)`,
       `Invoke-Command -ComputerName '${targetIP}' -Credential $cred -ScriptBlock { ${command} }`,
     ].join('; ')
   } else {

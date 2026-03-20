@@ -23,6 +23,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { randomUUID } from 'crypto'
 import { runPowerShell, delay } from './utils.ts'
+import { escapePsSingle } from './ps-escape.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -223,7 +224,7 @@ async function runLiveInstall(
 
       const copyResult = await runPowerShell(
         `$session = New-PSSession -ComputerName ${targetIP}${credArg} -ErrorAction Stop; ` +
-        `Copy-Item -Path '${escapePs(pkg.path)}' -Destination 'C:\\Temp\\${escapePs(pkg.filename)}' ` +
+        `Copy-Item -Path '${escapePsSingle(pkg.path)}' -Destination 'C:\\Temp\\${escapePsSingle(pkg.filename)}' ` +
         `-ToSession $session -ErrorAction Stop; ` +
         `Remove-PSSession $session`
       )
@@ -239,8 +240,8 @@ async function runLiveInstall(
       const installResult = await runPowerShell(
         `Invoke-Command -ComputerName ${targetIP}${credArg} -ScriptBlock { ` +
         `$proc = Start-Process ` +
-        `  -FilePath 'C:\\Temp\\${escapePs(pkg.filename)}' ` +
-        `  -ArgumentList '${escapePs(pkg.silentArgs)}' ` +
+        `  -FilePath 'C:\\Temp\\${escapePsSingle(pkg.filename)}' ` +
+        `  -ArgumentList '${escapePsSingle(pkg.silentArgs)}' ` +
         `  -Wait -PassThru -ErrorAction Stop; ` +
         `exit $proc.ExitCode ` +
         `} -ErrorAction Stop`
@@ -261,7 +262,7 @@ async function runLiveInstall(
 
       await runPowerShell(
         `Invoke-Command -ComputerName ${targetIP}${credArg} -ScriptBlock { ` +
-        `Remove-Item 'C:\\Temp\\${escapePs(pkg.filename)}' -Force -ErrorAction SilentlyContinue } -ErrorAction SilentlyContinue`
+        `Remove-Item 'C:\\Temp\\${escapePsSingle(pkg.filename)}' -Force -ErrorAction SilentlyContinue } -ErrorAction SilentlyContinue`
       ).catch(() => {
         // Non-critical
       })
@@ -295,14 +296,10 @@ async function runLiveInstall(
 
 function buildCredentialArg(credential?: InstallOptions['credential']): string {
   if (!credential) return ''
-  const user = escapePs(credential.username)
-  const pass = escapePs(credential.password)
+  const user = escapePsSingle(credential.username)
+  const pass = escapePsSingle(credential.password)
   return (
     ` -Credential (New-Object System.Management.Automation.PSCredential` +
     ` ('${user}', (ConvertTo-SecureString '${pass}' -AsPlainText -Force)))`
   )
-}
-
-function escapePs(s: string): string {
-  return s.replace(/'/g, "''")
 }

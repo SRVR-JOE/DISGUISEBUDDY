@@ -226,6 +226,14 @@ Write-OK "Merged script written to $MergedScript ($([math]::Round((Get-Item $Mer
 Write-Step 'Preparing output directory'
 
 if (Test-Path $OutputDir) {
+    # Safety check: only remove the output directory if it is within the project tree
+    $resolvedOutput = [System.IO.Path]::GetFullPath($OutputDir)
+    $resolvedProject = [System.IO.Path]::GetFullPath($PSScriptRoot)
+    if (-not $resolvedOutput.StartsWith($resolvedProject + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -and
+        $resolvedOutput -ne $resolvedProject) {
+        Write-Fail "Safety check failed: OutputDir '$resolvedOutput' is outside the project directory '$resolvedProject'. Aborting."
+        exit 1
+    }
     Remove-Item $OutputDir -Recurse -Force
 }
 New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null

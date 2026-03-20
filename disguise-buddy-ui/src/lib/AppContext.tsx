@@ -32,7 +32,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  useEffect(() => { document.documentElement.classList.toggle('dark', isDark) }, [])
+  useEffect(() => { document.documentElement.classList.toggle('dark', isDark) }, [isDark])
 
   const toggleTheme = useCallback(() => {
     setIsDark(prev => {

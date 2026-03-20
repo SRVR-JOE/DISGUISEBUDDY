@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Network, Wifi, WifiOff, RefreshCw } from 'lucide-react'
 import { GlassCard, SectionHeader, Badge, Button } from '@/components/ui'
+import { BASE_URL } from '@/lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,10 +25,10 @@ export function NetworkPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const fetchAdapters = () => {
+  const fetchAdapters = useCallback(() => {
     setLoading(true)
     setError('')
-    fetch('http://localhost:47100/api/network/adapters')
+    fetch(`${BASE_URL}/api/network/adapters`)
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()
@@ -39,11 +40,11 @@ export function NetworkPage() {
         setError(err.message)
       })
       .finally(() => setLoading(false))
-  }
+  }, [])
 
   useEffect(() => {
     fetchAdapters()
-  }, [])
+  }, [fetchAdapters])
 
   return (
     <div className="p-6 flex flex-col gap-6">

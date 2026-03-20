@@ -26,7 +26,7 @@ export function GlassCard({ children, className = '', title, accent }: GlassCard
           <h3 className="text-text font-bold text-sm tracking-wide">{title}</h3>
         </div>
       )}
-      <div className={title ? 'p-5' : 'p-5'}>{children}</div>
+      <div className="p-5">{children}</div>
     </motion.div>
   )
 }

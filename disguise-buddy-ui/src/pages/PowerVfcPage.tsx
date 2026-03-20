@@ -35,24 +35,24 @@ export function PowerVfcPage() {
         hostname: s.hostname || s.mgmtIp,
         mgmtIp: s.mgmtIp,
         status: s.status,
-        role: (s as any).role || '',
-        serial: (s as any).serial || '',
-        type: (s as any).type || '',
-        powerStatus: (s as any).powerStatus || '',
+        role: s.role || '',
+        serial: s.serial || '',
+        type: s.type || '',
+        powerStatus: s.powerStatus || '',
         voltages: (s.voltages || []).map(v => ({
           label: v.label,
           value: v.value,
           nominal: v.nominal,
         })),
-        vfcs: ((s as any).vfcs || []).map((v: any) => ({
+        vfcs: (s.vfcs || []).map(v => ({
           slot: v.slot,
           type: v.type,
           status: v.status,
         })),
-        ledColor: (s as any).ledColor || { r: 0, g: 0, b: 0 },
-        ledMode: (s as any).ledMode || '',
-        smcFirmware: (s as any).smcFirmware || '',
-        smcPlatform: (s as any).smcPlatform || '',
+        ledColor: s.ledColor || { r: 0, g: 0, b: 0 },
+        ledMode: s.ledMode || '',
+        smcFirmware: s.smcFirmware || '',
+        smcPlatform: s.smcPlatform || '',
         color: CHART_COLORS[i % CHART_COLORS.length],
       }))
   }, [latestSnapshot])
@@ -80,7 +80,9 @@ export function PowerVfcPage() {
       <div className="flex flex-wrap items-center gap-3">
         {/* Live toggle */}
         <button
+          type="button"
           onClick={() => setLiveMode(!liveMode)}
+          aria-label={liveMode ? 'Pause live updates' : 'Enable live updates'}
           className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-lg border transition-colors ${
             liveMode
               ? 'bg-success/15 text-success border-success/30'
@@ -94,7 +96,9 @@ export function PowerVfcPage() {
 
         {/* Snapshot */}
         <button
+          type="button"
           onClick={handleSnapshot}
+          aria-label="Refresh power data"
           className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-textMuted hover:text-text bg-surface rounded-lg border border-border transition-colors"
         >
           <RefreshCw size={12} />
@@ -110,8 +114,12 @@ export function PowerVfcPage() {
         <div className="flex items-center gap-1 bg-surface rounded-lg border border-border p-1 ml-auto">
           {TABS.map(tab => (
             <button
+              type="button"
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              aria-label={`${tab.label} tab`}
+              aria-selected={activeTab === tab.id}
+              role="tab"
               className={`px-3 py-1.5 text-[11px] font-medium rounded-md transition-colors ${
                 activeTab === tab.id
                   ? 'bg-primary text-white'
@@ -157,8 +165,8 @@ export function PowerVfcPage() {
                   mgmtIp={s.mgmtIp}
                   vfcs={s.vfcs}
                   color={s.color}
-                  role={(s as any).role}
-                  ledColor={(s as any).ledColor}
+                  role={s.role}
+                  ledColor={s.ledColor}
                 />
               ))}
             </div>
@@ -208,8 +216,8 @@ export function PowerVfcPage() {
               mgmtIp={s.mgmtIp}
               vfcs={s.vfcs}
               color={s.color}
-              role={(s as any).role}
-              ledColor={(s as any).ledColor}
+              role={s.role}
+              ledColor={s.ledColor}
             />
           ))}
           {servers.length === 0 && (

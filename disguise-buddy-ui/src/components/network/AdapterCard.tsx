@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { AdapterConfig } from '@/lib/types'
+import { isValidIP } from '@/lib/validation'
 import {
   GlassCard,
   Button,
@@ -24,18 +25,6 @@ const ROLE_COLORS: Record<string, string> = {
 
 function getRoleColor(role: string): string {
   return ROLE_COLORS[role] ?? '#64748B'
-}
-
-// ─── IP validation ────────────────────────────────────────────────────────────
-
-function isValidIP(ip: string): boolean {
-  if (!ip) return true // empty is OK
-  const parts = ip.split('.')
-  if (parts.length !== 4) return false
-  return parts.every((p) => {
-    const n = parseInt(p, 10)
-    return !isNaN(n) && n >= 0 && n <= 255 && String(n) === p
-  })
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────

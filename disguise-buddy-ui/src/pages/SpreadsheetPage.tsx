@@ -23,6 +23,7 @@ import {
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
 import type { Profile } from '@/lib/types'
+import { isValidIP } from '@/lib/validation'
 import { SectionHeader, Button } from '@/components/ui'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -51,17 +52,6 @@ function profileSortKey(name: string): [number, number] {
   const underMatch = lower.match(/understudy\s*(\d+)/i)
   if (underMatch) return [2, parseInt(underMatch[1], 10)]
   return [3, 0]
-}
-
-/** Basic IPv4 validation. */
-function isValidIP(ip: string): boolean {
-  if (!ip || ip.trim() === '') return true // empty is ok (not filled yet)
-  const parts = ip.trim().split('.')
-  if (parts.length !== 4) return false
-  return parts.every((p) => {
-    const n = Number(p)
-    return /^\d{1,3}$/.test(p) && n >= 0 && n <= 255
-  })
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────

@@ -127,7 +127,7 @@ function Save-ThemePreference {
     }
 }
 
-function Load-ThemePreference {
+function Import-ThemePreference {
     <#
     .SYNOPSIS
         Loads the user's saved theme preference from settings/theme.json.

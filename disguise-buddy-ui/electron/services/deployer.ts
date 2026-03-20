@@ -27,11 +27,7 @@ import {
   enableWinRMViaSMB,
   enableWinRMViaDCOM,
 } from './utils.ts'
-
-/** Escape a string for safe embedding in a PowerShell double-quoted string */
-function escapePsDouble(s: string): string {
-  return s.replace(/[`$"]/g, '`$&')
-}
+import { escapePsDouble, escapePsDouble as escapePs } from './ps-escape.ts'
 
 // -- Deploy mutex -------------------------------------------------------------
 
@@ -193,8 +189,11 @@ async function runLiveDeployInner(
     throw new Error(`ServerName "${profile.ServerName}" contains invalid NetBIOS characters`)
   }
 
-  const username = credential?.username ?? 'd3'
-  const password = credential?.password ?? 'disguise'
+  if (!credential?.username || !credential?.password) {
+    throw new Error('Credentials are required for deployment (no default credentials)')
+  }
+  const username = credential.username
+  const password = credential.password
   const escapedUser = escapePs(username)
   const escapedPass = escapePs(password)
 
@@ -1033,15 +1032,6 @@ function buildSmbScriptLines(smb: SMBSettings): string[] {
  */
 function buildSmbScript(smb: SMBSettings): string {
   return buildSmbScriptLines(smb).join('; ')
-}
-
-/**
- * Escape a string for embedding inside a PowerShell double-quoted string.
- * Handles backtick (escape char), dollar (variable expansion), and
- * double-quote (string terminator).
- */
-function escapePs(s: string): string {
-  return s.replace(/[`$"]/g, '`$&')
 }
 
 function sanitiseName(name: string): string {

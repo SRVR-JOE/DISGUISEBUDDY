@@ -204,8 +204,11 @@ export async function enableWinRMViaDCOM(
   targetIP: string,
   credential?: { username: string; password: string },
 ): Promise<DCOMBootstrapResult> {
-  const username = credential?.username ?? 'd3'
-  const password = credential?.password ?? 'disguise'
+  if (!credential?.username || !credential?.password) {
+    return { success: false, message: 'Credentials are required for DCOM bootstrap (no default credentials)' }
+  }
+  const username = credential.username
+  const password = credential.password
 
   // Escape values for embedding inside a double-quoted PowerShell string.
   // Backtick escapes the special characters PowerShell interprets inside "…".
@@ -281,8 +284,11 @@ export async function enableWinRMViaSMB(
   targetIP: string,
   credential?: { username: string; password: string },
 ): Promise<SMBBootstrapResult> {
-  const username = credential?.username ?? 'd3'
-  const password = credential?.password ?? 'disguise'
+  if (!credential?.username || !credential?.password) {
+    return { success: false, message: 'Credentials are required for SMB bootstrap (no default credentials)' }
+  }
+  const username = credential.username
+  const password = credential.password
   const taskName = `DisguiseBuddy_${Date.now()}`
 
   // Escape values for embedding inside PowerShell double-quoted strings.

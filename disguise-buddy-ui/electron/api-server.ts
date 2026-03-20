@@ -19,6 +19,7 @@ import { installSoftware, getPackages, addPackage, removePackage } from './servi
 import { executeRemote, executeLocal, pingHost } from './services/terminal.ts'
 import { querySmc, postSmc } from './services/smc-client.ts'
 import { telemetryService, type TelemetrySnapshot } from './services/telemetry.ts'
+import { escapePsDouble } from './services/ps-escape.ts'
 
 // ESM-compatible require — used to conditionally load 'electron' without a
 // static top-level import so that this module also works in the dev-server
@@ -84,10 +85,9 @@ function sseHeaders(res: Response): void {
   res.flushHeaders()
 }
 
-/** Escape a string for safe embedding in a PowerShell double-quoted string */
-function escapePsDouble(s: string): string {
-  return s.replace(/[`$"]/g, '`$&')
-}
+// ─── Local-apply mutex ────────────────────────────────────────────────────────
+
+let localApplyInProgress = false
 
 // ─── Profiles ─────────────────────────────────────────────────────────────────
 
@@ -106,6 +106,11 @@ app.post('/api/profiles', (req: Request, res: Response) => {
 })
 
 app.post('/api/profiles/:name/apply', async (req: Request, res: Response) => {
+  if (localApplyInProgress) {
+    res.status(409).json({ success: false, message: 'A local profile apply is already in progress' })
+    return
+  }
+
   const name = decodeURIComponent(param(req.params.name))
   const profile = getProfiles().find(p => p.Name === name)
   if (!profile) {
@@ -113,6 +118,7 @@ app.post('/api/profiles/:name/apply', async (req: Request, res: Response) => {
     return
   }
 
+  localApplyInProgress = true
   try {
     // Build PowerShell script to apply the profile locally
     const psLines: string[] = []
@@ -211,6 +217,8 @@ if ($existing) {
     })
   } catch (e: any) {
     res.status(500).json({ success: false, message: e.message })
+  } finally {
+    localApplyInProgress = false
   }
 })
 
@@ -425,45 +433,52 @@ app.post('/api/terminal/execute', (req: Request, res: Response) => {
     return
   }
 
-  // Input sanitization: block dangerous commands
-  const dangerousPatterns = [
-    /Remove-Item\s+-Recurse\s+C:\\/i,
-    /Format-/i,
-    /del\s+\//i,
-    /rm\s+-rf/i,
-    /;\s*Remove-Item\s+-Recurse/i,
-    /;\s*Format-/i,
-    /;\s*del\s+\//i,
-    /;\s*rm\s+-rf/i,
-    /&\s*\(.*['"]\s*\+\s*['"]/,
+  // Input sanitization: allowlist of permitted command prefixes.
+  // Only commands whose first token matches one of these (case-insensitive) are allowed.
+  const allowedPrefixes = [
+    'get-',           // PowerShell Get-* cmdlets (read-only info gathering)
+    'set-',           // PowerShell Set-* cmdlets (configuration)
+    'test-',          // PowerShell Test-* cmdlets (connectivity checks)
+    'new-',           // PowerShell New-* cmdlets (create resources like IPs, shares)
+    'remove-netipaddress', 'remove-netroute', 'remove-smbshare',  // safe Remove-* subset
+    'enable-', 'disable-',  // PowerShell Enable-/Disable-*
+    'rename-',        // PowerShell Rename-* cmdlets (hostname changes)
+    'invoke-command', // Remote execution via WinRM
+    'ipconfig', 'hostname', 'ping', 'nslookup', 'tracert', 'netstat', 'arp',  // network utilities
+    'select-', 'where-', 'sort-', 'measure-', 'format-table', 'format-list', 'out-',  // pipeline cmdlets
+    'start-service', 'stop-service', 'restart-service',  // service management
+    'winrm',          // WinRM setup
+    'net ',           // Net commands (for SMB)
+    'schtasks',       // Scheduled tasks (for deployer)
+    'resolve-',       // DNS resolution
+    'write-',         // Write-Output / Write-Host
+    '$',              // variable assignment / PS expressions (needed for credential setup)
   ]
 
-  const blocklist = [
-    'format-volume',
-    'clear-disk',
-    'initialize-disk',
-    'remove-partition',
-    'clear-recyclebin',
-    'stop-computer',
-    'restart-computer',
-    'reset-computermachinepassword',
-    'invoke-expression',
-    'iex',
+  // Explicitly blocked commands that should never run even if they match a prefix
+  const blockedCommands = [
+    'remove-item', 'set-executionpolicy', 'invoke-expression',
+    'new-psdrive', 'enable-psremoting',
+    'format-volume', 'clear-disk', 'initialize-disk', 'remove-partition',
+    'stop-computer', 'restart-computer',
   ]
 
   const cmdLower = command.toLowerCase().trim()
 
-  for (const pattern of dangerousPatterns) {
-    if (pattern.test(command)) {
-      sendSse(res, 'error', { message: 'Command rejected: contains a dangerous pattern' })
+  // Split on semicolons to check each chained statement independently
+  const chainedStatements = cmdLower.split(/;/).map(s => s.trim()).filter(Boolean)
+
+  for (const stmt of chainedStatements) {
+    const isBlocked = blockedCommands.some(blocked => stmt.startsWith(blocked))
+    if (isBlocked) {
+      sendSse(res, 'error', { message: `Command rejected: '${stmt.split(/\s/)[0]}' is not permitted` })
       res.end()
       return
     }
-  }
 
-  for (const blocked of blocklist) {
-    if (cmdLower.includes(blocked)) {
-      sendSse(res, 'error', { message: `Command rejected: '${blocked}' is blocked` })
+    const isAllowed = allowedPrefixes.some(prefix => stmt.startsWith(prefix))
+    if (!isAllowed) {
+      sendSse(res, 'error', { message: `Command rejected: '${stmt.split(/\s/)[0]}' is not in the allowed command list` })
       res.end()
       return
     }
@@ -611,13 +626,13 @@ function probeHttp(url: string, timeoutMs: number): Promise<{ status: number; bo
   })
 }
 
-// GET /api/probe?server=IP[&credential_user=d3][&credential_pass=disguise]
+// POST /api/probe { server, credential_user, credential_pass }
 // Returns a comprehensive connectivity report for the given target IP.
 
-app.get('/api/probe', async (req: Request, res: Response) => {
-  const target = (req.query.server as string) || ''
-  const credUser = (req.query.credential_user as string) || ''
-  const credPass = (req.query.credential_pass as string) || ''
+app.post('/api/probe', async (req: Request, res: Response) => {
+  const target = (req.body.server as string) || ''
+  const credUser = (req.body.credential_user as string) || ''
+  const credPass = (req.body.credential_pass as string) || ''
 
   if (!credUser || !credPass) {
     res.status(400).json({ success: false, message: 'Credentials required (credential_user and credential_pass)' })
@@ -1399,19 +1414,19 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [Math.round((r1 + m) * 255), Math.round((g1 + m) * 255), Math.round((b1 + m) * 255)]
 }
 
-app.get('/api/smc/fx', async (req: Request, res: Response) => {
+app.post('/api/smc/fx', async (req: Request, res: Response) => {
   sseHeaders(res)
 
-  const ips = ((req.query.ips as string) || '').split(',').filter(Boolean)
-  const fx = (req.query.fx as string) || 'chase'
-  const speed = Math.max(500, parseInt(req.query.speed as string) || 800)
-  const loops = parseInt(req.query.loops as string) || 3
-  const baseR = parseInt(req.query.r as string)
-  const baseG = parseInt(req.query.g as string)
-  const baseB = parseInt(req.query.b as string)
-  const authUser = (req.query.auth_user as string) || ''
-  const authPass = (req.query.auth_pass as string) || ''
-  const smcAuth = authUser && authPass ? { user: authUser, pass: authPass } : undefined
+  const body = req.body || {}
+  const ips = (Array.isArray(body.ips) ? body.ips : ((body.ips as string) || '').split(',').filter(Boolean)) as string[]
+  const fx = (body.fx as string) || 'chase'
+  const speed = Math.max(500, parseInt(body.speed) || 800)
+  const loops = parseInt(body.loops) || 3
+  const baseR = parseInt(body.r)
+  const baseG = parseInt(body.g)
+  const baseB = parseInt(body.b)
+  const auth = body.auth as { user: string; pass: string } | undefined
+  const smcAuth = auth?.user && auth?.pass ? { user: auth.user, pass: auth.pass } : undefined
 
   if (ips.length === 0 || ips.length > 8) {
     sendSse(res, 'error', { message: 'Provide 1-8 server IPs' })

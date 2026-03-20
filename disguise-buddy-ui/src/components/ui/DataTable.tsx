@@ -12,12 +12,15 @@ interface DataTableProps<T extends Record<string, unknown>> {
   columns: Column<T>[]
   data: T[]
   onRowClick?: (row: T, index: number) => void
+  /** Generate a stable key for each row. Falls back to row index if not provided. */
+  rowKey?: (row: T, index: number) => string
 }
 
 export function DataTable<T extends Record<string, unknown>>({
   columns,
   data,
   onRowClick,
+  rowKey,
 }: DataTableProps<T>) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
 
@@ -68,7 +71,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
               return (
                 <tr
-                  key={rowIndex}
+                  key={rowKey ? rowKey(row, rowIndex) : rowIndex}
                   onClick={() => handleRowClick(row, rowIndex)}
                   onKeyDown={(e) => handleRowKeyDown(e, row, rowIndex)}
                   tabIndex={onRowClick ? 0 : undefined}

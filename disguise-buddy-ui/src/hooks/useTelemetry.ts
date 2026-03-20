@@ -8,8 +8,7 @@ import type {
   DataPoint,
 } from '@/lib/telemetry-types'
 import { METRICS, getMetricColor } from '@/lib/metric-definitions'
-
-const BASE_URL = 'http://localhost:47100'
+import { BASE_URL } from '@/lib/api'
 
 const MAX_POINTS = 300
 

@@ -1,3 +1,10 @@
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason)
+})
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error)
+})
+
 import { app, BrowserWindow } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -39,7 +46,7 @@ async function createWindow(): Promise<void> {
   })
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(createWindow).catch(console.error)
 
 app.on('window-all-closed', () => {
   app.quit()
@@ -48,6 +55,6 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   // macOS: re-create window when dock icon is clicked and no windows are open
   if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow()
+    createWindow().catch(console.error)
   }
 })

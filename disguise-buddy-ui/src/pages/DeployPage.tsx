@@ -12,6 +12,7 @@ import {
   Button,
   Input,
   ProgressRing,
+  Select,
 } from '@/components/ui'
 import { ServerTile } from '@/components/deploy/ServerTile'
 
@@ -30,42 +31,6 @@ const TIMEOUT_OPTIONS = [
   { label: '200ms', value: '200' },
   { label: '500ms', value: '500' },
 ]
-
-// ─── Inline select component (matches project's design language) ──────────────
-
-interface SelectProps {
-  value: string
-  onChange: (value: string) => void
-  options: { label: string; value: string }[]
-  disabled?: boolean
-  'aria-label'?: string
-}
-
-function Select({ value, onChange, options, disabled = false, 'aria-label': ariaLabel }: SelectProps) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      aria-label={ariaLabel}
-      className={[
-        'px-3 py-2 rounded-lg text-sm transition-colors duration-150 outline-none',
-        'bg-surface border border-border text-text',
-        'focus:border-primary focus:ring-1 focus:ring-primary/30',
-        'appearance-none cursor-pointer',
-        disabled ? 'opacity-50 cursor-not-allowed' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
-  )
-}
 
 // ─── Deploy progress bar ──────────────────────────────────────────────────────
 

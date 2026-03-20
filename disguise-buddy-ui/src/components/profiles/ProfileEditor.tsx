@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronDown, X, Plus, Trash2 } from 'lucide-react'
 import { Button, Input, Toggle, ConfirmDialog } from '@/components/ui'
+import { isValidIP } from '@/lib/validation'
 import type { Profile, AdapterConfig, SMBSettings, SmbShare } from '@/lib/types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -63,18 +64,6 @@ function validateServerName(name: string): string | undefined {
   if (name.startsWith('-') || name.endsWith('-')) return 'Cannot start or end with a hyphen'
   return undefined
 }
-
-/** Validate IPv4 address: 4 octets, each 0-255, no leading zeros */
-function isValidIP(ip: string): boolean {
-  if (!ip) return true // empty is OK
-  const parts = ip.split('.')
-  if (parts.length !== 4) return false
-  return parts.every((p) => {
-    const n = parseInt(p, 10)
-    return !isNaN(n) && n >= 0 && n <= 255 && String(n) === p
-  })
-}
-
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -664,7 +653,7 @@ export function ProfileEditor({ profile, open, onClose, onSave }: ProfileEditorP
                   <div className="flex flex-col gap-3">
                     {draft.SMBSettings.AdditionalShares.map((share, idx) => (
                       <div
-                        key={idx}
+                        key={share.Name || share.Path || `share-${idx}`}
                         className="rounded-lg border border-border bg-surface p-4 flex flex-col gap-3 relative"
                       >
                         <button

@@ -1,5 +1,19 @@
 // ─── Telemetry types ─────────────────────────────────────────────────────────
 
+/** VFC card info per slot */
+export interface VfcInfo {
+  slot: number
+  type: string
+  status: string
+}
+
+/** RGB color value */
+export interface LedColor {
+  r: number
+  g: number
+  b: number
+}
+
 /** Server snapshot from SMC polling */
 export interface ServerSnapshot {
   mgmtIp: string
@@ -10,12 +24,17 @@ export interface ServerSnapshot {
   role: string
   powerStatus: string
   powerFault: string
-  chassisStats: any
+  chassisStats: Record<string, string>
   temperatures: { label: string; value: number }[]
   voltages: { label: string; value: number; nominal: number }[]
   fans: { label: string; rpm: number }[]
   status: 'online' | 'warning' | 'error' | 'offline'
   errors: string[]
+  vfcs?: VfcInfo[]
+  ledColor?: LedColor
+  ledMode?: string
+  smcFirmware?: string
+  smcPlatform?: string
 }
 
 export interface TelemetrySnapshot {

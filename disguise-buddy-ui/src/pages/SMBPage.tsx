@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Share2, FolderOpen, RefreshCw, AlertCircle } from 'lucide-react'
 import { GlassCard, SectionHeader, Badge, Button } from '@/components/ui'
+import { BASE_URL } from '@/lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,10 +20,10 @@ export function SMBPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const fetchShares = () => {
+  const fetchShares = useCallback(() => {
     setLoading(true)
     setError('')
-    fetch('http://localhost:47100/api/smb')
+    fetch(`${BASE_URL}/api/smb`)
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()
@@ -34,11 +35,11 @@ export function SMBPage() {
         setError(err.message)
       })
       .finally(() => setLoading(false))
-  }
+  }, [])
 
   useEffect(() => {
     fetchShares()
-  }, [])
+  }, [fetchShares])
 
   return (
     <div className="p-6 flex flex-col gap-6">

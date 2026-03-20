@@ -456,7 +456,7 @@ $mainForm.Add_KeyDown({
 # ============================================================================
 
 # Load saved theme preference (if any) before rendering the first view
-Load-ThemePreference
+Import-ThemePreference
 
 # Apply loaded theme to all existing controls before the first view render
 $mainForm.BackColor = $script:Theme.Background
@@ -488,14 +488,6 @@ Set-ActiveView -ViewName 'Dashboard'
 # Handle form closing
 $mainForm.Add_FormClosing({
     Write-AppLog -Message 'DISGUISE BUDDY shutting down' -Level 'INFO'
-})
-
-# Handle resize for responsive layout
-$mainForm.Add_Resize({
-    # Re-render current view on significant resize
-    if ($mainForm.WindowState -ne [System.Windows.Forms.FormWindowState]::Minimized) {
-        # Views will auto-adjust via docking/anchoring
-    }
 })
 
 Write-AppLog -Message 'DISGUISE BUDDY initialized successfully' -Level 'INFO'

@@ -148,7 +148,9 @@ export function TelemetryPage() {
 
         {/* Live mode toggle */}
         <button
+          type="button"
           onClick={() => setLiveMode(!liveMode)}
+          aria-label={liveMode ? 'Pause live telemetry' : 'Enable live telemetry'}
           className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-lg border transition-colors ${
             liveMode
               ? 'bg-success/15 text-success border-success/30'
@@ -164,7 +166,9 @@ export function TelemetryPage() {
 
         {/* Manual snapshot */}
         <button
+          type="button"
           onClick={handleSnapshot}
+          aria-label="Take telemetry snapshot"
           className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-textMuted hover:text-text bg-surface rounded-lg border border-border transition-colors"
         >
           <RefreshCw size={12} />
@@ -179,7 +183,9 @@ export function TelemetryPage() {
         {/* Compare toggle (charts tab only) */}
         {activeTab === 'charts' && (
           <button
+            type="button"
             onClick={() => setCompareMode(!compareMode)}
+            aria-label={compareMode ? 'Switch to split view' : 'Switch to overlay view'}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-lg border transition-colors ml-auto ${
               compareMode
                 ? 'bg-primary/15 text-primary border-primary/30'
@@ -194,7 +200,9 @@ export function TelemetryPage() {
       {/* Server selector pills */}
       <div className="flex flex-wrap items-center gap-2">
         <button
+          type="button"
           onClick={toggleAll}
+          aria-label="Toggle all servers"
           className={`px-2.5 py-1 text-[10px] font-medium rounded-full border transition-colors ${
             selectedServers.length === knownServers.size
               ? 'bg-primary/15 text-primary border-primary/30'
@@ -208,8 +216,11 @@ export function TelemetryPage() {
           const isSelected = selectedServers.includes(ip)
           return (
             <button
+              type="button"
               key={ip}
               onClick={() => toggleServer(ip)}
+              aria-label={`Toggle server ${hostname}`}
+              aria-pressed={isSelected}
               className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-medium rounded-full border transition-all ${
                 isSelected
                   ? 'border-opacity-50'
@@ -241,8 +252,12 @@ export function TelemetryPage() {
       <div className="flex items-center gap-1 bg-surface rounded-lg border border-border p-1 w-fit">
         {TABS.map(tab => (
           <button
+            type="button"
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
+            aria-label={`${tab.label} tab`}
+            aria-selected={activeTab === tab.id}
+            role="tab"
             className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-md transition-colors ${
               activeTab === tab.id
                 ? 'bg-primary text-white'

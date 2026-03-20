@@ -46,9 +46,10 @@ export async function querySmc(mgmtIp: string, endpoint: string, timeoutMs = 400
  * @param mgmtIp   Management-network IP
  * @param endpoint  API path after /api/
  * @param body      Request body (will be JSON-serialised)
+ * @param auth      Optional Basic-auth credentials ({ user, pass })
  * @param timeoutMs Request timeout in milliseconds (default 4000)
  */
-export async function postSmc(mgmtIp: string, endpoint: string, body: any, timeoutMs = 4000): Promise<any> {
+export async function postSmc(mgmtIp: string, endpoint: string, body: any, auth?: { user: string; pass: string }, timeoutMs = 4000): Promise<any> {
   if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(mgmtIp)) {
     return Promise.reject(new Error('Invalid IP address'))
   }
@@ -60,6 +61,15 @@ export async function postSmc(mgmtIp: string, endpoint: string, body: any, timeo
     const payload = JSON.stringify(body)
     const url = new URL(`http://${mgmtIp}/api/${endpoint}`)
 
+    const headers: Record<string, string | number> = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+    }
+
+    if (auth) {
+      headers['Authorization'] = 'Basic ' + Buffer.from(`${auth.user}:${auth.pass}`).toString('base64')
+    }
+
     const req = http.request(
       {
         hostname: url.hostname,
@@ -67,10 +77,7 @@ export async function postSmc(mgmtIp: string, endpoint: string, body: any, timeo
         path: url.pathname,
         method: 'POST',
         timeout: timeoutMs,
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(payload),
-        },
+        headers,
       },
       (res) => {
         let data = ''
@@ -79,7 +86,20 @@ export async function postSmc(mgmtIp: string, endpoint: string, body: any, timeo
           if (data.length > MAX_BODY_BYTES) { req.destroy(); if (!settled) { settled = true; reject(new Error('Response body too large')) } return }
         })
         res.on('end', () => {
-          if (!settled) { settled = true; try { resolve(JSON.parse(data)) } catch { reject(new Error('Invalid JSON')) } }
+          if (!settled) {
+            settled = true
+            try {
+              const parsed = JSON.parse(data)
+              // Attach HTTP status for callers that check it
+              if (typeof parsed === 'object' && parsed !== null) {
+                parsed.status = res.statusCode
+              }
+              resolve(parsed)
+            } catch {
+              // If body is not JSON, return a synthetic object with status
+              resolve({ status: res.statusCode, body: data })
+            }
+          }
         })
       },
     )
