@@ -53,6 +53,17 @@ export interface ServerSnapshot {
   temperatures: { label: string; value: number }[]
   voltages: { label: string; value: number; nominal: number }[]
   fans: { label: string; rpm: number }[]
+  // VFC cards
+  vfcs: { slot: number; type: string; status: string }[]
+  // LED strip
+  ledColor: { r: number; g: number; b: number }
+  ledMode: string
+  // SMC info
+  smcFirmware: string
+  smcHardware: string
+  smcPlatform: string
+  // Network adapters from BMC
+  networkAdapters: { name: string; mac: string; ip: string; netmask: string }[]
   // status
   status: 'online' | 'warning' | 'error' | 'offline'
   errors: string[]
@@ -349,11 +360,15 @@ export class TelemetryService {
 
   private async probeServer(ip: string, timestamp: number): Promise<ServerSnapshot> {
     try {
-      const [machine, session, power, chassis] = await Promise.all([
+      const [machine, session, power, chassis, vfcs, ledstrip, smc, adapters] = await Promise.all([
         querySmc(ip, 'localmachine').catch(() => null),
         querySmc(ip, 'session').catch(() => null),
         querySmc(ip, 'chassis/power/status').catch(() => null),
         querySmc(ip, 'chassis/stats').catch(() => null),
+        querySmc(ip, 'vfcs').catch(() => null),
+        querySmc(ip, 'ledstrip').catch(() => null),
+        querySmc(ip, 'smc').catch(() => null),
+        querySmc(ip, 'networkadapters').catch(() => null),
       ])
 
       if (!machine || !machine.hostname) {
@@ -363,6 +378,12 @@ export class TelemetryService {
       const powerFault = power?.['Main Power Fault'] || ''
       const { temperatures, voltages, fans } = parseChassisStats(chassis)
       const { status, errors } = determineStatus(true, powerFault, temperatures)
+
+      const parsedVfcs = Array.isArray(vfcs) ? vfcs.map((v: any) => ({
+        slot: typeof v.slot === 'number' ? v.slot : 0,
+        type: typeof v.type === 'string' ? v.type : 'Unknown',
+        status: typeof v.status === 'string' ? v.status : 'Unknown',
+      })) : []
 
       return {
         mgmtIp: ip,
@@ -377,6 +398,18 @@ export class TelemetryService {
         temperatures,
         voltages,
         fans,
+        vfcs: parsedVfcs,
+        ledColor: ledstrip ? { r: ledstrip.ledR ?? 0, g: ledstrip.ledG ?? 0, b: ledstrip.ledB ?? 0 } : { r: 0, g: 0, b: 0 },
+        ledMode: ledstrip?.ledMode ?? '',
+        smcFirmware: smc?.firmwareversion ?? '',
+        smcHardware: smc?.hardwareversion ?? '',
+        smcPlatform: smc?.hardwareplatform ?? '',
+        networkAdapters: Array.isArray(adapters) ? adapters.map((a: any) => ({
+          name: typeof a.name === 'string' ? a.name : '',
+          mac: typeof a.mac === 'string' ? a.mac : '',
+          ip: typeof a.ip === 'string' ? a.ip : '',
+          netmask: typeof a.netmask === 'string' ? a.netmask : '',
+        })).filter((a: any) => a.name && !a.name.includes('Loopback')) : [],
         status,
         errors,
       }
@@ -399,6 +432,13 @@ export class TelemetryService {
       temperatures: [],
       voltages: [],
       fans: [],
+      vfcs: [],
+      ledColor: { r: 0, g: 0, b: 0 },
+      ledMode: '',
+      smcFirmware: '',
+      smcHardware: '',
+      smcPlatform: '',
+      networkAdapters: [],
       status: 'offline',
       errors: ['Host unreachable'],
     }

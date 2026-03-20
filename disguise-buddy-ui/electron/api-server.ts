@@ -17,7 +17,7 @@ import { deployProfile } from './services/deployer.ts'
 import { isPowerShellAvailable, runPowerShell } from './services/utils.ts'
 import { installSoftware, getPackages, addPackage, removePackage } from './services/installer.ts'
 import { executeRemote, executeLocal, pingHost } from './services/terminal.ts'
-import { querySmc } from './services/smc-client.ts'
+import { querySmc, postSmc } from './services/smc-client.ts'
 import { telemetryService, type TelemetrySnapshot } from './services/telemetry.ts'
 
 // ESM-compatible require — used to conditionally load 'electron' without a
@@ -59,7 +59,7 @@ const app = express()
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'app://disguise-buddy'],
+  origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/, 'app://disguise-buddy'],
   methods: ['GET', 'POST', 'DELETE'],
 }))
 app.use(express.json())
@@ -1050,6 +1050,85 @@ app.post('/api/telemetry/config', (req: Request, res: Response) => {
     pollIntervalMs: telemetryService.pollIntervalMs,
     retentionMs: telemetryService.retentionMs,
   })
+})
+
+// ─── VFC status (per-server, on-demand) ──────────────────────────────────────
+
+app.get('/api/vfc/status', async (_req: Request, res: Response) => {
+  try {
+    const snap = telemetryService.getLatest()
+    if (!snap) return res.json({ servers: [] })
+    const vfcData = snap.servers
+      .filter(s => s.status !== 'offline')
+      .map(s => ({
+        mgmtIp: s.mgmtIp,
+        hostname: s.hostname,
+        vfcs: (s as any).vfcs ?? [],
+      }))
+    res.json({ servers: vfcData })
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message ?? 'VFC query failed' })
+  }
+})
+
+// ─── Power Control ───────────────────────────────────────────────────────────
+
+app.post('/api/power/:action', async (req: Request, res: Response) => {
+  const { action } = req.params
+  const { ip } = req.body
+
+  if (!ip || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    return res.status(400).json({ message: 'Valid IP address required' })
+  }
+
+  const validActions = ['on', 'off', 'cycle']
+  if (!validActions.includes(action)) {
+    return res.status(400).json({ message: `Invalid action. Must be one of: ${validActions.join(', ')}` })
+  }
+
+  try {
+    const result = await postSmc(ip, `chassis/power/${action}`, {})
+    res.json({ success: true, action, ip, result })
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message ?? `Power ${action} failed` })
+  }
+})
+
+// Identify — blink OLED and LED strip on a server
+app.post('/api/identify', async (req: Request, res: Response) => {
+  const { ip } = req.body
+
+  if (!ip || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    return res.status(400).json({ message: 'Valid IP address required' })
+  }
+
+  try {
+    const result = await postSmc(ip, 'chassis/whoami', {})
+    res.json({ success: true, ip, result })
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message ?? 'Identify failed' })
+  }
+})
+
+// LED strip control
+app.post('/api/led', async (req: Request, res: Response) => {
+  const { ip, r, g, b, mode } = req.body
+
+  if (!ip || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    return res.status(400).json({ message: 'Valid IP address required' })
+  }
+
+  try {
+    const result = await postSmc(ip, 'ledstrip', {
+      ledR: r ?? 255,
+      ledG: g ?? 255,
+      ledB: b ?? 255,
+      ledMode: mode ?? 'static',
+    })
+    res.json({ success: true, ip, result })
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message ?? 'LED control failed' })
+  }
 })
 
 app.get('/api/telemetry/stream', (req: Request, res: Response) => {

@@ -14,6 +14,7 @@ import { api } from '@/lib/api'
 import { useTelemetry } from '@/hooks/useTelemetry'
 import { CHART_COLORS } from '@/lib/metric-definitions'
 import type { TimeRange, MetricSeries } from '@/lib/telemetry-types'
+import { sortServers } from '@/lib/server-sort'
 
 import { TimeRangeSelector } from '@/components/telemetry/TimeRangeSelector'
 import { TimeSeriesChart } from '@/components/telemetry/TimeSeriesChart'
@@ -46,7 +47,7 @@ export function TelemetryPage() {
 
   const { series, anomalies, snapshots, loading } = useTelemetry({ timeRange, liveMode })
 
-  // Known servers from snapshots (auto-discovered by backend)
+  // Known servers from snapshots (auto-discovered by backend), sorted: Director → Actor → Understudy
   const knownServers = useMemo(() => {
     const map = new Map<string, string>()
     for (const snap of snapshots) {
@@ -56,7 +57,13 @@ export function TelemetryPage() {
         }
       }
     }
-    return map
+    // Re-insert sorted by role: Director → Actor → Understudy
+    const entries = sortServers(
+      Array.from(map.entries()).map(([ip, hostname]) => ({ ip, hostname }))
+    )
+    const sorted = new Map<string, string>()
+    for (const e of entries) sorted.set(e.ip, e.hostname)
+    return sorted
   }, [snapshots])
 
   // Auto-select all discovered servers on first data load

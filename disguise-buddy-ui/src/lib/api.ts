@@ -346,6 +346,26 @@ export const api = {
     return post('/api/telemetry/config', config)
   },
 
+  // VFC status across fleet
+  getVfcStatus(): Promise<{ servers: { mgmtIp: string; hostname: string; vfcs: { slot: number; type: string; status: string }[] }[] }> {
+    return get('/api/vfc/status')
+  },
+
+  // Power control
+  powerAction(ip: string, action: 'on' | 'off' | 'cycle'): Promise<{ success: boolean }> {
+    return post(`/api/power/${action}`, { ip })
+  },
+
+  // Identify server (blink OLED/LED)
+  identifyServer(ip: string): Promise<{ success: boolean }> {
+    return post('/api/identify', { ip })
+  },
+
+  // LED strip control
+  setLed(ip: string, r: number, g: number, b: number, mode?: string): Promise<{ success: boolean }> {
+    return post('/api/led', { ip, r, g, b, mode: mode ?? 'static' })
+  },
+
   // SSE — Telemetry stream (real-time push)
   telemetryStream(
     onSnapshot?: (d: any) => void,

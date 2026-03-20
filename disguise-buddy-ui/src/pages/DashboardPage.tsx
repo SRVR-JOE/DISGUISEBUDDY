@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, Radio, Pause, Play, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
@@ -6,9 +6,10 @@ import { useTelemetry } from '@/hooks/useTelemetry'
 import type { TimeRange } from '@/lib/telemetry-types'
 import { SectionHeader, Button, Badge } from '@/components/ui'
 import { FleetSummary } from '@/components/dashboard/FleetSummary'
-import { ServerHealthGrid } from '@/components/dashboard/ServerHealthGrid'
+import { DashboardFleetGrid } from '@/components/dashboard/DashboardFleetGrid'
 import { RecentActivity } from '@/components/dashboard/RecentActivity'
 import { TemperatureOverview } from '@/components/dashboard/TemperatureOverview'
+import { sortServers } from '@/lib/server-sort'
 
 export function DashboardPage() {
   const [timeRange, setTimeRange] = useState<TimeRange>('15m')
@@ -23,8 +24,11 @@ export function DashboardPage() {
     api.getProfiles().then(p => setProfileCount(p.length)).catch(err => console.warn('[Dashboard]', err))
   }, [])
 
-  // Extract latest server states
-  const servers = latestSnapshot?.servers ?? []
+  // Extract latest server states — sorted: Director → Actor → Understudy
+  const servers = useMemo(
+    () => sortServers(latestSnapshot?.servers ?? []),
+    [latestSnapshot],
+  )
 
   // Manual refresh
   const handleRefresh = useCallback(() => {
@@ -131,7 +135,7 @@ export function DashboardPage() {
       />
 
       {/* Server health grid */}
-      <ServerHealthGrid servers={servers} loading={loading} />
+      <DashboardFleetGrid servers={servers} loading={loading} />
 
       {/* Bottom row: temperature chart + activity feed */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
