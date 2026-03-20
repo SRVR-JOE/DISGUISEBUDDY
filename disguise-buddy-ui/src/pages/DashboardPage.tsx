@@ -1,743 +1,961 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Radio, Send, Wifi, Monitor, RefreshCw, ChevronDown } from 'lucide-react'
+import {
+  Server,
+  Cpu,
+  Thermometer,
+  AlertTriangle,
+  RefreshCw,
+  Activity,
+  Zap,
+  Fan,
+  Network,
+  ChevronRight,
+  Monitor,
+  Power,
+  CircleDot,
+} from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
-import type { DiscoveredServer, Profile, NetworkInterface } from '@/lib/types'
-import { GlassCard, SectionHeader, Badge, Button } from '@/components/ui'
+import { GlassCard, SectionHeader, Badge, Button, StatusDot, Toggle } from '@/components/ui'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DeployStatus = 'idle' | 'deploying' | 'done' | 'error'
-
-interface RowDeployState {
-  status: DeployStatus
-  progress: number
-  message: string
+interface DashboardServer {
+  ip: string
+  hostname: string
+  role: string
+  adapters: { name: string; ipAddress: string; macAddress: string; netmask: string }[]
+  power: Record<string, string>
+  chassis: Record<string, string>
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Parse helpers ────────────────────────────────────────────────────────────
 
-function deriveSubnet(address: string): string {
-  // "192.168.10.100" → "192.168.10"
-  const parts = address.split('.')
-  if (parts.length === 4) return parts.slice(0, 3).join('.')
-  return address
+function parseTemp(val: string | undefined): number {
+  if (!val) return 0
+  const match = val.match(/(\d+)/)
+  return match ? parseInt(match[1], 10) : 0
 }
 
-// ─── Inline Select ────────────────────────────────────────────────────────────
-
-interface SelectProps {
-  value: string
-  onChange: (value: string) => void
-  options: { label: string; value: string }[]
-  disabled?: boolean
-  className?: string
-  'aria-label'?: string
+function parseVoltage(val: string | undefined): number {
+  if (!val) return 0
+  const match = val.match(/([\d.]+)/)
+  return match ? parseFloat(match[1]) : 0
 }
 
-function Select({
-  value,
-  onChange,
-  options,
-  disabled = false,
-  className = '',
-  'aria-label': ariaLabel,
-}: SelectProps) {
-  return (
-    <div className={`relative inline-flex items-center ${className}`}>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        aria-label={ariaLabel}
-        className={[
-          'w-full appearance-none pl-3 pr-8 py-2 rounded-lg text-sm outline-none transition-colors duration-150',
-          'bg-surface border border-border text-text',
-          'focus:border-primary focus:ring-1 focus:ring-primary/30',
-          disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown
-        size={14}
-        className="pointer-events-none absolute right-2.5 text-textMuted"
-        aria-hidden="true"
-      />
-    </div>
-  )
+function parseRPM(val: string | undefined): number {
+  if (!val) return 0
+  const match = val.match(/(\d+)/)
+  return match ? parseInt(match[1], 10) : 0
 }
 
-// ─── Row deploy status pill ───────────────────────────────────────────────────
+// ─── Color helpers ────────────────────────────────────────────────────────────
 
-function DeployStatusPill({ state }: { state: RowDeployState }) {
-  if (state.status === 'idle') return null
-
-  const variant =
-    state.status === 'done'
-      ? 'success'
-      : state.status === 'error'
-        ? 'error'
-        : 'info'
-
-  const label =
-    state.status === 'deploying'
-      ? state.message || 'Deploying...'
-      : state.status === 'done'
-        ? 'Done'
-        : 'Failed'
-
-  return (
-    <div className="flex flex-col gap-1 min-w-0">
-      <div className="flex items-center gap-2">
-        <Badge variant={variant} pulse={state.status === 'deploying'}>
-          {label}
-        </Badge>
-      </div>
-      {state.status === 'deploying' && (
-        <div className="h-1 w-24 bg-surface rounded-full overflow-hidden">
-          <motion.div
-            className="h-full rounded-full bg-primary"
-            animate={{ width: `${state.progress}%` }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
-          />
-        </div>
-      )}
-    </div>
-  )
+function tempColor(value: number): string {
+  if (value < 60) return '#22c55e'
+  if (value < 75) return '#f59e0b'
+  return '#ef4444'
 }
 
-// ─── Server row ───────────────────────────────────────────────────────────────
-
-interface ServerRowProps {
-  server: DiscoveredServer
-  profiles: Profile[]
-  selectedProfile: string
-  onProfileChange: (profileName: string) => void
-  onDeploy: () => void
-  deployState: RowDeployState
-  index: number
+function voltageColor(actual: number, nominal: number): string {
+  if (actual === 0) return '#6b7280'
+  const pctDiff = Math.abs(actual - nominal) / nominal * 100
+  if (pctDiff < 5) return '#22c55e'
+  if (pctDiff < 10) return '#f59e0b'
+  return '#ef4444'
 }
 
-function ServerRow({
-  server,
-  profiles,
-  selectedProfile,
-  onProfileChange,
-  onDeploy,
-  deployState,
-  index,
-}: ServerRowProps) {
-  const isDeploying = deployState.status === 'deploying'
+function fanColor(rpm: number): string {
+  if (rpm === 0) return '#6b7280'
+  if (rpm > 1000) return '#22c55e'
+  if (rpm > 500) return '#f59e0b'
+  return '#ef4444'
+}
+
+function roleColor(role: string): string {
+  const r = role.toLowerCase()
+  if (r === 'director') return '#22c55e'
+  if (r === 'actor') return '#06b6d4'
+  if (r === 'understudy') return '#f59e0b'
+  return '#7c3aed'
+}
+
+function roleVariant(role: string): 'success' | 'info' | 'warning' | 'neutral' {
+  const r = role.toLowerCase()
+  if (r === 'director') return 'success'
+  if (r === 'actor') return 'info'
+  if (r === 'understudy') return 'warning'
+  return 'neutral'
+}
+
+// ─── Anomaly detection ────────────────────────────────────────────────────────
+
+function countAnomalies(servers: DashboardServer[]): number {
+  let count = 0
+  for (const s of servers) {
+    if (parseTemp(s.chassis['CPU-TMP']) > 75) count++
+    if (parseTemp(s.chassis['SYS-TMP']) > 50) count++
+    const v12 = parseVoltage(s.chassis['PAY_12-VOL'])
+    if (v12 > 0 && Math.abs(v12 - 12) / 12 > 0.1) count++
+    const v5 = parseVoltage(s.chassis['PAY_5-VOL'])
+    if (v5 > 0 && Math.abs(v5 - 5) / 5 > 0.1) count++
+    const v3 = parseVoltage(s.chassis['PAY_3_3-VOL'])
+    if (v3 > 0 && Math.abs(v3 - 3.3) / 3.3 > 0.1) count++
+    const fans = Object.entries(s.chassis).filter(([k]) => k.includes('FAN') && k.includes('SPEED'))
+    for (const [, v] of fans) {
+      const rpm = parseRPM(v)
+      if (rpm > 0 && rpm < 500) count++
+    }
+    if (s.power['Main Power Fault'] === 'true') count++
+    if (s.power['Power Overload'] === 'true') count++
+  }
+  return count
+}
+
+// ─── TempGauge (inline SVG) ──────────────────────────────────────────────────
+
+function TempGauge({ value, max = 100, label, size = 80 }: { value: number; max?: number; label: string; size?: number }) {
+  const pct = Math.min(100, (value / max) * 100)
+  const color = tempColor(value)
+  const strokeWidth = size * 0.1
+  const radius = (size - strokeWidth) / 2 - 2
+  const circumference = 2 * Math.PI * radius
+  const arcLength = circumference * 0.75
+  const offset = arcLength * (1 - pct / 100)
+  const center = size / 2
 
   return (
-    <motion.tr
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, ease: 'easeOut', delay: index * 0.06 }}
-      className="border-b border-border/60 last:border-0 hover:bg-surface/40 transition-colors duration-100"
-    >
-      {/* IP Address */}
-      <td className="px-4 py-3">
-        <span className="font-mono text-sm text-text">{server.IPAddress}</span>
-      </td>
-
-      {/* Hostname */}
-      <td className="px-4 py-3">
-        <span className="text-sm text-textSecondary">
-          {server.Hostname || <span className="text-textMuted italic">unknown</span>}
-        </span>
-      </td>
-
-      {/* Type */}
-      <td className="px-4 py-3">
-        {server.IsDisguise ? (
-          <Badge variant="success">disguise</Badge>
-        ) : (
-          <Badge variant="neutral">other</Badge>
-        )}
-      </td>
-
-      {/* Response time */}
-      <td className="px-4 py-3">
-        <span className="text-sm text-textSecondary font-mono">
-          {server.ResponseTimeMs}
-          <span className="text-textMuted ml-0.5 font-sans">ms</span>
-        </span>
-      </td>
-
-      {/* Profile dropdown */}
-      <td className="px-4 py-3">
-        <Select
-          value={selectedProfile}
-          onChange={onProfileChange}
-          options={
-            profiles.length === 0
-              ? [{ label: 'No profiles', value: '' }]
-              : profiles.map((p) => ({ label: p.Name, value: p.Name }))
-          }
-          disabled={profiles.length === 0 || isDeploying}
-          aria-label={`Profile for ${server.IPAddress}`}
-          className="w-44"
+    <div className="flex flex-col items-center gap-1">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {/* Track */}
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke="#1e1e2e"
+          strokeWidth={strokeWidth}
+          strokeDasharray={`${arcLength} ${circumference - arcLength}`}
+          strokeLinecap="round"
+          style={{ rotate: '135deg', transformOrigin: `${center}px ${center}px` }}
         />
-      </td>
-
-      {/* Deploy status + button */}
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-3">
-          <AnimatePresence>
-            {deployState.status !== 'idle' && (
-              <motion.div
-                key="status"
-                initial={{ opacity: 0, x: -6 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -6 }}
-                transition={{ duration: 0.2 }}
-              >
-                <DeployStatusPill state={deployState} />
-              </motion.div>
-            )}
-          </AnimatePresence>
-          <Button
-            variant={deployState.status === 'done' ? 'ghost' : 'primary'}
-            size="sm"
-            onClick={onDeploy}
-            disabled={!selectedProfile || isDeploying || profiles.length === 0}
-            loading={isDeploying}
-          >
-            <Send size={12} className="shrink-0" />
-            {deployState.status === 'done' ? 'Re-deploy' : 'Deploy'}
-          </Button>
-        </div>
-      </td>
-    </motion.tr>
+        {/* Value arc */}
+        <motion.circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeDasharray={`${arcLength} ${circumference - arcLength}`}
+          strokeLinecap="round"
+          initial={{ strokeDashoffset: arcLength }}
+          animate={{ strokeDashoffset: offset }}
+          transition={{ duration: 0.8, ease: 'easeOut' }}
+          style={{
+            rotate: '135deg',
+            transformOrigin: `${center}px ${center}px`,
+            filter: `drop-shadow(0 0 6px ${color}80)`,
+          }}
+        />
+        {/* Glow */}
+        <circle
+          cx={center}
+          cy={center}
+          r={radius * 0.55}
+          fill="none"
+          stroke={color}
+          strokeWidth={1}
+          opacity={0.15}
+        />
+        {/* Center text */}
+        <text
+          x={center}
+          y={center - 2}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fill={color}
+          fontSize={size * 0.22}
+          fontWeight="700"
+          fontFamily="'JetBrains Mono', monospace"
+        >
+          {value}°
+        </text>
+        <text
+          x={center}
+          y={center + size * 0.16}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fill="#94a3b8"
+          fontSize={size * 0.12}
+          fontFamily="Inter, system-ui, sans-serif"
+        >
+          {label}
+        </text>
+      </svg>
+    </div>
   )
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── VoltageBar ──────────────────────────────────────────────────────────────
+
+function VoltageBar({ actual, nominal, label }: { actual: number; nominal: number; label: string }) {
+  const pctDiff = nominal > 0 ? Math.abs(actual - nominal) / nominal * 100 : 0
+  const color = voltageColor(actual, nominal)
+  const fillPct = nominal > 0 ? Math.min(100, (actual / (nominal * 1.15)) * 100) : 0
+  const nominalPct = nominal > 0 ? (nominal / (nominal * 1.15)) * 100 : 0
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-textMuted">{label}</span>
+        <span className="text-xs font-mono" style={{ color }}>
+          {actual > 0 ? `${actual.toFixed(2)}V` : 'N/A'}
+          {actual > 0 && (
+            <span className="text-textMuted ml-1">
+              ({pctDiff < 1 ? '<1' : pctDiff.toFixed(1)}%)
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="relative h-2 bg-[#1e1e2e] rounded-full overflow-hidden">
+        {/* Nominal marker */}
+        <div
+          className="absolute top-0 h-full w-px bg-white/30 z-10"
+          style={{ left: `${nominalPct}%` }}
+        />
+        {/* Actual bar */}
+        <motion.div
+          className="h-full rounded-full"
+          style={{ backgroundColor: color }}
+          initial={{ width: 0 }}
+          animate={{ width: `${fillPct}%` }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
+        />
+      </div>
+    </div>
+  )
+}
+
+// ─── FanIndicator ────────────────────────────────────────────────────────────
+
+function FanIndicator({ rpm, label }: { rpm: number; label: string }) {
+  const color = fanColor(rpm)
+  return (
+    <div className="flex items-center gap-2">
+      <motion.div
+        animate={{ rotate: rpm > 0 ? 360 : 0 }}
+        transition={{ duration: rpm > 3000 ? 0.5 : rpm > 1000 ? 1 : 2, repeat: Infinity, ease: 'linear' }}
+      >
+        <Fan size={14} style={{ color }} />
+      </motion.div>
+      <div className="flex flex-col">
+        <span className="text-xs text-textMuted">{label}</span>
+        <span className="text-xs font-mono" style={{ color }}>
+          {rpm > 0 ? `${rpm} RPM` : 'OFF'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// ─── StatCard ────────────────────────────────────────────────────────────────
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  glowColor,
+  pulse = false,
+}: {
+  icon: React.ComponentType<any>
+  label: string
+  value: number | string
+  glowColor: string
+  pulse?: boolean
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+      className="glass-card relative overflow-hidden"
+      style={{ boxShadow: `0 0 30px ${glowColor}25, inset 0 1px 0 rgba(255,255,255,0.05)` }}
+    >
+      <div className="flex items-center gap-4 p-4">
+        <div
+          className="w-10 h-10 rounded-lg flex items-center justify-center"
+          style={{ backgroundColor: `${glowColor}20` }}
+        >
+          <Icon size={20} color={glowColor} />
+        </div>
+        <div className="flex flex-col">
+          <motion.span
+            key={String(value)}
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`text-2xl font-bold font-mono text-text ${pulse ? 'animate-pulse' : ''}`}
+          >
+            {value}
+          </motion.span>
+          <span className="text-xs text-textMuted uppercase tracking-wider">{label}</span>
+        </div>
+      </div>
+      {/* Subtle top glow line */}
+      <div
+        className="absolute top-0 left-0 right-0 h-px"
+        style={{ background: `linear-gradient(90deg, transparent, ${glowColor}60, transparent)` }}
+      />
+    </motion.div>
+  )
+}
+
+// ─── RackUnit ────────────────────────────────────────────────────────────────
+
+function RackUnit({
+  server,
+  isExpanded,
+  onToggle,
+  index,
+}: {
+  server: DashboardServer
+  isExpanded: boolean
+  onToggle: () => void
+  index: number
+}) {
+  const cpuTemp = parseTemp(server.chassis['CPU-TMP'])
+  const sysTemp = parseTemp(server.chassis['SYS-TMP'])
+  const powerOn = server.power['System Power'] === 'on'
+  const hasFault = server.power['Main Power Fault'] === 'true' || server.power['Power Overload'] === 'true'
+
+  const fans = Object.entries(server.chassis)
+    .filter(([k]) => k.includes('FAN') && k.includes('SPEED'))
+    .map(([k, v]) => ({ name: k.replace(/-SPEED/, ''), rpm: parseRPM(v) }))
+
+  const v12 = parseVoltage(server.chassis['PAY_12-VOL'])
+  const v5 = parseVoltage(server.chassis['PAY_5-VOL'])
+  const sb5 = parseVoltage(server.chassis['SB_5-VOL'])
+  const aux5 = parseVoltage(server.chassis['AUX_5-VOL'])
+  const v3 = parseVoltage(server.chassis['PAY_3_3-VOL'])
+
+  const borderColor = roleColor(server.role)
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -12 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.3, delay: index * 0.05 }}
+    >
+      {/* Rack unit header */}
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`w-full text-left border-l-4 rounded-lg transition-all duration-200 hover:bg-surface/60 ${
+          isExpanded ? 'bg-surface/40' : 'bg-surface/20'
+        }`}
+        style={{ borderLeftColor: borderColor }}
+      >
+        <div className="flex items-center gap-3 px-4 py-3">
+          {/* Power LED */}
+          <StatusDot status={powerOn ? (hasFault ? 'warning' : 'online') : 'offline'} />
+
+          {/* Hostname & IP */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-text truncate">
+                {server.hostname || server.ip}
+              </span>
+              <Badge variant={roleVariant(server.role)}>
+                {server.role || 'Unknown'}
+              </Badge>
+            </div>
+            <span className="text-xs font-mono text-textMuted">{server.ip}</span>
+          </div>
+
+          {/* CPU temp mini bar */}
+          <div className="flex items-center gap-2 shrink-0">
+            <Thermometer size={12} style={{ color: tempColor(cpuTemp) }} />
+            <div className="w-20 h-1.5 bg-[#1e1e2e] rounded-full overflow-hidden">
+              <motion.div
+                className="h-full rounded-full"
+                style={{ backgroundColor: tempColor(cpuTemp) }}
+                animate={{ width: `${Math.min(100, (cpuTemp / 100) * 100)}%` }}
+                transition={{ duration: 0.5 }}
+              />
+            </div>
+            <span className="text-xs font-mono w-10 text-right" style={{ color: tempColor(cpuTemp) }}>
+              {cpuTemp}°C
+            </span>
+          </div>
+
+          {/* Mini fan indicators */}
+          <div className="flex items-center gap-1 shrink-0">
+            {fans.slice(0, 4).map((f, i) => (
+              <motion.div
+                key={i}
+                animate={{ rotate: f.rpm > 0 ? 360 : 0 }}
+                transition={{ duration: f.rpm > 3000 ? 0.5 : 1.5, repeat: Infinity, ease: 'linear' }}
+              >
+                <Fan size={10} style={{ color: fanColor(f.rpm) }} />
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Expand arrow */}
+          <motion.div
+            animate={{ rotate: isExpanded ? 90 : 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <ChevronRight size={16} className="text-textMuted" />
+          </motion.div>
+        </div>
+      </button>
+
+      {/* Expanded detail */}
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            key="detail"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
+            className="overflow-hidden"
+          >
+            <div
+              className="mx-4 mb-4 p-5 rounded-lg border border-border/50 bg-[#0d0d1a]/60"
+              style={{ borderLeftColor: borderColor, borderLeftWidth: '2px' }}
+            >
+              {/* Temperature gauges */}
+              <div className="flex flex-wrap gap-8 mb-6">
+                <div>
+                  <h4 className="text-xs font-semibold text-textSecondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <Thermometer size={12} /> Temperatures
+                  </h4>
+                  <div className="flex items-center gap-6">
+                    <TempGauge value={cpuTemp} label="CPU" size={90} />
+                    <TempGauge value={sysTemp} label="SYS" size={90} />
+                  </div>
+                </div>
+
+                {/* Voltage rails */}
+                <div className="flex-1 min-w-60">
+                  <h4 className="text-xs font-semibold text-textSecondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <Zap size={12} /> Voltage Rails
+                  </h4>
+                  <div className="flex flex-col gap-2.5">
+                    <VoltageBar actual={v12} nominal={12} label="12V Main" />
+                    <VoltageBar actual={v5} nominal={5} label="5V Payload" />
+                    <VoltageBar actual={sb5} nominal={5} label="5V Standby" />
+                    <VoltageBar actual={aux5} nominal={5} label="5V Aux" />
+                    <VoltageBar actual={v3} nominal={3.3} label="3.3V" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Fan speeds */}
+              <div className="mb-6">
+                <h4 className="text-xs font-semibold text-textSecondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <Fan size={12} /> Fan Speeds
+                </h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {fans.map((f, i) => (
+                    <FanIndicator key={i} rpm={f.rpm} label={f.name} />
+                  ))}
+                </div>
+              </div>
+
+              {/* Power status */}
+              <div className="mb-6">
+                <h4 className="text-xs font-semibold text-textSecondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <Power size={12} /> Power Status
+                </h4>
+                <div className="flex flex-wrap gap-3">
+                  {Object.entries(server.power).map(([key, val]) => {
+                    const isOk = key === 'System Power' ? val === 'on' : val === 'false'
+                    return (
+                      <div key={key} className="flex items-center gap-1.5">
+                        <StatusDot status={isOk ? 'online' : 'warning'} />
+                        <span className="text-xs text-textSecondary">{key}</span>
+                        <span className={`text-xs font-mono ${isOk ? 'text-success' : 'text-error'}`}>
+                          {val}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Network adapters */}
+              {server.adapters && server.adapters.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-textSecondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <Network size={12} /> Network Adapters
+                  </h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="border-b border-border/40">
+                          {['Name', 'IP Address', 'MAC Address', 'Netmask'].map(h => (
+                            <th key={h} className="px-3 py-1.5 text-xs font-semibold text-textMuted uppercase tracking-wider">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {server.adapters.map((a, i) => (
+                          <tr key={i} className="border-b border-border/20 last:border-0">
+                            <td className="px-3 py-1.5 text-xs text-textSecondary">{a.name}</td>
+                            <td className="px-3 py-1.5 text-xs font-mono text-text">{a.ipAddress}</td>
+                            <td className="px-3 py-1.5 text-xs font-mono text-textMuted">{a.macAddress}</td>
+                            <td className="px-3 py-1.5 text-xs font-mono text-textMuted">{a.netmask}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  )
+}
+
+// ─── HealthMatrixCell ────────────────────────────────────────────────────────
+
+function MatrixCell({ color, value, tooltip }: { color: string; value: string; tooltip?: string }) {
+  return (
+    <td className="px-2 py-1.5 text-center border border-border/20" title={tooltip}>
+      <span
+        className="inline-block w-3 h-3 rounded-full mr-1.5 align-middle"
+        style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}50` }}
+      />
+      <span className="text-xs font-mono text-textSecondary align-middle">{value}</span>
+    </td>
+  )
+}
+
+// ─── Main Page ───────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
-  // NICs
-  const [nics, setNics] = useState<NetworkInterface[]>([])
-  const [selectedNic, setSelectedNic] = useState('')
-  const [nicsLoading, setNicsLoading] = useState(true)
-
-  // Profiles
-  const [profiles, setProfiles] = useState<Profile[]>([])
-
-  // Per-row profile selections: ip → profileName
-  const [rowProfiles, setRowProfiles] = useState<Record<string, string>>({})
-
-  // Scan state
+  const [servers, setServers] = useState<DashboardServer[]>([])
   const [scanning, setScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState(0)
-  const [servers, setServers] = useState<DiscoveredServer[]>([])
-  const [hasScanned, setHasScanned] = useState(false)
+  const [expandedIp, setExpandedIp] = useState<string | null>(null)
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
-  // Credentials
-  const [credUser, setCredUser] = useState('d3')
-  const [credPass, setCredPass] = useState('disguise')
+  const esRef = useRef<EventSource | null>(null)
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Per-row deploy states: ip → RowDeployState
-  const [deployStates, setDeployStates] = useState<Record<string, RowDeployState>>({})
-
-  // Setup instructions panel
-  const [showSetup, setShowSetup] = useState(false)
-  const [setupScript, setSetupScript] = useState('')
-
-  // Refs to keep EventSource handles so we can close them on unmount
-  const scanEsRef = useRef<EventSource | null>(null)
-  const deployEsRefs = useRef<Record<string, EventSource>>({})
-
-  // Derived
-  const selectedNicObj = nics.find((n) => n.name === selectedNic) ?? null
-  const subnet = selectedNicObj ? deriveSubnet(selectedNicObj.address) : ''
-
-  // ── Load NICs and profiles on mount ────────────────────────────────────────
-
-  useEffect(() => {
-    Promise.all([
-      api.getNics(),
-      api.getProfiles(),
-    ])
-      .then(([nicList, profileList]) => {
-        setNics(nicList)
-        if (nicList.length > 0) setSelectedNic(nicList[0].name)
-        setProfiles(profileList)
-      })
-      .catch(() => toast.error('Failed to load network interfaces'))
-      .finally(() => setNicsLoading(false))
-
-    api.getSetupScript().then(data => setSetupScript(data.oneLiner)).catch(() => {})
-
-    return () => {
-      scanEsRef.current?.close()
-      Object.values(deployEsRefs.current).forEach((es) => es.close())
-    }
-  }, [])
-
-  // ── Sync rowProfiles when new servers are discovered ───────────────────────
-
-  const defaultProfile = profiles[0]?.Name ?? ''
-
-  const addServerToState = useCallback(
-    (server: DiscoveredServer) => {
-      setServers((prev) => {
-        if (prev.some((s) => s.IPAddress === server.IPAddress)) return prev
-        return [...prev, server]
-      })
-      setRowProfiles((prev) => ({
-        ...prev,
-        [server.IPAddress]: prev[server.IPAddress] ?? defaultProfile,
-      }))
-      setDeployStates((prev) => ({
-        ...prev,
-        [server.IPAddress]: prev[server.IPAddress] ?? { status: 'idle', progress: 0, message: '' },
-      }))
-    },
-    [defaultProfile],
-  )
-
-  // ── Scan ───────────────────────────────────────────────────────────────────
+  // ── Auto-scan on mount ─────────────────────────────────────────────────────
 
   const startScan = useCallback(() => {
-    if (!subnet || scanning) return
-
-    // Close any existing scan stream
-    scanEsRef.current?.close()
+    if (scanning) return
+    esRef.current?.close()
 
     setScanning(true)
     setScanProgress(0)
     setServers([])
-    setHasScanned(false)
-    setRowProfiles({})
-    setDeployStates({})
+    setExpandedIp(null)
 
-    const es = api.scanNetwork(subnet, 1, 254)
-    scanEsRef.current = es
-
-    es.addEventListener('progress', (e: MessageEvent) => {
-      const data = JSON.parse(e.data) as { percent?: number }
-      if (typeof data.percent === 'number') setScanProgress(data.percent)
-    })
+    const es = api.smcDiscover('192.168.100', 200, 254)
+    esRef.current = es
 
     es.addEventListener('discovered', (e: MessageEvent) => {
-      const server = JSON.parse(e.data) as DiscoveredServer
-      addServerToState(server)
+      try {
+        const data = JSON.parse(e.data)
+        const server: DashboardServer = {
+          ip: data.ip ?? '',
+          hostname: data.hostname ?? '',
+          role: data.role ?? '',
+          adapters: data.adapters ?? [],
+          power: data.power ?? {},
+          chassis: data.chassis ?? {},
+        }
+        setServers(prev => {
+          if (prev.some(s => s.ip === server.ip)) return prev
+          return [...prev, server]
+        })
+      } catch { /* skip malformed */ }
+    })
+
+    es.addEventListener('progress', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (typeof data.percent === 'number') setScanProgress(data.percent)
+      } catch { /* skip */ }
     })
 
     es.addEventListener('complete', () => {
       es.close()
-      scanEsRef.current = null
+      esRef.current = null
       setScanning(false)
-      setHasScanned(true)
       setScanProgress(100)
-      toast.success(`Scan complete`)
+      toast.success('Scan complete')
+    })
+
+    es.addEventListener('error', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data)
+        toast.error(data.message || 'Scan error')
+      } catch { /* skip */ }
     })
 
     es.onerror = () => {
       es.close()
-      scanEsRef.current = null
+      esRef.current = null
       setScanning(false)
-      setHasScanned(true)
-      toast.error('Scan failed')
+      toast.error('Scan connection lost')
     }
-  }, [subnet, scanning, addServerToState])
+  }, [scanning])
 
-  // ── Per-row deploy ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    startScan()
+    return () => {
+      esRef.current?.close()
+      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  const deployToServer = useCallback(
-    (server: DiscoveredServer) => {
-      const profileName = rowProfiles[server.IPAddress] ?? defaultProfile
-      if (!profileName) return
+  // ── Refresh all servers ────────────────────────────────────────────────────
 
-      // Close any existing stream for this IP
-      deployEsRefs.current[server.IPAddress]?.close()
-
-      setDeployStates((prev) => ({
-        ...prev,
-        [server.IPAddress]: { status: 'deploying', progress: 0, message: 'Starting...' },
-      }))
-
-      const es = api.deployProfile(server.IPAddress, profileName, credUser, credPass)
-      deployEsRefs.current[server.IPAddress] = es
-
-      es.addEventListener('progress', (e: MessageEvent) => {
-        const data = JSON.parse(e.data) as {
-          stepNumber?: number
-          total?: number
-          message?: string
-        }
-        const pct =
-          data.stepNumber != null && data.total
-            ? Math.round((data.stepNumber / data.total) * 100)
-            : 0
-        setDeployStates((prev) => ({
-          ...prev,
-          [server.IPAddress]: {
-            status: 'deploying',
-            progress: pct,
-            message: data.message ?? '',
-          },
-        }))
-      })
-
-      es.addEventListener('complete', () => {
-        es.close()
-        delete deployEsRefs.current[server.IPAddress]
-        setDeployStates((prev) => ({
-          ...prev,
-          [server.IPAddress]: { status: 'done', progress: 100, message: 'Done' },
-        }))
-        toast.success(`Deployed to ${server.Hostname || server.IPAddress}`)
-      })
-
-      es.addEventListener('error', (e: MessageEvent) => {
-        const data = JSON.parse(e.data) as { message?: string }
-        es.close()
-        delete deployEsRefs.current[server.IPAddress]
-        setDeployStates((prev) => ({
-          ...prev,
-          [server.IPAddress]: {
-            status: 'error',
-            progress: prev[server.IPAddress]?.progress ?? 0,
-            message: data.message ?? 'Failed',
-          },
-        }))
-        toast.error(
-          `Deploy failed for ${server.Hostname || server.IPAddress}${data.message ? `: ${data.message}` : ''}`,
+  const refreshAll = useCallback(async () => {
+    if (servers.length === 0 || refreshing) return
+    setRefreshing(true)
+    try {
+      const updated = await Promise.all(
+        servers.map(s =>
+          api.smcProbe(s.ip)
+            .then((data: any) => ({
+              ip: data.ip ?? s.ip,
+              hostname: data.hostname ?? s.hostname,
+              role: data.role ?? s.role,
+              adapters: data.adapters ?? s.adapters,
+              power: data.power ?? s.power,
+              chassis: data.chassis ?? s.chassis,
+            } as DashboardServer))
+            .catch(() => s)
         )
-      })
+      )
+      setServers(updated)
+      toast.success('Refreshed all servers')
+    } finally {
+      setRefreshing(false)
+    }
+  }, [servers, refreshing])
 
-      es.onerror = () => {
-        es.close()
-        delete deployEsRefs.current[server.IPAddress]
-        setDeployStates((prev) => ({
-          ...prev,
-          [server.IPAddress]: {
-            status: 'error',
-            progress: prev[server.IPAddress]?.progress ?? 0,
-            message: 'Failed',
-          },
-        }))
-        toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}`)
+  // ── Auto-refresh toggle ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (autoRefresh && servers.length > 0) {
+      refreshTimerRef.current = setInterval(() => {
+        refreshAll()
+      }, 30000)
+    } else {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current)
+        refreshTimerRef.current = null
       }
-    },
-    [rowProfiles, defaultProfile, credUser, credPass],
-  )
+    }
+    return () => {
+      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current)
+    }
+  }, [autoRefresh, refreshAll, servers.length])
 
-  // ── Mass deploy ─────────────────────────────────────────────────────────────
+  // ── Derived stats ──────────────────────────────────────────────────────────
 
-  const deployAllServers = useCallback(() => {
-    servers.forEach((server) => {
-      const profileName = rowProfiles[server.IPAddress] ?? defaultProfile
-      if (!profileName) return
-      deployToServer(server)
-    })
-  }, [servers, rowProfiles, defaultProfile, deployToServer])
+  const totalServers = servers.length
+  const onlineServers = servers.filter(s => s.power['System Power'] === 'on').length
+  const alerts = useMemo(() => countAnomalies(servers), [servers])
+  const avgCpuTemp = useMemo(() => {
+    if (servers.length === 0) return 0
+    const sum = servers.reduce((acc, s) => acc + parseTemp(s.chassis['CPU-TMP']), 0)
+    return Math.round(sum / servers.length)
+  }, [servers])
+
+  const avgTempGlowColor = avgCpuTemp < 60 ? '#22c55e' : avgCpuTemp < 75 ? '#f59e0b' : '#ef4444'
+
+  // ── Health matrix data ─────────────────────────────────────────────────────
+
+  const voltageRows = useMemo(() => [
+    { label: 'CPU Temp', key: 'CPU-TMP', type: 'temp' as const },
+    { label: 'SYS Temp', key: 'SYS-TMP', type: 'temp' as const },
+    { label: '12V Rail', key: 'PAY_12-VOL', type: 'voltage' as const, nominal: 12 },
+    { label: '5V Rail', key: 'PAY_5-VOL', type: 'voltage' as const, nominal: 5 },
+    { label: '3.3V Rail', key: 'PAY_3_3-VOL', type: 'voltage' as const, nominal: 3.3 },
+    { label: 'CPU Fan', key: 'CPU_FAN0-SPEED', type: 'fan' as const },
+    { label: 'SYS Fan 1', key: 'SYS_FAN1-SPEED', type: 'fan' as const },
+    { label: 'SYS Fan 2', key: 'SYS_FAN2-SPEED', type: 'fan' as const },
+    { label: 'SYS Fan 3', key: 'SYS_FAN3-SPEED', type: 'fan' as const },
+  ], [])
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  const nicOptions = nicsLoading
-    ? [{ label: 'Loading...', value: '' }]
-    : nics.length === 0
-      ? [{ label: 'No interfaces found', value: '' }]
-      : nics.map((n) => ({
-          label: `${n.name} — ${n.address}`,
-          value: n.name,
-        }))
-
-  const disguiseCount = servers.filter((s) => s.IsDisguise).length
-
-  const anyDeploying = Object.values(deployStates).some((s) => s.status === 'deploying')
-
-  const deployableCount = servers.filter((server) => {
-    const profileName = rowProfiles[server.IPAddress] ?? defaultProfile
-    return !!profileName
-  }).length
-
   return (
     <div className="p-6 flex flex-col gap-6">
-      <SectionHeader
-        title="Dashboard"
-        subtitle="Scan your network and deploy profiles to discovered servers"
-      />
-
-      {/* ── Toolbar ── */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: 'easeOut' }}
-      >
-        <GlassCard>
-          <div className="flex flex-wrap items-end gap-4">
-            {/* NIC selector */}
-            <div className="flex flex-col gap-1.5 flex-1 min-w-56">
-              <label className="text-xs font-semibold text-textSecondary uppercase tracking-wider flex items-center gap-1.5">
-                <Wifi size={12} aria-hidden="true" />
-                Network Interface
-              </label>
-              <Select
-                value={selectedNic}
-                onChange={setSelectedNic}
-                options={nicOptions}
-                disabled={nicsLoading || scanning}
-                aria-label="Select network interface"
-              />
-            </div>
-
-            {/* Subnet preview */}
-            {subnet && (
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-semibold text-textSecondary uppercase tracking-wider">
-                  Subnet
-                </span>
-                <span className="font-mono text-sm text-textSecondary px-3 py-2 rounded-lg bg-surface border border-border">
-                  {subnet}.1–254
-                </span>
-              </div>
-            )}
-
-            {/* Scan button */}
-            <Button
-              variant="primary"
-              onClick={startScan}
-              disabled={!subnet || scanning || nicsLoading}
-              loading={scanning}
-              className="self-end"
-            >
-              <Radio size={14} className="shrink-0" />
-              {scanning ? 'Scanning...' : 'Scan Network'}
-            </Button>
-          </div>
-
-          {/* Credentials row */}
-          <div className="flex flex-wrap items-end gap-4 pt-3 border-t border-border/50">
-            <div className="flex flex-col gap-1.5 flex-1 min-w-40">
-              <label className="text-xs font-semibold text-textSecondary uppercase tracking-wider">
-                Username
-              </label>
-              <input
-                type="text"
-                value={credUser}
-                onChange={(e) => setCredUser(e.target.value)}
-                placeholder="Administrator"
-                className="w-full px-3 py-2 rounded-lg text-sm bg-surface border border-border text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors duration-150"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5 flex-1 min-w-40">
-              <label className="text-xs font-semibold text-textSecondary uppercase tracking-wider">
-                Password
-              </label>
-              <input
-                type="password"
-                value={credPass}
-                onChange={(e) => setCredPass(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-3 py-2 rounded-lg text-sm bg-surface border border-border text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors duration-150"
-              />
-            </div>
-          </div>
-
-          {/* Scan progress bar */}
-          <AnimatePresence>
-            {scanning && (
-              <motion.div
-                key="scan-progress"
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden mt-4"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 h-1.5 bg-surface rounded-full overflow-hidden">
-                    <motion.div
-                      className="h-full rounded-full bg-primary"
-                      animate={{ width: `${scanProgress}%` }}
-                      transition={{ duration: 0.5, ease: 'easeOut' }}
-                    />
-                  </div>
-                  <span className="text-xs text-textMuted font-mono shrink-0 w-10 text-right">
-                    {scanProgress}%
-                  </span>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </GlassCard>
-      </motion.div>
-
-      {/* ── Setup instructions ── */}
-      <div>
-        <button
-          type="button"
-          onClick={() => setShowSetup(v => !v)}
-          className="text-xs text-textMuted hover:text-textSecondary transition-colors duration-150 flex items-center gap-1.5"
-        >
-          <ChevronDown size={12} className={`transition-transform ${showSetup ? 'rotate-180' : ''}`} />
-          {showSetup ? 'Hide' : 'Show'} server setup instructions
-        </button>
-
-        <AnimatePresence>
-          {showSetup && (
-            <motion.div
-              key="setup-panel"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden"
-            >
-              <GlassCard className="mt-3">
-                <p className="text-sm text-textSecondary mb-3">
-                  If deployment fails with "WinRM and DCOM both unavailable", run this command once on each target server in an <strong>Administrator PowerShell</strong>:
-                </p>
-                <div className="relative">
-                  <pre className="text-xs font-mono bg-black/30 text-green-400 p-4 rounded-lg overflow-x-auto whitespace-pre-wrap break-all">
-                    {setupScript || 'Loading...'}
-                  </pre>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(setupScript)
-                      toast.success('Copied to clipboard')
-                    }}
-                    className="absolute top-2 right-2 px-2 py-1 text-xs bg-surface/80 text-textSecondary rounded border border-border hover:bg-surface transition-colors"
-                  >
-                    Copy
-                  </button>
-                </div>
-                <p className="text-xs text-textMuted mt-2">
-                  This only needs to be run once per server. After that, remote deployment will work automatically.
-                </p>
-              </GlassCard>
-            </motion.div>
-          )}
-        </AnimatePresence>
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <SectionHeader
+          title="Health Center"
+          subtitle="Real-time server health monitoring across the MGMT subnet"
+        />
+        <div className="flex items-center gap-3">
+          <Toggle
+            checked={autoRefresh}
+            onChange={setAutoRefresh}
+            label="Auto-refresh (30s)"
+            disabled={servers.length === 0}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={refreshAll}
+            disabled={servers.length === 0 || refreshing}
+            loading={refreshing}
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+            Refresh
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={startScan}
+            disabled={scanning}
+            loading={scanning}
+          >
+            <Activity size={14} />
+            {scanning ? 'Scanning...' : 'Re-scan'}
+          </Button>
+        </div>
       </div>
 
-      {/* ── Results table ── */}
+      {/* Scan progress */}
       <AnimatePresence>
-        {(hasScanned || servers.length > 0) && (
+        {scanning && (
           <motion.div
-            key="results"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3, ease: 'easeOut' }}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.3 }}
+            className="overflow-hidden"
           >
-            <GlassCard>
-              {/* Table header */}
-              <div className="flex items-center justify-between gap-4 mb-4 pb-4 border-b border-border">
-                <div className="flex items-center gap-3">
-                  <h3 className="text-text font-bold text-sm tracking-wide">Discovered Servers</h3>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={servers.length > 0 ? 'info' : 'neutral'}>
-                      {servers.length} found
-                    </Badge>
-                    {disguiseCount > 0 && (
-                      <Badge variant="success">{disguiseCount} disguise</Badge>
-                    )}
-                  </div>
-                </div>
-
-                {/* Re-scan shortcut + Deploy All */}
-                <div className="flex items-center gap-2">
-                  {hasScanned && !scanning && (
-                    <Button variant="ghost" size="sm" onClick={startScan} disabled={!subnet}>
-                      <RefreshCw size={13} />
-                      Re-scan
-                    </Button>
-                  )}
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={deployAllServers}
-                    disabled={
-                      servers.length === 0 ||
-                      profiles.length === 0 ||
-                      anyDeploying ||
-                      deployableCount === 0
-                    }
-                    loading={anyDeploying}
-                  >
-                    <Send size={13} className="shrink-0" />
-                    Deploy All ({deployableCount})
-                  </Button>
-                </div>
+            <div className="flex items-center gap-4">
+              <div className="flex-1 h-1.5 bg-surface rounded-full overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full bg-gradient-to-r from-purple-500 to-cyan-400"
+                  animate={{ width: `${scanProgress}%` }}
+                  transition={{ duration: 0.5, ease: 'easeOut' }}
+                  style={{ boxShadow: '0 0 12px rgba(124, 58, 237, 0.5)' }}
+                />
               </div>
-
-              {/* Empty state */}
-              {servers.length === 0 && hasScanned && !scanning && (
-                <div className="flex flex-col items-center justify-center py-12 gap-3">
-                  <Monitor size={32} className="text-textMuted" aria-hidden="true" />
-                  <p className="text-textMuted text-sm">No servers found on {subnet}.0/24</p>
-                  <p className="text-textMuted/60 text-xs">
-                    Check your network interface selection and try again
-                  </p>
-                </div>
-              )}
-
-              {/* Table */}
-              {servers.length > 0 && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-border">
-                        {[
-                          'IP Address',
-                          'Hostname',
-                          'Type',
-                          'Response',
-                          'Profile',
-                          'Action',
-                        ].map((col) => (
-                          <th
-                            key={col}
-                            className="px-4 py-2.5 text-xs font-semibold text-textMuted uppercase tracking-wider whitespace-nowrap"
-                          >
-                            {col}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {servers.map((server, i) => (
-                        <ServerRow
-                          key={server.IPAddress}
-                          server={server}
-                          profiles={profiles}
-                          selectedProfile={rowProfiles[server.IPAddress] ?? defaultProfile}
-                          onProfileChange={(name) =>
-                            setRowProfiles((prev) => ({ ...prev, [server.IPAddress]: name }))
-                          }
-                          onDeploy={() => deployToServer(server)}
-                          deployState={
-                            deployStates[server.IPAddress] ?? {
-                              status: 'idle',
-                              progress: 0,
-                              message: '',
-                            }
-                          }
-                          index={i}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </GlassCard>
+              <span className="text-xs font-mono text-textMuted w-12 text-right">{scanProgress}%</span>
+              <Badge variant="info" pulse>Scanning</Badge>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Stats bar ─────────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          icon={Server}
+          label="Total Servers"
+          value={totalServers}
+          glowColor="#7c3aed"
+          pulse={scanning}
+        />
+        <StatCard
+          icon={Monitor}
+          label="Servers Online"
+          value={onlineServers}
+          glowColor="#22c55e"
+        />
+        <StatCard
+          icon={AlertTriangle}
+          label="Alerts"
+          value={alerts}
+          glowColor={alerts > 0 ? '#ef4444' : '#f59e0b'}
+        />
+        <StatCard
+          icon={Cpu}
+          label="Avg CPU Temp"
+          value={servers.length > 0 ? `${avgCpuTemp}°C` : '--'}
+          glowColor={avgTempGlowColor}
+        />
+      </div>
+
+      {/* ── Rack View ─────────────────────────────────────────────────────────── */}
+      {servers.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+        >
+          <GlassCard>
+            <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border/50">
+              <Server size={16} className="text-primary" />
+              <h3 className="text-sm font-bold text-text uppercase tracking-wider">Server Rack</h3>
+              <Badge variant="info">{servers.length} units</Badge>
+            </div>
+
+            {/* Rack frame */}
+            <div
+              className="relative rounded-lg border border-border/30 bg-[#0a0a14]/50 p-2"
+              style={{ boxShadow: 'inset 0 2px 12px rgba(0,0,0,0.3)' }}
+            >
+              {/* Rack rails (visual) */}
+              <div className="absolute top-0 bottom-0 left-0 w-1 bg-gradient-to-b from-border/40 via-border/20 to-border/40 rounded-l" />
+              <div className="absolute top-0 bottom-0 right-0 w-1 bg-gradient-to-b from-border/40 via-border/20 to-border/40 rounded-r" />
+
+              <div className="flex flex-col gap-1 pl-3 pr-3">
+                {servers.map((server, i) => (
+                  <RackUnit
+                    key={server.ip}
+                    server={server}
+                    isExpanded={expandedIp === server.ip}
+                    onToggle={() => setExpandedIp(prev => prev === server.ip ? null : server.ip)}
+                    index={i}
+                  />
+                ))}
+              </div>
+            </div>
+          </GlassCard>
+        </motion.div>
+      )}
+
+      {/* ── Health Matrix ──────────────────────────────────────────────────────── */}
+      {servers.length > 1 && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
+        >
+          <GlassCard>
+            <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border/50">
+              <CircleDot size={16} className="text-accent" />
+              <h3 className="text-sm font-bold text-text uppercase tracking-wider">Health Matrix</h3>
+              <span className="text-xs text-textMuted">Spot inconsistencies across servers</span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-border/40">
+                    <th className="px-3 py-2 text-xs font-semibold text-textMuted uppercase tracking-wider sticky left-0 bg-card z-10 min-w-28">
+                      Metric
+                    </th>
+                    {servers.map(s => (
+                      <th key={s.ip} className="px-2 py-2 text-center">
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="text-xs font-bold text-text truncate max-w-20">
+                            {s.hostname || s.ip.split('.').pop()}
+                          </span>
+                          <Badge variant={roleVariant(s.role)} className="text-[9px] px-1 py-0">
+                            {s.role || '?'}
+                          </Badge>
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {voltageRows.map(row => (
+                    <tr key={row.key} className="border-b border-border/20 last:border-0">
+                      <td className="px-3 py-1.5 text-xs text-textSecondary font-medium sticky left-0 bg-card z-10">
+                        {row.label}
+                      </td>
+                      {servers.map(s => {
+                        const rawVal = s.chassis[row.key]
+                        if (row.type === 'temp') {
+                          const val = parseTemp(rawVal)
+                          return (
+                            <MatrixCell
+                              key={s.ip}
+                              color={tempColor(val)}
+                              value={val > 0 ? `${val}°` : '--'}
+                              tooltip={`${row.label}: ${rawVal || 'N/A'}`}
+                            />
+                          )
+                        }
+                        if (row.type === 'voltage') {
+                          const val = parseVoltage(rawVal)
+                          return (
+                            <MatrixCell
+                              key={s.ip}
+                              color={voltageColor(val, row.nominal!)}
+                              value={val > 0 ? `${val.toFixed(2)}V` : '--'}
+                              tooltip={`${row.label}: ${rawVal || 'N/A'} (nominal ${row.nominal}V)`}
+                            />
+                          )
+                        }
+                        // fan
+                        const val = parseRPM(rawVal)
+                        return (
+                          <MatrixCell
+                            key={s.ip}
+                            color={fanColor(val)}
+                            value={val > 0 ? `${val}` : '--'}
+                            tooltip={`${row.label}: ${rawVal || 'N/A'}`}
+                          />
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Legend */}
+            <div className="flex items-center gap-6 mt-4 pt-3 border-t border-border/30">
+              <span className="text-xs text-textMuted">Legend:</span>
+              {[
+                { color: '#22c55e', label: 'Normal' },
+                { color: '#f59e0b', label: 'Warning' },
+                { color: '#ef4444', label: 'Critical' },
+                { color: '#6b7280', label: 'N/A' },
+              ].map(item => (
+                <div key={item.label} className="flex items-center gap-1.5">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: item.color, boxShadow: `0 0 4px ${item.color}40` }}
+                  />
+                  <span className="text-xs text-textMuted">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </GlassCard>
+        </motion.div>
+      )}
+
+      {/* ── Empty state ────────────────────────────────────────────────────────── */}
+      {!scanning && servers.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+        >
+          <GlassCard>
+            <div className="flex flex-col items-center justify-center py-16 gap-4">
+              <div className="w-16 h-16 rounded-full bg-surface flex items-center justify-center">
+                <Server size={28} className="text-textMuted" />
+              </div>
+              <p className="text-textMuted text-sm">No servers discovered on 192.168.100.200-254</p>
+              <p className="text-textMuted/60 text-xs">
+                Ensure servers are powered on and connected to the MGMT subnet
+              </p>
+              <Button variant="primary" size="sm" onClick={startScan}>
+                <Activity size={14} />
+                Scan Again
+              </Button>
+            </div>
+          </GlassCard>
+        </motion.div>
+      )}
     </div>
   )
 }

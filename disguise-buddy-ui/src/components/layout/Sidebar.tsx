@@ -9,6 +9,7 @@ import {
   Rocket,
   Package,
   Terminal,
+  Radar,
   Sun,
   Moon,
   ChevronRight,
@@ -39,6 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'deploy',    label: 'Network Deploy',   icon: Rocket,          shortcut: 'Ctrl+6' },
   { id: 'software',  label: 'Software',         icon: Package,         shortcut: 'Ctrl+7' },
   { id: 'terminal',  label: 'Terminal',         icon: Terminal,        shortcut: 'Ctrl+8' },
+  { id: 'smc-discovery', label: 'SMC Discovery', icon: Radar, shortcut: 'Ctrl+9' },
 ]
 
 // ─── Constants ────────────────────────────────────────────────────────────────

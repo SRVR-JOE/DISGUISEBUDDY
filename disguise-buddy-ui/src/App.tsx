@@ -11,6 +11,7 @@ import { IdentityPage } from './pages/IdentityPage'
 import { DeployPage } from './pages/DeployPage'
 import { SoftwarePage } from './pages/SoftwarePage'
 import { TerminalPage } from './pages/TerminalPage'
+import { SMCDiscoveryPage } from './pages/SMCDiscoveryPage'
 
 export default function App(): React.ReactElement {
   const [activeView, setActiveView] = useState('dashboard')
@@ -44,6 +45,7 @@ export default function App(): React.ReactElement {
       case 'deploy':    return <DeployPage />
       case 'software':  return <SoftwarePage />
       case 'terminal':  return <TerminalPage />
+      case 'smc-discovery': return <SMCDiscoveryPage />
       default:          return <DashboardPage />
     }
   }
