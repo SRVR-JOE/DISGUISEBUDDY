@@ -15,6 +15,7 @@ import { TerminalPage } from './pages/TerminalPage'
 import { SpreadsheetPage } from './pages/SpreadsheetPage'
 import { TelemetryPage } from './pages/TelemetryPage'
 import { PowerVfcPage } from './pages/PowerVfcPage'
+import { SMCDiscoveryPage } from './pages/SMCDiscoveryPage'
 
 export default function App(): React.ReactElement {
   const [activeView, setActiveView] = useState('dashboard')
@@ -51,6 +52,7 @@ export default function App(): React.ReactElement {
       case 'terminal':  return <TerminalPage />
       case 'telemetry': return <TelemetryPage />
       case 'power':     return <PowerVfcPage />
+      case 'smc-discovery': return <SMCDiscoveryPage />
       default:          return <DashboardPage />
     }
   }

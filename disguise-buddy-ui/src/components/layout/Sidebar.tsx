@@ -12,6 +12,7 @@ import {
   Terminal,
   BarChart3,
   Zap,
+  Radar,
   Sun,
   Moon,
   ChevronRight,
@@ -46,6 +47,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'terminal',    label: 'Terminal',         icon: Terminal,        shortcut: 'Ctrl+9' },
   { id: 'telemetry',   label: 'Telemetry',        icon: BarChart3,       shortcut: 'Ctrl+0' },
   { id: 'power',       label: 'Power & VFC',      icon: Zap,             shortcut: '' },
+  { id: 'smc-discovery', label: 'SMC Discovery', icon: Radar,           shortcut: '' },
 ]
 
 // ─── Constants ────────────────────────────────────────────────────────────────

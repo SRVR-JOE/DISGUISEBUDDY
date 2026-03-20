@@ -103,6 +103,11 @@ function readSseStream(
     })
 }
 
+/** Open an EventSource to a given API path. */
+function openEventSource(path: string): EventSource {
+  return new EventSource(`${BASE_URL}${path}`)
+}
+
 // ─── API client ───────────────────────────────────────────────────────────────
 
 export const api = {
@@ -294,28 +299,6 @@ export const api = {
     return post<Result>(`/api/profiles/${encodeURIComponent(profileName)}/apply`)
   },
 
-  // SMC Discovery — scan disguise MGMT ports for servers
-  smcDiscover(
-    subnet: string, start: number, end: number, timeout?: number,
-    onProgress?: (d: any) => void, onError?: (d: any) => void, onDone?: (d: any) => void,
-  ) {
-    const params = new URLSearchParams({
-      subnet, start: String(start), end: String(end),
-      ...(timeout ? { timeout: String(timeout) } : {}),
-    })
-    const ctrl = new AbortController()
-    readSseStream(
-      fetch(`${BASE_URL}/api/smc/discover?${params.toString()}`, { signal: ctrl.signal }),
-      { onProgress, onError, onDone },
-    )
-    return { cancel: () => ctrl.abort() }
-  },
-
-  // SMC Probe — get full details of a single server by MGMT IP
-  smcProbe(ip: string): Promise<any> {
-    return get<any>(`/api/smc/probe?ip=${encodeURIComponent(ip)}`)
-  },
-
   // ─── Telemetry ──────────────────────────────────────────────────────────────
 
   async getTelemetryHistory(range: string): Promise<any[]> {
@@ -383,5 +366,69 @@ export const api = {
       onError?.({ message: 'SSE connection error' })
     }
     return { cancel: () => es.close() }
+  },
+
+  // ── SMC Discovery ──────────────────────────────────────────────────────────
+
+  // SSE — SMC subnet scan. Returns EventSource.
+  smcDiscover(subnet: string, start: number, end: number): EventSource {
+    const params = new URLSearchParams({
+      subnet,
+      start: String(start),
+      end: String(end),
+    })
+    return openEventSource(`/api/smc/discover?${params.toString()}`)
+  },
+
+  // Single SMC server probe
+  smcProbe(ip: string): Promise<any> {
+    return get(`/api/smc/probe?ip=${encodeURIComponent(ip)}`)
+  },
+
+  // Set LED strip color
+  smcSetLed(ip: string, ledMode: string, r: number, g: number, b: number, auth?: { user: string; pass: string }): Promise<Result> {
+    return post<Result>('/api/smc/led', { ip, ledMode, ledR: r, ledG: g, ledB: b, auth })
+  },
+
+  // Flash identify (whoami)
+  smcIdentify(ip: string): Promise<Result> {
+    return post<Result>('/api/smc/identify', { ip })
+  },
+
+  // Change hostname via SMC
+  smcSetHostname(ip: string, hostname: string, auth: { user: string; pass: string }): Promise<Result> {
+    return post<Result>('/api/smc/hostname', { ip, hostname, auth })
+  },
+
+  // Push adapter IPs via SMC
+  smcSetAdapters(ip: string, adapters: { mac: string; ipAddress: string; netmask: string }[], auth: { user: string; pass: string }): Promise<Result> {
+    return post<Result>('/api/smc/adapters', { ip, adapters, auth })
+  },
+
+  // Power on/off/cycle
+  smcPower(ip: string, action: 'on' | 'off' | 'cycle', auth: { user: string; pass: string }): Promise<Result> {
+    return post<Result>('/api/smc/power', { ip, action, auth })
+  },
+
+  // Send OLED notification
+  smcOled(ip: string, title: string, message: string, auth: { user: string; pass: string }): Promise<Result> {
+    return post<Result>('/api/smc/oled', { ip, title, message, auth })
+  },
+
+  // Run LED FX animation across multiple servers (SSE stream)
+  smcRunFx(ips: string[], fx: string, speed?: number, loops?: number, color?: { r: number; g: number; b: number }, auth?: { user: string; pass: string }): EventSource {
+    const params = new URLSearchParams({ ips: ips.join(','), fx })
+    if (speed) params.set('speed', String(speed))
+    if (loops) params.set('loops', String(loops))
+    if (color) {
+      params.set('r', String(color.r))
+      params.set('g', String(color.g))
+      params.set('b', String(color.b))
+    }
+    if (auth) {
+      params.set('auth_user', auth.user)
+      params.set('auth_pass', auth.pass)
+    }
+    return openEventSource(`/api/smc/fx?${params.toString()}`)
   },
 }
