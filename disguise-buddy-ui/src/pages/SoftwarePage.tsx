@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useAppContext } from '@/lib/AppContext'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Package,
@@ -457,6 +458,9 @@ function ServerInstallProgress({ server, state, selectedPackages }: ServerInstal
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function SoftwarePage() {
+  // ── Shared context ──────────────────────────────────────────────────────────
+  const { discoveredServers: servers } = useAppContext()
+
   // ── Packages state ──────────────────────────────────────────────────────────
   const [packages, setPackages] = useState<SoftwarePackage[]>([])
   const [packagesLoading, setPackagesLoading] = useState(true)
@@ -469,7 +473,6 @@ export function SoftwarePage() {
   const [addingSoftware, setAddingSoftware] = useState(false)
 
   // ── Servers state ────────────────────────────────────────────────────────────
-  const [servers] = useState<DiscoveredServer[]>([])
   const [serversLoading, setServersLoading] = useState(true)
   const [selectedServerIPs, setSelectedServerIPs] = useState<Set<string>>(new Set())
   const [refreshingServers, setRefreshingServers] = useState(false)
@@ -605,70 +608,71 @@ export function SoftwarePage() {
         [server.IPAddress]: { status: 'installing', packages: {} },
       }))
 
-      const es = api.installSoftware(server.IPAddress, packageIds)
-
-      es.addEventListener('progress', (e: MessageEvent) => {
-        const data = JSON.parse(e.data) as InstallProgress
-        setInstallStates((prev) => {
-          const current = prev[server.IPAddress] ?? { status: 'installing', packages: {} }
-          return {
-            ...prev,
-            [server.IPAddress]: {
-              ...current,
-              status: 'installing',
-              packages: {
-                ...current.packages,
-                [data.packageId]: {
-                  step: data.step,
-                  percent: data.percent,
-                  message: data.message,
+      api.installSoftware(
+        server.IPAddress,
+        packageIds,
+        undefined, // credUser
+        undefined, // credPass
+        // onProgress
+        (data: InstallProgress) => {
+          setInstallStates((prev) => {
+            const current = prev[server.IPAddress] ?? { status: 'installing', packages: {} }
+            return {
+              ...prev,
+              [server.IPAddress]: {
+                ...current,
+                status: 'installing',
+                packages: {
+                  ...current.packages,
+                  [data.packageId]: {
+                    step: data.step,
+                    percent: data.percent,
+                    message: data.message,
+                  },
                 },
               },
-            },
-          }
-        })
-      })
-
-      es.addEventListener('complete', (e: MessageEvent) => {
-        es.close()
-        const result = JSON.parse(e.data) as InstallResult
-        setInstallStates((prev) => {
-          const current = prev[server.IPAddress] ?? { status: 'done', packages: {} }
-          return {
+            }
+          })
+        },
+        // onError
+        () => {
+          setInstallStates((prev) => ({
             ...prev,
             [server.IPAddress]: {
-              ...current,
-              status: result.success ? 'done' : 'error',
-              summary: result,
+              ...(prev[server.IPAddress] ?? { packages: {} }),
+              status: 'error',
             },
+          }))
+          toast.error(`Connection error for ${server.Hostname || server.IPAddress}`)
+          completedRef.current++
+          if (completedRef.current === total) setInstalling(false)
+        },
+        // onDone
+        (result: InstallResult) => {
+          setInstallStates((prev) => {
+            const current = prev[server.IPAddress] ?? { status: 'done', packages: {} }
+            return {
+              ...prev,
+              [server.IPAddress]: {
+                ...current,
+                status: result.success ? 'done' : 'error',
+                summary: result,
+              },
+            }
+          })
+
+          if (result.success) {
+            toast.success(`Installed on ${server.Hostname || server.IPAddress}`)
+          } else {
+            toast.error(
+              `Install on ${server.Hostname || server.IPAddress}: ${result.failed.length} package${result.failed.length === 1 ? '' : 's'} failed`,
+            )
           }
-        })
 
-        if (result.success) {
-          toast.success(`Installed on ${server.Hostname || server.IPAddress}`)
-        } else {
-          toast.error(
-            `Install on ${server.Hostname || server.IPAddress}: ${result.failed.length} package${result.failed.length === 1 ? '' : 's'} failed`,
-          )
-        }
-
-        completedRef.current++
-        if (completedRef.current === total) setInstalling(false)
-      })
-
-      es.onerror = () => {
-        es.close()
-        setInstallStates((prev) => ({
-          ...prev,
-          [server.IPAddress]: {
-            ...(prev[server.IPAddress] ?? { packages: {} }),
-            status: 'error',
-          },
-        }))
-        toast.error(`Connection error for ${server.Hostname || server.IPAddress}`)
-        completedRef.current++
-        if (completedRef.current === total) setInstalling(false)
-      }
+          completedRef.current++
+          if (completedRef.current === total) setInstalling(false)
+        },
+      )
     }
   }, [selectedPackageIds, selectedServerIPs, servers])
 

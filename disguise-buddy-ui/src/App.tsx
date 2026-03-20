@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react'
 import { Toaster } from 'react-hot-toast'
+import { AppProvider } from './lib/AppContext'
 import { Sidebar } from './components/layout/Sidebar'
 import { PageTransition } from './components/layout/PageTransition'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
@@ -11,6 +12,8 @@ import { IdentityPage } from './pages/IdentityPage'
 import { DeployPage } from './pages/DeployPage'
 import { SoftwarePage } from './pages/SoftwarePage'
 import { TerminalPage } from './pages/TerminalPage'
+import { SpreadsheetPage } from './pages/SpreadsheetPage'
+import { TelemetryPage } from './pages/TelemetryPage'
 
 export default function App(): React.ReactElement {
   const [activeView, setActiveView] = useState('dashboard')
@@ -21,10 +24,12 @@ export default function App(): React.ReactElement {
 
   const handleRefresh = useCallback(() => {
     console.log('[App] F5 — refresh triggered for view:', activeView)
+    window.dispatchEvent(new Event('app-refresh'))
   }, [activeView])
 
   const handleDeploy = useCallback(() => {
     console.log('[App] Ctrl+Enter — deploy triggered')
+    window.dispatchEvent(new Event('app-deploy'))
   }, [])
 
   useKeyboardShortcuts({
@@ -43,31 +48,35 @@ export default function App(): React.ReactElement {
       case 'identity':  return <IdentityPage />
       case 'deploy':    return <DeployPage />
       case 'software':  return <SoftwarePage />
+      case 'spreadsheet': return <SpreadsheetPage />
       case 'terminal':  return <TerminalPage />
+      case 'telemetry': return <TelemetryPage />
       default:          return <DashboardPage />
     }
   }
 
   return (
-    <div className="flex h-screen bg-bg overflow-hidden">
-      <Sidebar activeView={activeView} onViewChange={setActiveView} />
+    <AppProvider>
+      <div className="flex h-screen bg-bg overflow-hidden">
+        <Sidebar activeView={activeView} onViewChange={setActiveView} />
 
-      <main className="flex-1 overflow-y-auto">
-        <PageTransition viewKey={activeView}>
-          {renderPage()}
-        </PageTransition>
-      </main>
+        <main className="flex-1 overflow-y-auto">
+          <PageTransition viewKey={activeView}>
+            {renderPage()}
+          </PageTransition>
+        </main>
 
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          style: {
-            background: '#1E1E2E',
-            color: '#E2E8F0',
-            border: '1px solid #2A2A3C',
-          },
-        }}
-      />
-    </div>
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            style: {
+              background: '#1E1E2E',
+              color: '#E2E8F0',
+              border: '1px solid #2A2A3C',
+            },
+          }}
+        />
+      </div>
+    </AppProvider>
   )
 }

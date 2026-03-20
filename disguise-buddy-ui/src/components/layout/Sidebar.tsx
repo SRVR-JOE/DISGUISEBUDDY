@@ -4,15 +4,18 @@ import {
   LayoutDashboard,
   Users,
   Network,
+  Table2,
   FolderOpen,
   Server,
   Rocket,
   Package,
   Terminal,
+  BarChart3,
   Sun,
   Moon,
   ChevronRight,
 } from 'lucide-react'
+import { useAppContext } from '@/lib/AppContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,12 +36,14 @@ interface SidebarProps {
 const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard',       icon: LayoutDashboard, shortcut: 'Ctrl+1' },
   { id: 'profiles',  label: 'Profiles',        icon: Users,           shortcut: 'Ctrl+2' },
-  { id: 'network',   label: 'Network',          icon: Network,         shortcut: 'Ctrl+3' },
-  { id: 'smb',       label: 'SMB Sharing',      icon: FolderOpen,      shortcut: 'Ctrl+4' },
-  { id: 'identity',  label: 'Server Identity',  icon: Server,          shortcut: 'Ctrl+5' },
-  { id: 'deploy',    label: 'Network Deploy',   icon: Rocket,          shortcut: 'Ctrl+6' },
-  { id: 'software',  label: 'Software',         icon: Package,         shortcut: 'Ctrl+7' },
-  { id: 'terminal',  label: 'Terminal',         icon: Terminal,        shortcut: 'Ctrl+8' },
+  { id: 'network',      label: 'Network',          icon: Network,         shortcut: 'Ctrl+3' },
+  { id: 'spreadsheet', label: 'Spreadsheet',      icon: Table2,          shortcut: 'Ctrl+4' },
+  { id: 'smb',         label: 'SMB Sharing',      icon: FolderOpen,      shortcut: 'Ctrl+5' },
+  { id: 'identity',    label: 'Server Identity',  icon: Server,          shortcut: 'Ctrl+6' },
+  { id: 'deploy',      label: 'Network Deploy',   icon: Rocket,          shortcut: 'Ctrl+7' },
+  { id: 'software',    label: 'Software',         icon: Package,         shortcut: 'Ctrl+8' },
+  { id: 'terminal',    label: 'Terminal',         icon: Terminal,        shortcut: 'Ctrl+9' },
+  { id: 'telemetry',   label: 'Telemetry',        icon: BarChart3,       shortcut: 'Ctrl+0' },
 ]
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -51,7 +56,7 @@ const HOVER_DELAY_MS  = 200
 
 export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   const [isExpanded, setIsExpanded] = useState(false)
-  const [isDark, setIsDark] = useState(true)
+  const { isDark, toggleTheme } = useAppContext()
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Hover-expand with delay to prevent flickering on mouse-through
@@ -74,9 +79,8 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   }, [])
 
   const handleThemeToggle = useCallback(() => {
-    setIsDark(prev => !prev)
-    console.log('[Sidebar] Theme toggle clicked — dark:', !isDark)
-  }, [isDark])
+    toggleTheme()
+  }, [toggleTheme])
 
   return (
     <motion.nav

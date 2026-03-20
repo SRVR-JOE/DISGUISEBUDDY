@@ -26,7 +26,11 @@ import {
   ensureWinRMReady,
   enableWinRMViaSMB,
   enableWinRMViaDCOM,
-} from './utils.js'
+} from './utils.ts'
+
+// -- Deploy mutex -------------------------------------------------------------
+
+const activeDeployments = new Set<string>()
 
 // -- Public types -------------------------------------------------------------
 
@@ -152,6 +156,25 @@ export function deployProfile(
 // -- Live implementation ------------------------------------------------------
 
 async function runLiveDeploy(
+  options: DeployOptions,
+  callbacks: DeployCallbacks,
+  isCancelled: () => boolean,
+): Promise<void> {
+  const { targetIP, profile, credential } = options
+
+  if (activeDeployments.has(targetIP)) {
+    throw new Error(`A deployment to ${targetIP} is already in progress.`)
+  }
+  activeDeployments.add(targetIP)
+
+  try {
+    await runLiveDeployInner(options, callbacks, isCancelled)
+  } finally {
+    activeDeployments.delete(targetIP)
+  }
+}
+
+async function runLiveDeployInner(
   options: DeployOptions,
   callbacks: DeployCallbacks,
   isCancelled: () => boolean,
@@ -319,7 +342,7 @@ async function runSmbDirect(opts: SmbDirectOptions): Promise<void> {
   const createResult = await runPowerShell(
     `schtasks.exe /create` +
     ` /s ${targetIP}` +
-    ` /u ${username}` +
+    ` /u "${escapePs(username)}"` +
     ` /p "${escapePs(password)}"` +
     ` /tn "${taskName}"` +
     ` /tr "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${scriptLocalPath}"` +
@@ -653,6 +676,17 @@ async function runWinrmDeploy(
     }
   }
 
+  // Schedule reboot if hostname was changed
+  if (profile.ServerName) {
+    const rebootResult = await runPowerShell(
+      `Invoke-Command -ComputerName ${targetIP}${credArg} -ScriptBlock { shutdown /r /t 30 /f } -ErrorAction SilentlyContinue`
+    )
+    if (rebootResult.exitCode === 0) {
+      callbacks.onStep({ step: 'verify', message: 'Server will reboot in 30 seconds', stepNumber: WINRM_STEPS.indexOf('verify') + 1, total })
+      console.log(`[deployer] Reboot scheduled on ${targetIP} in 30 seconds`)
+    }
+  }
+
   // Step 6: Verify
   step('verify', `Verifying ${targetIP} is still reachable...`)
   if (isCancelled()) return
@@ -703,13 +737,15 @@ function buildDeployScript(profile: Profile): string {
   lines.push(``)
   lines.push(`try {`)
 
+  lines.push(`  $needsReboot = $false`)
+  lines.push(``)
   // ── Rename hostname ──────────────────────────────────────────────────────
   const safeName = sanitiseName(profile.ServerName)
-  lines.push(``)
   lines.push(`  # Rename hostname`)
   lines.push(`  try {`)
   lines.push(`    Rename-Computer -NewName '${safeName}' -Force -ErrorAction Stop`)
   lines.push(`    [void]$result.messages.Add('Hostname set to ${safeName}')`)
+  lines.push(`    $needsReboot = $true`)
   lines.push(`  } catch {`)
   lines.push(`    [void]$result.messages.Add("Hostname rename failed: $_")`)
   lines.push(`  }`)
@@ -748,10 +784,73 @@ function buildDeployScript(profile: Profile): string {
     lines.push(`  }`)
   }
 
+  // ── Process CustomSettings ──────────────────────────────────────────────
+  const customSettings = profile.CustomSettings ?? {}
+  const customKeys = Object.keys(customSettings)
+  if (customKeys.length > 0) {
+    const regEntries: { key: string; value: unknown }[] = []
+    const envEntries: { key: string; value: unknown }[] = []
+    const jsonEntries: { key: string; value: unknown }[] = []
+
+    for (const key of customKeys) {
+      const value = customSettings[key]
+      if (key.startsWith('REG:')) {
+        regEntries.push({ key: key.substring(4), value })
+      } else if (key.startsWith('ENV:')) {
+        envEntries.push({ key: key.substring(4), value })
+      } else {
+        jsonEntries.push({ key, value })
+      }
+    }
+
+    lines.push(``)
+    lines.push(`  # Process CustomSettings`)
+    lines.push(`  try {`)
+
+    for (const entry of regEntries) {
+      // Expected format for key: "HKLM:\SOFTWARE\SomePath\ValueName"
+      const lastBackslash = entry.key.lastIndexOf('\\')
+      if (lastBackslash > 0) {
+        const regPath = entry.key.substring(0, lastBackslash).replace(/'/g, "''")
+        const regName = entry.key.substring(lastBackslash + 1).replace(/'/g, "''")
+        const regValue = String(entry.value).replace(/'/g, "''")
+        lines.push(`    if (-not (Test-Path '${regPath}')) { New-Item -Path '${regPath}' -Force | Out-Null }`)
+        lines.push(`    Set-ItemProperty -Path '${regPath}' -Name '${regName}' -Value '${regValue}' -Force`)
+      }
+    }
+
+    for (const entry of envEntries) {
+      const envName = String(entry.key).replace(/'/g, "''")
+      const envValue = String(entry.value).replace(/'/g, "''")
+      lines.push(`    [System.Environment]::SetEnvironmentVariable('${envName}', '${envValue}', 'Machine')`)
+    }
+
+    if (jsonEntries.length > 0) {
+      const settingsJson = JSON.stringify(
+        Object.fromEntries(jsonEntries.map((e) => [e.key, e.value])),
+      ).replace(/'/g, "''")
+      lines.push(`    $settingsPath = 'C:\\d3 Projects\\disguise-buddy-settings.json'`)
+      lines.push(`    $settingsDir = Split-Path $settingsPath -Parent`)
+      lines.push(`    if (-not (Test-Path $settingsDir)) { New-Item -ItemType Directory -Path $settingsDir -Force | Out-Null }`)
+      lines.push(`    '${settingsJson}' | Set-Content -Path $settingsPath -Encoding UTF8 -Force`)
+    }
+
+    lines.push(`    [void]$result.messages.Add('CustomSettings applied')`)
+    lines.push(`  } catch {`)
+    lines.push(`    [void]$result.messages.Add("CustomSettings failed: $_")`)
+    lines.push(`  }`)
+  }
+
   lines.push(``)
   lines.push(`} catch {`)
   lines.push(`  $result.success = $false`)
   lines.push(`  [void]$result.messages.Add("Unexpected error: $_")`)
+  lines.push(`}`)
+  lines.push(``)
+  lines.push(`# Schedule reboot if hostname was changed`)
+  lines.push(`if ($needsReboot) {`)
+  lines.push(`  [void]$result.messages.Add('Server will reboot in 30 seconds')`)
+  lines.push(`  shutdown /r /t 30 /f`)
   lines.push(`}`)
   lines.push(``)
   lines.push(`$result | ConvertTo-Json -Depth 4 | Set-Content -Path $resultPath -Encoding UTF8 -Force`)
@@ -783,12 +882,19 @@ function buildAdapterScriptLines(adapter: AdapterConfig): string[] {
     `$iface = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*${sanitiseName(adapter.AdapterName)}*" } | Select-Object -First 1`
   )
   lines.push(
-    `if (-not $iface) { Write-Warning "Adapter '${sanitiseName(adapter.AdapterName)}' not found"; return }`
+    `if (-not $iface) { $iface = Get-NetAdapter | Where-Object { $_.Name -like "*${sanitiseName(adapter.AdapterName)}*" } | Select-Object -First 1 }`
+  )
+  lines.push(
+    `if (-not $iface) { $iface = (Get-NetAdapter | Sort-Object InterfaceIndex)[${adapter.Index}] }`
+  )
+  lines.push(
+    `if (-not $iface) { Write-Warning "Adapter '${sanitiseName(adapter.AdapterName)}' not found"; continue }`
   )
   lines.push(`$idx = $iface.InterfaceIndex`)
 
   if (adapter.DHCP) {
     lines.push(`Set-NetIPInterface -InterfaceIndex $idx -Dhcp Enabled -ErrorAction SilentlyContinue`)
+    lines.push(`Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses -ErrorAction SilentlyContinue`)
     lines.push(`Remove-NetIPAddress -InterfaceIndex $idx -Confirm:$false -ErrorAction SilentlyContinue`)
     lines.push(`Remove-NetRoute -InterfaceIndex $idx -Confirm:$false -ErrorAction SilentlyContinue`)
   } else if (adapter.IPAddress) {
@@ -813,6 +919,15 @@ function buildAdapterScriptLines(adapter: AdapterConfig): string[] {
     }
   }
 
+  // Set VLAN ID if configured
+  if (adapter.VLANID != null) {
+    lines.push(`# Set VLAN ID`)
+    lines.push(`$vlanAdapter = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*${sanitiseName(adapter.AdapterName)}*" }`)
+    lines.push(`if ($vlanAdapter) {`)
+    lines.push(`    Set-NetAdapterAdvancedProperty -Name $vlanAdapter.Name -RegistryKeyword "VlanID" -RegistryValue ${adapter.VLANID}`)
+    lines.push(`}`)
+  }
+
   return lines
 }
 
@@ -825,9 +940,53 @@ function buildAdapterScript(adapter: AdapterConfig): string {
 
 function subnetToPrefixLength(mask: string): number {
   if (!mask) return 24
-  return mask
-    .split('.')
-    .reduce((acc, octet) => acc + Number(parseInt(octet, 10).toString(2).split('1').length - 1), 0)
+  return mask.split('.').reduce((acc, octet) => {
+    const n = parseInt(octet, 10)
+    return acc + (n >>> 0).toString(2).replace(/0/g, '').length
+  }, 0)
+}
+
+/**
+ * Parses SharePermissions string (e.g., "Everyone:Full,d3:Change,Guests:Read")
+ * and returns the appropriate PowerShell parameters for New-SmbShare.
+ * Falls back to `-FullAccess 'Administrators'` if empty or unparseable.
+ */
+function parseSharePermissions(permissions: string): string {
+  if (!permissions || !permissions.trim()) {
+    return `-FullAccess 'Administrators'`
+  }
+
+  const fullAccess: string[] = []
+  const changeAccess: string[] = []
+  const readAccess: string[] = []
+
+  const entries = permissions.split(',').map((e) => e.trim()).filter(Boolean)
+  for (const entry of entries) {
+    const parts = entry.split(':').map((p) => p.trim())
+    if (parts.length !== 2) continue
+    const [account, level] = parts
+    switch (level.toLowerCase()) {
+      case 'full':
+        fullAccess.push(`'${sanitiseName(account)}'`)
+        break
+      case 'change':
+        changeAccess.push(`'${sanitiseName(account)}'`)
+        break
+      case 'read':
+        readAccess.push(`'${sanitiseName(account)}'`)
+        break
+    }
+  }
+
+  if (fullAccess.length === 0 && changeAccess.length === 0 && readAccess.length === 0) {
+    return `-FullAccess 'Administrators'`
+  }
+
+  const parts: string[] = []
+  if (fullAccess.length > 0) parts.push(`-FullAccess ${fullAccess.join(',')}`)
+  if (changeAccess.length > 0) parts.push(`-ChangeAccess ${changeAccess.join(',')}`)
+  if (readAccess.length > 0) parts.push(`-ReadAccess ${readAccess.join(',')}`)
+  return parts.join(' ')
 }
 
 /**
@@ -840,9 +999,10 @@ function buildSmbScriptLines(smb: SMBSettings): string[] {
   if (smb.ShareD3Projects && smb.ShareName && smb.ProjectsPath) {
     const name = sanitiseName(smb.ShareName)
     const path_ = smb.ProjectsPath.replace(/'/g, "''")
+    const permArgs = parseSharePermissions(smb.SharePermissions)
     lines.push(`New-Item -ItemType Directory -Path '${path_}' -Force -ErrorAction SilentlyContinue | Out-Null`)
     lines.push(`Remove-SmbShare -Name '${name}' -Force -ErrorAction SilentlyContinue`)
-    lines.push(`New-SmbShare -Name '${name}' -Path '${path_}' -Description 'd3 Projects' -FullAccess 'Administrators' -ErrorAction Stop`)
+    lines.push(`New-SmbShare -Name '${name}' -Path '${path_}' -Description 'd3 Projects' ${permArgs} -ErrorAction Stop`)
   }
 
   for (const share of smb.AdditionalShares ?? []) {

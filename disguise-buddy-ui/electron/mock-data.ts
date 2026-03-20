@@ -140,26 +140,39 @@ function loadProfilesFromDisk(): Profile[] {
 
 // ─── In-memory profile store (seeded from disk) ───────────────────────────────
 
-// Sort: Director first, then Actors numerically, then Understudies numerically
-let profiles: Profile[] = loadProfilesFromDisk().sort((a, b) => {
-  const order = (name: string) => {
-    if (name.startsWith('Director')) return 0
-    if (name.startsWith('Actor')) return 1
-    if (name.startsWith('Understudy')) return 2
-    return 3
+// Use globalThis to ensure a single profile store even if the module is loaded
+// twice (tsx can resolve .js and .ts as separate module instances on Windows).
+const STORE_KEY = '__disguiseBuddyProfileStore__'
+
+function getOrInitProfiles(): Profile[] {
+  if (!(globalThis as any)[STORE_KEY]) {
+    const loaded = loadProfilesFromDisk().sort((a, b) => {
+      const order = (name: string) => {
+        if (name.startsWith('Director')) return 0
+        if (name.startsWith('Actor')) return 1
+        if (name.startsWith('Understudy')) return 2
+        return 3
+      }
+      const oa = order(a.Name), ob = order(b.Name)
+      if (oa !== ob) return oa - ob
+      return a.Name.localeCompare(b.Name, undefined, { numeric: true })
+    })
+    ;(globalThis as any)[STORE_KEY] = loaded
   }
-  const oa = order(a.Name), ob = order(b.Name)
-  if (oa !== ob) return oa - ob
-  return a.Name.localeCompare(b.Name, undefined, { numeric: true })
-})
+  return (globalThis as any)[STORE_KEY]
+}
+
+// Initialize eagerly so the log fires at startup
+getOrInitProfiles()
 
 // ─── Profile API ──────────────────────────────────────────────────────────────
 
 export function getProfiles(): Profile[] {
-  return profiles
+  return getOrInitProfiles()
 }
 
 export function saveProfile(profile: Profile): Result {
+  const profiles = getOrInitProfiles()
   const now = new Date().toISOString()
   const existing = profiles.findIndex((p) => p.Name === profile.Name)
   const updatedProfile = existing >= 0
@@ -187,6 +200,7 @@ export function saveProfile(profile: Profile): Result {
 }
 
 export function deleteProfile(name: string): Result {
+  const profiles = getOrInitProfiles()
   const idx = profiles.findIndex((p) => p.Name === name)
   if (idx === -1) {
     return { success: false, message: `Profile "${name}" not found` }
@@ -206,7 +220,8 @@ export function deleteProfile(name: string): Result {
   }
 
   // Disk succeeded — now remove from memory
-  profiles = profiles.filter((p) => p.Name !== name)
+  const updatedProfiles = profiles.filter((p) => p.Name !== name)
+  ;(globalThis as any)[STORE_KEY] = updatedProfiles
   return { success: true, message: `Profile "${name}" deleted` }
 }
 

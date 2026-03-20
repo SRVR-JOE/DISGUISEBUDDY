@@ -1,7 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { startApiServer } from './api-server.js'
+import { startApiServer } from './api-server.ts'
 
 // ESM-compatible __dirname
 const __filename = fileURLToPath(import.meta.url)

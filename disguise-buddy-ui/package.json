@@ -10,7 +10,7 @@
     "type-check": "tsc --noEmit",
     "api": "tsx electron/dev-server.ts",
     "start": "concurrently --kill-others-on-fail \"tsx electron/dev-server.ts\" \"vite --open\"",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "concurrently \"tsc -p electron/tsconfig.json -w\" \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "tsc -p electron/tsconfig.json && vite build && electron-builder"
   },
   "keywords": [],
@@ -18,13 +18,16 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "framer-motion": "^12.34.3",
     "lucide-react": "^0.575.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-hot-toast": "^2.6.0"
+    "react-hot-toast": "^2.6.0",
+    "recharts": "^3.8.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -49,21 +52,20 @@
     "directories": {
       "output": "dist-installer"
     },
-    "files": [
-      "dist-electron/**/*",
-      "dist-renderer/**/*",
-      "package.json"
-    ],
     "extraResources": [
       {
         "from": "../profiles",
         "to": "profiles",
-        "filter": ["**/*.json"]
+        "filter": [
+          "**/*.json"
+        ]
       },
       {
         "from": "../software",
         "to": "software",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {

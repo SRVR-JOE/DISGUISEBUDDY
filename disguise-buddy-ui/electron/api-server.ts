@@ -11,12 +11,14 @@ import {
   saveProfile,
   deleteProfile,
   getNetworkInterfaces,
-} from './mock-data.js'
-import { scanNetwork } from './services/scanner.js'
-import { deployProfile } from './services/deployer.js'
-import { isPowerShellAvailable, runPowerShell } from './services/utils.js'
-import { installSoftware, getPackages, addPackage, removePackage } from './services/installer.js'
-import { executeRemote, executeLocal, pingHost } from './services/terminal.js'
+} from './mock-data.ts'
+import { scanNetwork } from './services/scanner.ts'
+import { deployProfile } from './services/deployer.ts'
+import { isPowerShellAvailable, runPowerShell } from './services/utils.ts'
+import { installSoftware, getPackages, addPackage, removePackage } from './services/installer.ts'
+import { executeRemote, executeLocal, pingHost } from './services/terminal.ts'
+import { querySmc } from './services/smc-client.ts'
+import { telemetryService, type TelemetrySnapshot } from './services/telemetry.ts'
 
 // ESM-compatible require — used to conditionally load 'electron' without a
 // static top-level import so that this module also works in the dev-server
@@ -98,14 +100,113 @@ app.post('/api/profiles', (req: Request, res: Response) => {
   res.status(result.success ? 200 : 400).json(result)
 })
 
-app.post('/api/profiles/:name/apply', (req: Request, res: Response) => {
+app.post('/api/profiles/:name/apply', async (req: Request, res: Response) => {
   const name = decodeURIComponent(param(req.params.name))
   const profile = getProfiles().find(p => p.Name === name)
   if (!profile) {
     res.status(404).json({ success: false, message: `Profile "${name}" not found` })
     return
   }
-  res.json({ success: true, message: `Profile "${name}" found`, profile })
+
+  try {
+    // Build PowerShell script to apply the profile locally
+    const psLines: string[] = []
+    const serverName = profile.ServerName.replace(/'/g, "''")
+
+    // 1. Rename computer if ServerName differs from current
+    psLines.push(`
+$currentName = $env:COMPUTERNAME
+if ("${serverName}" -ne $currentName) {
+  Rename-Computer -NewName "${serverName}" -Force -ErrorAction Stop
+  Write-Output "Renamed computer from $currentName to ${serverName} (reboot required)"
+} else {
+  Write-Output "Hostname already set to ${serverName}"
+}
+`)
+
+    // 2. Configure each enabled adapter (static IP or DHCP)
+    for (const adapter of profile.NetworkAdapters) {
+      if (!adapter.Enabled) continue
+      const adapterName = adapter.AdapterName.replace(/'/g, "''")
+      if (adapter.DHCP) {
+        psLines.push(`
+# Configure ${adapterName} for DHCP
+Set-NetIPInterface -InterfaceAlias '${adapterName}' -Dhcp Enabled -ErrorAction SilentlyContinue
+Set-DnsClientServerAddress -InterfaceAlias '${adapterName}' -ResetServerAddresses -ErrorAction SilentlyContinue
+Write-Output "Configured ${adapterName} for DHCP"
+`)
+      } else {
+        const ip = adapter.IPAddress.replace(/'/g, "''")
+        const mask = adapter.SubnetMask.replace(/'/g, "''")
+        const gw = adapter.Gateway.replace(/'/g, "''")
+        const dns1 = adapter.DNS1.replace(/'/g, "''")
+        const dns2 = adapter.DNS2.replace(/'/g, "''")
+        // Convert subnet mask to prefix length
+        psLines.push(`
+# Configure ${adapterName} with static IP
+$iface = Get-NetAdapter -Name '${adapterName}' -ErrorAction Stop
+Remove-NetIPAddress -InterfaceIndex $iface.InterfaceIndex -Confirm:$false -ErrorAction SilentlyContinue
+Remove-NetRoute -InterfaceIndex $iface.InterfaceIndex -Confirm:$false -ErrorAction SilentlyContinue
+$maskParts = '${mask}'.Split('.')
+$prefix = ($maskParts | ForEach-Object { [Convert]::ToString([int]$_, 2) }) -join '' -replace '0','' | ForEach-Object { $_.Length }
+New-NetIPAddress -InterfaceIndex $iface.InterfaceIndex -IPAddress '${ip}' -PrefixLength $prefix ${gw ? `-DefaultGateway '${gw}'` : ''} -ErrorAction Stop
+$dnsServers = @(${dns1 ? `'${dns1}'` : ''}${dns2 ? `, '${dns2}'` : ''}) | Where-Object { $_ }
+if ($dnsServers.Count -gt 0) { Set-DnsClientServerAddress -InterfaceIndex $iface.InterfaceIndex -ServerAddresses $dnsServers }
+Write-Output "Configured ${adapterName} with IP ${ip}"
+`)
+      }
+    }
+
+    // 3. Create/update SMB shares
+    if (profile.SMBSettings.ShareD3Projects) {
+      const shareName = profile.SMBSettings.ShareName.replace(/'/g, "''")
+      const sharePath = profile.SMBSettings.ProjectsPath.replace(/'/g, "''")
+      psLines.push(`
+# Create/update d3 Projects SMB share
+if (!(Test-Path '${sharePath}')) { New-Item -Path '${sharePath}' -ItemType Directory -Force | Out-Null }
+$existing = Get-SmbShare -Name '${shareName}' -ErrorAction SilentlyContinue
+if ($existing) {
+  Set-SmbShare -Name '${shareName}' -Path '${sharePath}' -Force -ErrorAction Stop
+  Write-Output "Updated SMB share ${shareName}"
+} else {
+  New-SmbShare -Name '${shareName}' -Path '${sharePath}' -FullAccess Everyone -ErrorAction Stop
+  Write-Output "Created SMB share ${shareName}"
+}
+`)
+    }
+
+    if (profile.SMBSettings.AdditionalShares) {
+      for (const share of profile.SMBSettings.AdditionalShares) {
+        const sName = share.Name.replace(/'/g, "''")
+        const sPath = share.Path.replace(/'/g, "''")
+        const sDesc = (share.Description || '').replace(/'/g, "''")
+        psLines.push(`
+# Additional share: ${sName}
+if (!(Test-Path '${sPath}')) { New-Item -Path '${sPath}' -ItemType Directory -Force | Out-Null }
+$existing = Get-SmbShare -Name '${sName}' -ErrorAction SilentlyContinue
+if ($existing) {
+  Set-SmbShare -Name '${sName}' -Description '${sDesc}' -Force -ErrorAction Stop
+  Write-Output "Updated SMB share ${sName}"
+} else {
+  New-SmbShare -Name '${sName}' -Path '${sPath}' -Description '${sDesc}' -FullAccess Everyone -ErrorAction Stop
+  Write-Output "Created SMB share ${sName}"
+}
+`)
+      }
+    }
+
+    const fullScript = psLines.join('\n')
+    const result = await runPowerShell(fullScript)
+    res.json({
+      success: result.exitCode === 0,
+      message: result.exitCode === 0 ? `Profile "${name}" applied locally` : `Profile apply failed: ${result.stderr || result.stdout}`,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+    })
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message })
+  }
 })
 
 app.delete('/api/profiles/:name', (req: Request, res: Response) => {
@@ -179,13 +280,20 @@ app.get('/api/scan', (req: Request, res: Response) => {
 // ─── SSE: Profile deployment ──────────────────────────────────────────────────
 // Query params: server, profile
 
-app.get('/api/deploy', async (req: Request, res: Response) => {
+app.post('/api/deploy', async (req: Request, res: Response) => {
   sseHeaders(res)
 
-  const server = (req.query.server as string) || ''
-  const profileName = (req.query.profile as string) || ''
-  const credUser = (req.query.credential_user as string) || ''
-  const credPass = (req.query.credential_pass as string) || ''
+  const server = (req.body.server as string) || ''
+  const profileName = (req.body.profile as string) || ''
+  const credUser = (req.body.credential_user as string) || ''
+  const credPass = (req.body.credential_pass as string) || ''
+
+  // Validate server is a valid IPv4 address
+  if (!server || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(server)) {
+    sendSse(res, 'error', { message: 'Invalid server: must be a valid IPv4 address' })
+    res.end()
+    return
+  }
   const credential = credUser && credPass ? { username: credUser, password: credPass } : undefined
 
   console.log(`[deploy] Starting deployment: server=${server}, profile=${profileName}, hasCredential=${!!credential}`)
@@ -252,11 +360,15 @@ app.delete('/api/software/:id', (req: Request, res: Response) => {
 // ─── SSE: Software installation ───────────────────────────────────────────────
 // Query params: server, packages (comma-separated package IDs)
 
-app.get('/api/install', (req: Request, res: Response) => {
+app.post('/api/install', (req: Request, res: Response) => {
   sseHeaders(res)
 
-  const server = (req.query.server as string) || ''
-  const packageIds = ((req.query.packages as string) || '').split(',').filter(Boolean)
+  const servers = (req.body.servers as string) || (req.body.server as string) || ''
+  const packageIds = Array.isArray(req.body.packages) ? req.body.packages as string[] : ((req.body.packages as string) || '').split(',').filter(Boolean)
+  const credUser = (req.body.credential_user as string) || ''
+  const credPass = (req.body.credential_pass as string) || ''
+  const credential = credUser && credPass ? { username: credUser, password: credPass } : undefined
+  const server = servers
   const allPkgs = getPackages(SOFTWARE_DIR)
   const packages = allPkgs.filter(p => packageIds.includes(p.id))
 
@@ -288,22 +400,71 @@ app.get('/api/install', (req: Request, res: Response) => {
 // Query params: command (required), server (optional), credential_user (optional), credential_pass (optional)
 // If server is provided the command runs remotely via WinRM; otherwise locally.
 
-app.get('/api/terminal/execute', (req: Request, res: Response) => {
+app.post('/api/terminal/execute', (req: Request, res: Response) => {
   sseHeaders(res)
 
-  const command = (req.query.command as string) || ''
-  const server = (req.query.server as string) || ''
-  const credUser = (req.query.credential_user as string) || ''
-  const credPass = (req.query.credential_pass as string) || ''
+  const command = (req.body.command as string) || ''
+  const target = (req.body.target as string) || (req.body.server as string) || ''
+  const credUser = (req.body.credential_user as string) || ''
+  const credPass = (req.body.credential_pass as string) || ''
 
   if (!command.trim()) {
-    sendSse(res, 'error', { message: 'command query param is required' })
+    sendSse(res, 'error', { message: 'command is required' })
+    res.end()
+    return
+  }
+
+  // Input sanitization: block dangerous commands
+  const dangerousPatterns = [
+    /Remove-Item\s+-Recurse\s+C:\\/i,
+    /Format-/i,
+    /del\s+\//i,
+    /rm\s+-rf/i,
+    /;\s*Remove-Item\s+-Recurse/i,
+    /;\s*Format-/i,
+    /;\s*del\s+\//i,
+    /;\s*rm\s+-rf/i,
+  ]
+
+  const blocklist = [
+    'format-volume',
+    'clear-disk',
+    'initialize-disk',
+    'remove-partition',
+    'clear-recyclebin',
+    'stop-computer',
+    'restart-computer',
+    'reset-computermachinepassword',
+  ]
+
+  const cmdLower = command.toLowerCase().trim()
+
+  for (const pattern of dangerousPatterns) {
+    if (pattern.test(command)) {
+      sendSse(res, 'error', { message: 'Command rejected: contains a dangerous pattern' })
+      res.end()
+      return
+    }
+  }
+
+  for (const blocked of blocklist) {
+    if (cmdLower.includes(blocked)) {
+      sendSse(res, 'error', { message: `Command rejected: '${blocked}' is blocked` })
+      res.end()
+      return
+    }
+  }
+
+  // Validate target is a valid IPv4 address if provided
+  if (target && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(target)) {
+    sendSse(res, 'error', { message: 'Invalid target: must be a valid IPv4 address' })
     res.end()
     return
   }
 
   const credential =
     credUser && credPass ? { username: credUser, password: credPass } : undefined
+  const server = target
 
   const callbacks = {
     onOutput: (line: string) => sendSse(res, 'output', { line }),
@@ -626,6 +787,249 @@ Write-Output "WSMAN_OK"
     recommended,
   })
 })
+
+// ─── Identity ──────────────────────────────────────────────────────────────────
+
+app.get('/api/identity', async (req: Request, res: Response) => {
+  try {
+    const result = await runPowerShell(`
+      [PSCustomObject]@{
+        Hostname = $env:COMPUTERNAME
+        Domain = (Get-WmiObject Win32_ComputerSystem).Domain
+        DomainType = if ((Get-WmiObject Win32_ComputerSystem).PartOfDomain) { 'Domain' } else { 'Workgroup' }
+        OSVersion = [System.Environment]::OSVersion.VersionString
+        Uptime = ((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).ToString('d\\.hh\\:mm\\:ss')
+        SerialNumber = (Get-WmiObject Win32_BIOS).SerialNumber
+        Model = (Get-WmiObject Win32_ComputerSystem).Model
+      } | ConvertTo-Json
+    `)
+    res.json(JSON.parse(result.stdout || '{}'))
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// ─── SMB Shares ────────────────────────────────────────────────────────────────
+
+app.get('/api/smb', async (req: Request, res: Response) => {
+  try {
+    const result = await runPowerShell(`Get-SmbShare | Select-Object Name, Path, Description, ShareState | ConvertTo-Json -AsArray`)
+    res.json(JSON.parse(result.stdout || '[]'))
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// ─── Network Adapters (detailed) ───────────────────────────────────────────────
+
+app.get('/api/network/adapters', async (req: Request, res: Response) => {
+  try {
+    const result = await runPowerShell(`
+      Get-NetAdapter | ForEach-Object {
+        $ip = Get-NetIPAddress -InterfaceIndex $_.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1
+        $dns = Get-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
+        $dhcp = (Get-NetIPInterface -InterfaceIndex $_.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).Dhcp
+        [PSCustomObject]@{
+          Name = $_.Name
+          InterfaceDescription = $_.InterfaceDescription
+          InterfaceIndex = $_.InterfaceIndex
+          Status = $_.Status
+          MacAddress = $_.MacAddress
+          LinkSpeed = $_.LinkSpeed
+          IPAddress = $ip.IPAddress
+          SubnetPrefix = $ip.PrefixLength
+          Gateway = (Get-NetRoute -InterfaceIndex $_.InterfaceIndex -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue).NextHop
+          DNS = $dns.ServerAddresses -join ','
+          DHCP = ($dhcp -eq 'Enabled')
+        }
+      } | ConvertTo-Json -AsArray
+    `)
+    res.json(JSON.parse(result.stdout || '[]'))
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// ─── SMC Discovery (disguise Remote Manager on MGMT port) ─────────────────────
+
+app.get('/api/smc/discover', async (req: Request, res: Response) => {
+  const { subnet, start, end, timeout } = req.query
+  const subnetStr = String(subnet || '192.168.100')
+  const startNum = Number(start) || 200
+  const endNum = Number(end) || 254
+  const timeoutMs = Number(timeout) || 4000
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  })
+
+  const servers: any[] = []
+  const total = endNum - startNum + 1
+
+  for (let i = startNum; i <= endNum; i++) {
+    const ip = `${subnetStr}.${i}`
+    const current = i - startNum + 1
+
+    res.write(`event: progress\ndata: ${JSON.stringify({ current, total, percent: Math.round((current / total) * 100), ip })}\n\n`)
+
+    try {
+      const [machine, session, adapters, power] = await Promise.all([
+        querySmc(ip, 'localmachine', timeoutMs).catch(() => null),
+        querySmc(ip, 'session', timeoutMs).catch(() => null),
+        querySmc(ip, 'networkadapters', timeoutMs).catch(() => null),
+        querySmc(ip, 'chassis/power/status', timeoutMs).catch(() => null),
+      ])
+
+      if (machine && machine.hostname) {
+        const server = {
+          mgmtIp: ip,
+          hostname: machine.hostname,
+          serial: machine.serial || '',
+          type: machine.type || '',
+          role: session?.role || '',
+          powerStatus: power?.['System Power'] || '',
+          adapters: (adapters || []).filter((a: any) =>
+            a.name !== 'Loopback Pseudo-Interface 1' && a.name !== 'disguiseMGMT'
+          ),
+        }
+        servers.push(server)
+        res.write(`event: discovered\ndata: ${JSON.stringify(server)}\n\n`)
+      }
+    } catch {
+      // Host not responding — skip
+    }
+  }
+
+  res.write(`event: complete\ndata: ${JSON.stringify({ message: 'SMC scan complete', found: servers.length, servers })}\n\n`)
+  res.end()
+})
+
+/** Probe a single server's SMC API by MGMT IP. */
+app.get('/api/smc/probe', async (req: Request, res: Response) => {
+  const ip = String(req.query.ip || '')
+  if (!ip) return res.status(400).json({ error: 'ip parameter required' })
+
+  try {
+    const [machine, session, adapters, power, chassis] = await Promise.all([
+      querySmc(ip, 'localmachine').catch(() => null),
+      querySmc(ip, 'session').catch(() => null),
+      querySmc(ip, 'networkadapters').catch(() => null),
+      querySmc(ip, 'chassis/power/status').catch(() => null),
+      querySmc(ip, 'chassis/stats').catch(() => null),
+    ])
+
+    if (!machine || !machine.hostname) {
+      return res.status(404).json({ error: 'No SMC found at this IP' })
+    }
+
+    res.json({
+      mgmtIp: ip,
+      hostname: machine.hostname,
+      serial: machine.serial || '',
+      type: machine.type || '',
+      role: session?.role || '',
+      powerStatus: power?.['System Power'] || '',
+      powerFault: power?.['Main Power Fault'] || '',
+      chassisStats: chassis || null,
+      adapters: (adapters || []).filter((a: any) =>
+        a.name !== 'Loopback Pseudo-Interface 1' && a.name !== 'disguiseMGMT'
+      ),
+    })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ─── Telemetry ────────────────────────────────────────────────────────────────
+
+const RANGE_MAP: Record<string, number> = {
+  '5m':  5 * 60 * 1000,
+  '15m': 15 * 60 * 1000,
+  '1h':  60 * 60 * 1000,
+  '6h':  6 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+}
+
+app.get('/api/telemetry/history', (req: Request, res: Response) => {
+  const rangeKey = (req.query.range as string) || '1h'
+  const rangeMs = RANGE_MAP[rangeKey]
+  if (!rangeMs) {
+    res.status(400).json({ success: false, message: `Invalid range. Use one of: ${Object.keys(RANGE_MAP).join(', ')}` })
+    return
+  }
+  res.json(telemetryService.getHistory(rangeMs))
+})
+
+app.get('/api/telemetry/latest', (_req: Request, res: Response) => {
+  const snapshot = telemetryService.getLatest()
+  if (!snapshot) {
+    res.status(404).json({ success: false, message: 'No telemetry data yet' })
+    return
+  }
+  res.json(snapshot)
+})
+
+app.post('/api/telemetry/latest', async (_req: Request, res: Response) => {
+  try {
+    const snapshot = await telemetryService.takeSnapshot()
+    res.json(snapshot)
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+app.post('/api/telemetry/servers', (req: Request, res: Response) => {
+  const { ips } = req.body as { ips?: string[] }
+  if (!Array.isArray(ips) || ips.length === 0) {
+    res.status(400).json({ success: false, message: 'ips must be a non-empty array of IP strings' })
+    return
+  }
+  telemetryService.setServers(ips)
+  res.json({ success: true, servers: telemetryService.servers })
+})
+
+app.post('/api/telemetry/config', (req: Request, res: Response) => {
+  const { pollIntervalMs, retentionMs } = req.body as { pollIntervalMs?: number; retentionMs?: number }
+  if (pollIntervalMs !== undefined) {
+    if (typeof pollIntervalMs !== 'number' || pollIntervalMs < 5000) {
+      res.status(400).json({ success: false, message: 'pollIntervalMs must be a number >= 5000' })
+      return
+    }
+    telemetryService.pollIntervalMs = pollIntervalMs
+  }
+  if (retentionMs !== undefined) {
+    if (typeof retentionMs !== 'number' || retentionMs < 60000) {
+      res.status(400).json({ success: false, message: 'retentionMs must be a number >= 60000' })
+      return
+    }
+    telemetryService.retentionMs = retentionMs
+  }
+  // Restart polling with new interval if running
+  telemetryService.stop()
+  telemetryService.start()
+  res.json({
+    success: true,
+    pollIntervalMs: telemetryService.pollIntervalMs,
+    retentionMs: telemetryService.retentionMs,
+  })
+})
+
+app.get('/api/telemetry/stream', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+  res.flushHeaders()
+
+  const callback = (snapshot: TelemetrySnapshot) => {
+    res.write(`data: ${JSON.stringify(snapshot)}\n\n`)
+  }
+
+  telemetryService.registerCallback(callback)
+
+  req.on('close', () => {
+    telemetryService.unregisterCallback(callback)
+  })
+})
+
+// Start telemetry polling
+telemetryService.start()
 
 // ─── 404 fallback ─────────────────────────────────────────────────────────────
 

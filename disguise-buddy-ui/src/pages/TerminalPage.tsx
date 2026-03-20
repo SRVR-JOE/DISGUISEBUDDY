@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useAppContext } from '@/lib/AppContext'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Terminal,
@@ -9,7 +10,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
-import type { DiscoveredServer } from '@/lib/types'
+// DiscoveredServer type is used via useAppContext()
 import { GlassCard, SectionHeader, Badge, Button } from '@/components/ui'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -84,8 +85,10 @@ const QUICK_ACTIONS: { label: string; command: string; isPing?: boolean }[] = [
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function TerminalPage() {
+  // ── Shared context ─────────────────────────────────────────────────────────
+  const { discoveredServers: servers } = useAppContext()
+
   // ── Server list ─────────────────────────────────────────────────────────────
-  const [servers] = useState<DiscoveredServer[]>([])
   const [serversLoading, setServersLoading] = useState(true)
   const [refreshingServers, setRefreshingServers] = useState(false)
 
@@ -109,7 +112,7 @@ export function TerminalPage() {
   const pendingInputRef = useRef('')   // saves whatever the user was typing before cycling history
 
   // ── Active SSE ref ───────────────────────────────────────────────────────────
-  const esRef = useRef<EventSource | null>(null)
+  const esRef = useRef<{ cancel: () => void } | null>(null)
 
   // ── No auto-discovery — user must scan from Dashboard first ──────────────────
   useEffect(() => {
@@ -131,7 +134,7 @@ export function TerminalPage() {
   // ── Cleanup SSE on unmount ───────────────────────────────────────────────────
   useEffect(() => {
     return () => {
-      esRef.current?.close()
+      esRef.current?.cancel()
     }
   }, [])
 
@@ -160,7 +163,7 @@ export function TerminalPage() {
 
   // ── Abort running command ────────────────────────────────────────────────────
   const abortCommand = useCallback(() => {
-    esRef.current?.close()
+    esRef.current?.cancel()
     esRef.current = null
     appendLine('meta', '[Aborted]')
     setRunning(false)
@@ -192,36 +195,20 @@ export function TerminalPage() {
       setRunning(true)
       setInput('')
 
-      let es: EventSource
-
-      if (isPing) {
-        const pingTarget = selectedIP || '127.0.0.1'
-        es = api.pingHost(pingTarget, 4)
-      } else {
-        es = api.executeCommand(cmd, selectedIP || undefined)
+      const onOutput = (data: { line: string }) => {
+        appendLine('stdout', data.line)
       }
 
-      esRef.current = es
+      const onError = () => {
+        esRef.current = null
+        appendLine('stderr', 'Connection error — command may not have completed')
+        setRunning(false)
+        inputRef.current?.focus()
+      }
 
-      es.addEventListener('output', (e: MessageEvent) => {
-        const data = JSON.parse(e.data) as { line: string }
-        appendLine('stdout', data.line)
-      })
-
-      es.addEventListener('error', (e: MessageEvent) => {
-        try {
-          const data = JSON.parse(e.data) as { line: string }
-          appendLine('stderr', data.line)
-        } catch {
-          // onerror fires for transport errors too — handled below
-        }
-      })
-
-      es.addEventListener('complete', (e: MessageEvent) => {
-        es.close()
+      const onDone = (data: any) => {
         esRef.current = null
         try {
-          const data = JSON.parse(e.data) as { exitCode: number; durationMs: number }
           const exitText = data.exitCode === 0
             ? `Completed in ${data.durationMs}ms (exit 0)`
             : `Exited with code ${data.exitCode} in ${data.durationMs}ms`
@@ -231,14 +218,13 @@ export function TerminalPage() {
         }
         setRunning(false)
         inputRef.current?.focus()
-      })
+      }
 
-      es.onerror = () => {
-        es.close()
-        esRef.current = null
-        appendLine('stderr', 'Connection error — command may not have completed')
-        setRunning(false)
-        inputRef.current?.focus()
+      if (isPing) {
+        const pingTarget = selectedIP || '127.0.0.1'
+        esRef.current = api.pingHost(pingTarget, 4, onOutput, onError, onDone)
+      } else {
+        esRef.current = api.executeCommand(cmd, selectedIP || undefined, undefined, undefined, onOutput, onError, onDone)
       }
     },
     [servers, selectedIP, appendLine],

@@ -1,4 +1,4 @@
-import { startApiServer } from './api-server.js'
+import { startApiServer } from './api-server.ts'
 
 startApiServer()
   .then(() => {

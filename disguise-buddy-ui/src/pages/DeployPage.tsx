@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useAppContext } from '@/lib/AppContext'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Radio, Send, Wifi } from 'lucide-react'
+import { Radio, Send, Wifi, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
 import type { DiscoveredServer, Profile } from '@/lib/types'
@@ -125,6 +126,21 @@ function DeployProgressRow({ ip, hostname, state }: DeployProgressRowProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function DeployPage() {
+  // ── Shared context ─────────────────────────────────────────────────────────
+  const { credUser, setCredUser, credPass, setCredPass, addDiscoveredServers } = useAppContext()
+
+  // ── SSE ref for cleanup ────────────────────────────────────────────────────
+  const scanHandleRef = useRef<{ cancel: () => void } | null>(null)
+  const deployHandleRefs = useRef<{ cancel: () => void }[]>([])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      scanHandleRef.current?.cancel()
+      deployHandleRefs.current.forEach(h => h.cancel())
+    }
+  }, [])
+
   // ── Scan state ──────────────────────────────────────────────────────────────
   const [subnet, setSubnet] = useState('192.168.10')
   const [rangeStart, setRangeStart] = useState('1')
@@ -182,59 +198,44 @@ export function DeployPage() {
     setScanProgress(0)
     setScanStatus(`Scanning ${subnet}.${start}–${end}…`)
 
-    const es = api.scanNetwork(subnet, start, end)
-
-    es.addEventListener('progress', (e: MessageEvent) => {
-      try {
-        const data = JSON.parse(e.data) as { percent: number; current?: number }
-        setScanProgress(data.percent)
+    const handle = api.scanNetwork(
+      subnet,
+      start,
+      end,
+      parseInt(timeout, 10),
+      // onProgress
+      (data: any) => {
+        if (data.percent !== undefined) {
+          setScanProgress(data.percent)
+        }
         if (data.current !== undefined) {
           setScanStatus(`Scanning ${subnet}.${data.current}…`)
         }
-      } catch {
-        console.warn('[DeployPage] Failed to parse scan progress event:', e.data)
-      }
-    })
-
-    es.addEventListener('discovered', (e: MessageEvent) => {
-      try {
-        const server = JSON.parse(e.data) as DiscoveredServer
-        setServers((prev) => [...prev, server])
-      } catch {
-        console.warn('[DeployPage] Failed to parse discovered event:', e.data)
-      }
-    })
-
-    es.addEventListener('complete', () => {
-      setScanning(false)
-      setScanProgress(100)
-      setScanStatus('')
-      es.close()
-      const count = serversRef.current.length
-      toast.success(`Scan complete: ${count} server${count === 1 ? '' : 's'} found`)
-    })
-
-    // Named SSE 'error' event — application-level error sent by the server
-    es.addEventListener('error', (e: MessageEvent) => {
-      setScanning(false)
-      setScanStatus('')
-      es.close()
-      try {
-        const data = JSON.parse(e.data) as { message?: string }
-        toast.error(data.message ?? 'Scan failed')
-      } catch {
-        toast.error('Scan failed')
-      }
-    })
-
-    // Network-level onerror — connection dropped / server unreachable
-    es.onerror = () => {
-      setScanning(false)
-      setScanStatus('')
-      es.close()
-      toast.error('Scan connection lost')
-    }
-  }, [subnet, rangeStart, rangeEnd])
+        // Handle discovered servers arriving as progress events
+        if (data.IPAddress) {
+          setServers((prev) => [...prev, data as DiscoveredServer])
+        }
+      },
+      // onError
+      (data: any) => {
+        setScanning(false)
+        setScanStatus('')
+        scanHandleRef.current = null
+        toast.error(data?.message ?? 'Scan failed')
+      },
+      // onDone
+      () => {
+        setScanning(false)
+        setScanProgress(100)
+        setScanStatus('')
+        scanHandleRef.current = null
+        const count = serversRef.current.length
+        addDiscoveredServers(serversRef.current)
+        toast.success(`Scan complete: ${count} server${count === 1 ? '' : 's'} found`)
+      },
+    )
+    scanHandleRef.current = handle
+  }, [subnet, rangeStart, rangeEnd, timeout, addDiscoveredServers])
 
   // ── Server tile selection ───────────────────────────────────────────────────
   const toggleServer = useCallback((ip: string) => {
@@ -273,11 +274,13 @@ export function DeployPage() {
         [server.IPAddress]: { status: 'deploying', progress: 0, message: 'Starting…' },
       }))
 
-      const es = api.deployProfile(server.IPAddress, selectedProfile)
-
-      es.addEventListener('progress', (e: MessageEvent) => {
-        try {
-          const data = JSON.parse(e.data) as { step?: string; message?: string; stepNumber?: number; total?: number }
+      const handle = api.deployProfile(
+        server.IPAddress,
+        selectedProfile,
+        credUser,
+        credPass,
+        // onProgress
+        (data: any) => {
           const percent = data.total ? Math.round(((data.stepNumber ?? 0) / data.total) * 100) : 0
           setDeployStates((prev) => ({
             ...prev,
@@ -287,81 +290,46 @@ export function DeployPage() {
               message: data.message ?? '',
             },
           }))
-        } catch {
-          console.warn(`[DeployPage] Failed to parse progress event for ${server.IPAddress}:`, e.data)
-        }
-      })
-
-      es.addEventListener('complete', (e: MessageEvent) => {
-        es.close()
-        let success = true
-        let msg = 'Done'
-        try {
-          const data = JSON.parse(e.data) as { success?: boolean; message?: string }
-          success = data.success !== false
-          msg = data.message ?? (success ? 'Done' : 'Failed')
-        } catch {
-          console.warn(`[DeployPage] Failed to parse complete event for ${server.IPAddress}:`, e.data)
-          success = false
-          msg = 'Deployment completed but result could not be verified'
-        }
-        setDeployStates((prev) => ({
-          ...prev,
-          [server.IPAddress]: {
-            status: success ? 'done' : 'error',
-            progress: success ? 100 : prev[server.IPAddress]?.progress ?? 0,
-            message: msg,
-          },
-        }))
-        if (success) {
-          toast.success(`Deployed to ${server.Hostname || server.IPAddress}`)
-        } else {
+        },
+        // onError
+        (data: any) => {
+          const msg = data?.message ?? 'Failed'
+          setDeployStates((prev) => ({
+            ...prev,
+            [server.IPAddress]: {
+              status: 'error',
+              progress: prev[server.IPAddress]?.progress ?? 0,
+              message: msg,
+            },
+          }))
           toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}: ${msg}`)
-        }
-        completed++
-        if (completed === total) setDeploying(false)
-      })
-
-      // Named SSE 'error' event — application-level error sent by the server
-      es.addEventListener('error', (e: MessageEvent) => {
-        es.close()
-        let msg = 'Failed'
-        try {
-          const data = JSON.parse(e.data) as { message?: string }
-          msg = data.message ?? msg
-        } catch {
-          // use default message
-        }
-        setDeployStates((prev) => ({
-          ...prev,
-          [server.IPAddress]: {
-            status: 'error',
-            progress: prev[server.IPAddress]?.progress ?? 0,
-            message: msg,
-          },
-        }))
-        toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}: ${msg}`)
-        completed++
-        if (completed === total) setDeploying(false)
-      })
-
-      // Network-level onerror — connection dropped / server unreachable
-      es.onerror = () => {
-        es.close()
-        setDeployStates((prev) => ({
-          ...prev,
-          [server.IPAddress]: {
-            status: 'error',
-            progress: prev[server.IPAddress]?.progress ?? 0,
-            message: 'Connection lost',
-          },
-        }))
-        toast.error(`Deploy connection lost for ${server.Hostname || server.IPAddress}`)
-        completed++
-        if (completed === total) setDeploying(false)
-      }
+          completed++
+          if (completed === total) setDeploying(false)
+        },
+        // onDone
+        (data: any) => {
+          const success = data?.success !== false
+          const msg = data?.message ?? (success ? 'Done' : 'Failed')
+          setDeployStates((prev) => ({
+            ...prev,
+            [server.IPAddress]: {
+              status: success ? 'done' : 'error',
+              progress: success ? 100 : prev[server.IPAddress]?.progress ?? 0,
+              message: msg,
+            },
+          }))
+          if (success) {
+            toast.success(`Deployed to ${server.Hostname || server.IPAddress}`)
+          } else {
+            toast.error(`Deploy failed for ${server.Hostname || server.IPAddress}: ${msg}`)
+          }
+          completed++
+          if (completed === total) setDeploying(false)
+        },
+      )
+      deployHandleRefs.current.push(handle)
     }
-  }, [selectedIPs, selectedProfile, servers])
+  }, [selectedIPs, selectedProfile, servers, credUser, credPass])
 
   // ── Derived ─────────────────────────────────────────────────────────────────
   const selectedServers = servers.filter((s) => selectedIPs.has(s.IPAddress))
@@ -375,6 +343,42 @@ export function DeployPage() {
         title="Network Deploy"
         subtitle="Discover disguise servers and deploy profiles"
       />
+
+      {/* ── Card 0: Credentials ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: 'easeOut' }}
+      >
+        <GlassCard>
+          <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+            <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
+              <Lock size={14} className="text-primary" aria-hidden="true" />
+            </div>
+            <h3 className="text-text font-bold text-sm tracking-wide">Remote Credentials</h3>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <Input
+              label="Username"
+              value={credUser}
+              onChange={setCredUser}
+              placeholder="Administrator"
+              className="w-52"
+            />
+            <Input
+              label="Password"
+              value={credPass}
+              onChange={setCredPass}
+              placeholder="••••••••"
+              type="password"
+              className="w-52"
+            />
+            <p className="text-textMuted text-xs self-end pb-2">
+              Used for WinRM deployment to remote servers
+            </p>
+          </div>
+        </GlassCard>
+      </motion.div>
 
       {/* ── Card 1: Network Scan ── */}
       <motion.div

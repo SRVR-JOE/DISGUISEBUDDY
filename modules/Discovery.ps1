@@ -607,16 +607,33 @@ function Push-ProfileToServer {
                             $results += "INFO: $($adapter.AdapterName) - Disabled in profile, skipping"
                             continue
                         }
-                        if ([string]::IsNullOrWhiteSpace($adapter.IPAddress)) { continue }
                         if ($adapter.DHCP -eq $true) {
-                            $results += "INFO: $($adapter.Role) ($($adapter.AdapterName)) - DHCP enabled, skipping static config"
+                            try {
+                                $netAdapter = Get-NetAdapter | Where-Object { $_.Name -eq $adapter.AdapterName -or $_.InterfaceDescription -like "*$($adapter.AdapterName)*" } | Select-Object -First 1
+                                if ($netAdapter) {
+                                    Set-NetIPInterface -InterfaceIndex $netAdapter.InterfaceIndex -Dhcp Enabled -ErrorAction Stop
+                                    Remove-NetIPAddress -InterfaceIndex $netAdapter.InterfaceIndex -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue
+                                    Remove-NetRoute -InterfaceIndex $netAdapter.InterfaceIndex -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue
+                                    Set-DnsClientServerAddress -InterfaceIndex $netAdapter.InterfaceIndex -ResetServerAddresses -ErrorAction SilentlyContinue
+                                    $results += "OK: $($adapter.Role) ($($adapter.AdapterName)) - DHCP enabled"
+                                } else {
+                                    $results += "WARN: $($adapter.Role) ($($adapter.AdapterName)) - Adapter not found"
+                                }
+                            } catch {
+                                $results += "FAIL: $($adapter.Role) ($($adapter.AdapterName)) - DHCP config failed: $_"
+                            }
                             continue
                         }
+                        if ([string]::IsNullOrWhiteSpace($adapter.IPAddress)) { continue }
 
                         # Find the adapter by AdapterName (matching profile schema)
-                        $netAdapter = Get-NetAdapter | Where-Object {
-                            $_.Name -eq $adapter.AdapterName
-                        } | Select-Object -First 1
+                        $netAdapter = Get-NetAdapter | Where-Object { $_.Name -eq $adapter.AdapterName } | Select-Object -First 1
+                        if (-not $netAdapter) {
+                            $netAdapter = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*$($adapter.AdapterName)*" } | Select-Object -First 1
+                        }
+                        if (-not $netAdapter) {
+                            $netAdapter = (Get-NetAdapter | Sort-Object InterfaceIndex)[$adapter.Index]
+                        }
 
                         if (-not $netAdapter) {
                             $results += "WARN: Adapter '$($adapter.AdapterName)' for role '$($adapter.Role)' not found"
@@ -624,7 +641,7 @@ function Push-ProfileToServer {
                         }
 
                         # Remove existing IP configuration
-                        $netAdapter | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
+                        $netAdapter | Remove-NetIPAddress -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue
                         $netAdapter | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
 
                         # Convert SubnetMask (dotted decimal) to CIDR prefix length
@@ -664,6 +681,16 @@ function Push-ProfileToServer {
                         }
 
                         $results += "OK: $($adapter.Role) ($($adapter.AdapterName)) -> $($adapter.IPAddress)/$prefixLength"
+
+                        # VLAN support
+                        if ($adapter.VLANID -and $adapter.VLANID -gt 0) {
+                            try {
+                                Set-NetAdapterAdvancedProperty -Name $netAdapter.Name -RegistryKeyword "VlanID" -RegistryValue $adapter.VLANID -ErrorAction Stop
+                                $results += "OK: $($adapter.Role) - VLAN $($adapter.VLANID) set"
+                            } catch {
+                                $results += "WARN: $($adapter.Role) - VLAN config failed: $_"
+                            }
+                        }
                     } catch {
                         $results += "ERROR: $($adapter.Role) ($($adapter.AdapterName)) - $($_.Exception.Message)"
                     }

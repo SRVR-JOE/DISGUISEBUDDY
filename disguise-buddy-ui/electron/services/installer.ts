@@ -22,7 +22,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { randomUUID } from 'crypto'
-import { runPowerShell, delay } from './utils.js'
+import { runPowerShell, delay } from './utils.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -295,7 +295,7 @@ function buildCredentialArg(credential?: InstallOptions['credential']): string {
   const pass = escapePs(credential.password)
   return (
     ` -Credential (New-Object System.Management.Automation.PSCredential` +
-    ` ("${user}", (ConvertTo-SecureString "${pass}" -AsPlainText -Force)))`
+    ` ('${user}', (ConvertTo-SecureString '${pass}' -AsPlainText -Force)))`
   )
 }
 

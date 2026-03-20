@@ -24,7 +24,7 @@ export interface PowerShellResult {
  * Rejects only on spawn failure; a non-zero exit code is surfaced via
  * the resolved value so callers can decide how to handle it.
  */
-export function runPowerShell(command: string): Promise<PowerShellResult> {
+export function runPowerShell(command: string, timeoutMs: number = 120000): Promise<PowerShellResult> {
   return new Promise((resolve, reject) => {
     const encoded = Buffer.from(command, 'utf16le').toString('base64')
 
@@ -39,6 +39,12 @@ export function runPowerShell(command: string): Promise<PowerShellResult> {
 
     let stdout = ''
     let stderr = ''
+    let timedOut = false
+
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGTERM')
+    }, timeoutMs)
 
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf8')
@@ -49,15 +55,25 @@ export function runPowerShell(command: string): Promise<PowerShellResult> {
     })
 
     child.on('error', (err) => {
+      clearTimeout(timer)
       reject(new Error(`PowerShell spawn error: ${err.message}`))
     })
 
     child.on('close', (code) => {
-      resolve({
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        exitCode: code ?? 1,
-      })
+      clearTimeout(timer)
+      if (timedOut) {
+        resolve({
+          stdout: stdout.trim(),
+          stderr: `PowerShell command timed out after ${timeoutMs}ms`,
+          exitCode: 1,
+        })
+      } else {
+        resolve({
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          exitCode: code ?? 1,
+        })
+      }
     })
   })
 }
@@ -140,7 +156,9 @@ export async function ensureWinRMReady(targetIP: string): Promise<WinRMReadyResu
   // Add the target IP to TrustedHosts so PowerShell accepts bare-IP connections
   try {
     const trustedResult = await runPowerShell(
-      `Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value "${targetIP}" -Force`
+      `$current = (Get-Item WSMan:\\localhost\\Client\\TrustedHosts).Value; ` +
+      `if ($current -notmatch '(^|,)${targetIP}(,|$)') { ` +
+      `Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value "${targetIP}" -Concatenate -Force }`
     )
     if (trustedResult.exitCode === 0) {
       console.log(`[utils] Added ${targetIP} to WSMan TrustedHosts`)

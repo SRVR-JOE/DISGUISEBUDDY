@@ -875,6 +875,25 @@ function Apply-FullProfile {
                 [void]$results.AppendLine("[FAIL] $adapterLabel : $($adapterResult.Message)")
                 Write-AppLog "Adapter $adapterLabel failed: $($adapterResult.Message)" -Level 'ERROR'
             }
+
+            # VLAN support
+            if ($adapter.VLANID -and $adapter.VLANID -gt 0) {
+                try {
+                    $adapterObj = Get-NetAdapter | Where-Object { $_.Name -eq $adapterName } | Select-Object -First 1
+                    if (-not $adapterObj) {
+                        $adapterObj = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*$adapterName*" } | Select-Object -First 1
+                    }
+                    if (-not $adapterObj) {
+                        $adapterObj = (Get-NetAdapter | Sort-Object InterfaceIndex)[$adIndex]
+                    }
+                    if ($adapterObj) {
+                        Set-NetAdapterAdvancedProperty -Name $adapterObj.Name -RegistryKeyword "VlanID" -RegistryValue $adapter.VLANID
+                        Write-AppLog "VLAN $($adapter.VLANID) set on $adapterName" "INFO"
+                    }
+                } catch {
+                    Write-AppLog "VLAN config failed for $adapterName : $_" "WARN"
+                }
+            }
         }
         catch {
             $failCount++
